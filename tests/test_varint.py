@@ -11,7 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load_minecraft():
     enc, enu, pkt, proto = [], [], [], []
-    for name in ("minecraft_core.bps", "minecraft_26_3.bps"):
+    for name in (
+        "minecraft_core.bps",
+        "minecraft_26_3.bps",
+        "minecraft_26_3_login.bps",
+        "minecraft_26_3_play.bps",
+        "minecraft_26_3_play_serverbound.bps",
+        "minecraft_26_3_wiki.bps",
+    ):
         s = parse((ROOT / "schemas" / name).read_text(encoding="utf-8"))
         enc.extend(s.encodings)
         enu.extend(s.enums)

@@ -4,11 +4,21 @@ from bps import ast
 from bps.errors import ResolveError
 
 
+def _dedupe(kind: str, decls, name_of) -> dict:
+    table: dict = {}
+    for d in decls:
+        name = name_of(d)
+        if name in table:
+            raise ResolveError(f"duplicate {kind} {name!r}")
+        table[name] = d
+    return table
+
+
 def analyze(schema: ast.Schema) -> ast.ResolvedSchema:
-    encodings = {e.name: e for e in schema.encodings}
-    enums = {e.name: e for e in schema.enums}
-    packets = {p.name: p for p in schema.packets}
-    protocols = {p.name: p for p in schema.protocols}
+    encodings = _dedupe("encoding", schema.encodings, lambda e: e.name)
+    enums = _dedupe("enum", schema.enums, lambda e: e.name)
+    packets = _dedupe("packet", schema.packets, lambda p: p.name)
+    protocols = _dedupe("protocol", schema.protocols, lambda p: p.name)
 
     for name, enc in encodings.items():
         _check_encoding(enc, encodings, enums, name)
@@ -65,6 +75,8 @@ def _check_block(
         if item.kind == "spread" and item.spread_name:
             if item.spread_name not in encodings:
                 raise ResolveError(f"unknown spread encoding {item.spread_name!r} in {path}")
+        if item.kind == "group":
+            _check_block(ast.BlockType(item.group_items), encodings, enums, path, params)
 
 
 def _check_field_type(

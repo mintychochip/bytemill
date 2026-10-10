@@ -38,36 +38,14 @@ packet login_start {
 }
 
 packet encryption_response {
-    secret_len: varint
-    secret:     i8[] count = secret_len
+    secret_length:       varint
+    secret:              i8[] count = secret_length
+    verify_token_length: varint
+    verify_token:        i8[] count = verify_token_length
 }
 
 packet keep_alive {
     keep_alive_id: i64be
 }
 
-packet disconnect {
-    reason_raw: rest
-}
-
-protocol minecraft @ v26_3 {
-    id = 777
-    frame default {
-        length: varint
-        id: varint
-        payload: rest
-    }
-
-    route handshaking.serverbound 0x00 => handshake
-    route handshaking.serverbound 0xfe => legacy_server_list_ping
-    route status.serverbound 0x00 => status_request
-    route status.clientbound 0x00 => status_response
-    route status.serverbound 0x01 => ping_request
-    route status.clientbound 0x01 => pong_response
-    route login.serverbound 0x00 => login_start
-    route login.serverbound 0x01 => encryption_response
-    route play.clientbound 0x2d => keep_alive
-    route configuration.clientbound 0x04 => keep_alive
-    route play.clientbound 0x20 => disconnect
-    route configuration.clientbound 0x02 => disconnect
-}
+// Routes: schemas/minecraft_26_3_wiki.bps (full protocol 777 surface from minecraft.wiki)

@@ -1,0 +1,177 @@
+// Minecraft Java Edition 26.3 (protocol 777) — login + configuration/play shared
+// packet layouts transcribed from minecraft.wiki field tables.
+
+// --- Login (clientbound) ---
+
+packet login_disconnect {
+    reason: text_component
+}
+
+packet hello {
+    server_id:           string(20)
+    public_key_length:   varint
+    public_key:          i8[] count = public_key_length
+    verify_token_length: varint
+    verify_token:        i8[] count = verify_token_length
+    should_authenticate: boolean
+}
+
+packet login_finished {
+    profile:    game_profile
+    session_id: uuid
+}
+
+packet login_compression {
+    threshold: varint
+}
+
+packet custom_query {
+    message_id: varint
+    channel:    identifier
+    data:       rest
+}
+
+// --- Login (serverbound) ---
+
+packet custom_query_answer {
+    message_id: varint
+    data:       rest
+}
+
+packet login_acknowledged { }
+
+// --- Configuration and play (clientbound) ---
+
+packet disconnect {
+    reason: text_component
+}
+
+packet custom_payload {
+    channel: identifier
+    data:    rest
+}
+
+packet cookie_request {
+    key: identifier
+}
+
+packet ping {
+    id: i32be
+}
+
+packet post_effects {
+    effects_count: varint
+    effects:       identifier[] count = effects_count
+}
+
+packet store_cookie {
+    key:      identifier
+    length:   varint
+    payload:  i8[] count = length
+}
+
+packet transfer {
+    host: string(32767)
+    port: varint
+}
+
+packet resource_pack_pop {
+    has_uuid: varint
+    if has_uuid != 0 {
+        uuid: uuid
+    }
+}
+
+packet resource_pack_push {
+    uuid:     uuid
+    url:      string(32767)
+    hash:     string(40)
+    forced:   boolean
+    has_prompt: varint
+    if has_prompt != 0 {
+        prompt: text_component
+    }
+}
+
+packet custom_report_details {
+    details_count: varint
+    details: {
+        title:       string(128)
+        description: string(4096)
+    }[] count = details_count
+}
+
+packet clear_dialog { }
+
+// --- Configuration and play (serverbound) ---
+
+packet client_information {
+    locale:             string(16)
+    view_distance:      i8
+    chat_mode:          varint
+    chat_colors:        boolean
+    displayed_skin_parts: u8
+    main_hand:          varint
+    enable_text_filtering: boolean
+    allow_server_listings: boolean
+    particle_status:    varint
+}
+
+packet cookie_response {
+    key: identifier
+    has_payload: varint
+    if has_payload != 0 {
+        length: varint
+        payload: i8[] count = length
+    }
+}
+
+packet resource_pack {
+    uuid:   uuid
+    result: varint
+}
+
+packet custom_click_action {
+    id:           identifier
+    payload_size: varint
+    payload:      nbt
+}
+
+// --- Remaining mechanical layouts ---
+
+packet pong {
+    id: i32be
+}
+
+packet update_tags {
+    registries_count: varint
+    registries: {
+        registry:    identifier
+        tags_count:  varint
+        tags: {
+            name:          identifier
+            entries_count: varint
+            entries:       varint[] count = entries_count
+        }[] count = tags_count
+    }[] count = registries_count
+}
+
+packet sound {
+    sound_event:     id_or_sound_event
+    category:        varint
+    effect_position_x: i32be
+    effect_position_y: i32be
+    effect_position_z: i32be
+    volume:          f32be
+    pitch:           f32be
+    seed:            i64be
+}
+
+packet sound_entity {
+    sound_event:     id_or_sound_event
+    category:        varint
+    entity_id:       varint
+    volume:          f32be
+    pitch:           f32be
+    seed:            i64be
+}

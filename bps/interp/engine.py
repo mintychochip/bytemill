@@ -35,25 +35,37 @@ def _decode_block_items(
     resolved: ast.ResolvedSchema,
     param_env: dict[str, Any],
 ) -> dict[str, Any]:
+    """Decode a block; returns only the names this block defines (no parent env leak)."""
     env: dict[str, Any] = dict(param_env)
+    out: dict[str, Any] = {}
     expanded = _expand_items(items, resolved, param_env)
+
+    def bind(name: str, value: Any) -> None:
+        env[name] = value
+        out[name] = value
+
     for item in expanded:
         if item.kind == "require":
             if not truthy(eval_expr(item.require_expr, env)):
                 raise DecodeError(f"require failed: {item.require_expr}")
             continue
+        if item.kind == "group":
+            if item.group_if is not None and truthy(eval_expr(item.group_if, env)):
+                for k, v in _decode_block_items(item.group_items, cur, resolved, env).items():
+                    bind(k, v)
+            continue
         if item.kind == "computed":
-            env[item.computed_name] = eval_expr(item.computed_expr, env)
+            bind(item.computed_name, eval_expr(item.computed_expr, env))
             continue
         if item.kind == "field" and item.wire:
             wf = item.wire
             if wf.if_expr is not None and not truthy(eval_expr(wf.if_expr, env)):
                 continue
             if wf.repeat:
-                env[wf.name] = _decode_repeat(wf, cur, resolved, env)
+                bind(wf.name, _decode_repeat(wf, cur, resolved, env))
             else:
-                env[wf.name] = _decode_type(wf.type_ref, cur, resolved, env)
-    return env
+                bind(wf.name, _decode_type(wf.type_ref, cur, resolved, env))
+    return out
 
 
 def _expand_items(
@@ -76,7 +88,18 @@ def _expand_items(
                     )
                 )
         else:
-            out.append(item)
+            if item.kind == "group":
+                out.append(
+                    ast.BlockItem(
+                        "group",
+                        group_if=item.group_if,
+                        group_items=tuple(
+                            _expand_items(item.group_items, resolved, param_env)
+                        ),
+                    )
+                )
+            else:
+                out.append(item)
     return out
 
 
@@ -190,7 +213,7 @@ def _decode_type_ref(
         bind = _bind_params(enc.params, ref.args, env)
         if isinstance(enc.body, ast.BlockType):
             decoded = _decode_block_items(enc.body.items, cur, resolved, bind)
-            if enc.name in ("string", "identifier") and "value" in decoded:
+            if enc.name in ("string", "identifier", "nbt_string") and "value" in decoded:
                 return decoded["value"]
             if enc.name == "boolean" and "value" in decoded:
                 return decoded["value"] != 0
@@ -288,6 +311,10 @@ def _encode_block_items(
     for item in expanded:
         if item.kind in ("require", "computed"):
             continue
+        if item.kind == "group":
+            if item.group_if is None or truthy(eval_expr(item.group_if, env)):
+                _encode_block_items(item.group_items, w, resolved, env)
+            continue
         if item.kind == "field" and item.wire:
             wf = item.wire
             if wf.if_expr is not None and not truthy(eval_expr(wf.if_expr, env)):
@@ -333,12 +360,26 @@ def _encode_type(
     if isinstance(t, ast.BlockType):
         if not isinstance(val, dict):
             raise EncodeError("expected dict for block")
-        _encode_block_items(t.items, w, resolved, val)
+        _encode_block_items(t.items, w, resolved, {**env, **val})
         return
     if isinstance(t, ast.TypeRef):
         _encode_type_ref(t, w, resolved, env, val)
         return
-    raise EncodeError("match encode not implemented")
+    if isinstance(t, ast.MatchType):
+        tag_value = eval_expr(t.tag_expr, env)
+        for arm in t.arms:
+            if arm.tag is None:
+                if arm.type_ref is None:
+                    return
+                _encode_type(arm.type_ref, w, resolved, env, val)
+                return
+            if int(arm.tag) == int(tag_value):
+                if arm.type_ref is None:
+                    return
+                _encode_type(arm.type_ref, w, resolved, env, val)
+                return
+        raise EncodeError(f"no match arm for tag {tag_value}")
+    raise EncodeError(f"cannot encode type {t!r}")
 
 
 def _encode_type_ref(
@@ -353,6 +394,15 @@ def _encode_type_ref(
         enc = resolved.encodings[name]
         bind = _bind_params(enc.params, ref.args, env)
         if isinstance(enc.body, ast.BlockType):
+            if isinstance(val, str) and enc.name in ("string", "identifier", "nbt_string"):
+                if enc.name == "nbt_string":
+                    raw = val.encode("utf-8")
+                    w.emit(struct.pack(">H", len(raw)))
+                    w.emit(raw)
+                else:
+                    _write_leb128(w, len(raw), 32)
+                    w.emit(raw)
+                return
             if not isinstance(val, dict):
                 raise EncodeError(f"expected dict for {name}")
             _encode_block_items(enc.body.items, w, resolved, {**env, **val})
@@ -374,11 +424,26 @@ def _encode_type_ref(
     if name == "u16be":
         w.emit(struct.pack(">H", int(val) & 0xFFFF))
         return
+    if name == "i16be":
+        w.emit(struct.pack(">h", int(val)))
+        return
     if name == "i64be":
         w.emit(struct.pack(">q", int(val)))
         return
     if name == "u64be":
         w.emit(struct.pack(">Q", int(val)))
+        return
+    if name == "u32be":
+        w.emit(struct.pack(">I", int(val) & 0xFFFFFFFF))
+        return
+    if name == "i32be":
+        w.emit(struct.pack(">i", int(val)))
+        return
+    if name == "f32be":
+        w.emit(struct.pack(">f", float(val)))
+        return
+    if name == "f64be":
+        w.emit(struct.pack(">d", float(val)))
         return
     if name == "u8":
         w.emit(struct.pack(">B", int(val) & 0xFF))

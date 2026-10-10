@@ -62,13 +62,15 @@ class MatchType:
 
 @dataclass(frozen=True)
 class BlockItem:
-    kind: str  # field | computed | require | spread
+    kind: str  # field | computed | require | spread | group
     wire: WireField | None = None
     computed_name: str | None = None
     computed_expr: Expr | None = None
     require_expr: Expr | None = None
     spread_name: str | None = None
     spread_args: tuple[Expr, ...] = ()
+    group_if: Expr | None = None
+    group_items: tuple["BlockItem", ...] = ()
 
 
 @dataclass(frozen=True)

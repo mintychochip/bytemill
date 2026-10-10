@@ -144,12 +144,22 @@ class Parser:
             if self.at(TokKind.ELLIPSIS):
                 self.pos += 1
                 sname = self.eat_ident_value()
-                args = self.parse_call_args()
+                args = ()
+                if self.at(TokKind.LPAREN):
+                    args = self.parse_call_args()
                 items.append(ast.BlockItem("spread", spread_name=sname, spread_args=args))
                 continue
             if self.cur().value == "require":
                 self.pos += 1
                 items.append(ast.BlockItem("require", require_expr=self.parse_expr()))
+                continue
+            if self.cur().value == "if":
+                self.pos += 1
+                cond = self.parse_expr()
+                group_items = self.parse_block_type().items
+                items.append(
+                    ast.BlockItem("group", group_if=cond, group_items=group_items)
+                )
                 continue
             name = self.eat_ident_value()
             if self.try_eat(TokKind.EQ):
@@ -165,8 +175,19 @@ class Parser:
             type_ref = self.parse_field_type()
             if_expr = None
             if self.cur().value == "if":
+                # `if cond {` opens a conditional group for the following fields;
+                # `if cond` after a field type is a per-field presence modifier.
+                mark = self.pos
                 self.pos += 1
-                if_expr = self.parse_expr()
+                cond = self.parse_expr()
+                if self.at(TokKind.LBRACE):
+                    self.pos = mark
+                    group_items = self.parse_conditional_group()
+                    items.append(
+                        ast.BlockItem("group", group_if=group_items[0], group_items=group_items[1])
+                    )
+                    continue
+                if_expr = cond
             repeat = None
             if self.at(TokKind.LBRACK):
                 repeat = self.parse_repeat()
@@ -176,6 +197,7 @@ class Parser:
                     wire=ast.WireField(name, type_ref, if_expr, repeat),
                 )
             )
+            self.try_eat(TokKind.COMMA)
         self.eat(TokKind.RBRACE)
         return tuple(items)
 
@@ -229,6 +251,13 @@ class Parser:
     def parse_block_type(self) -> ast.BlockType:
         items = self.parse_block_items()
         return ast.BlockType(items)
+
+    def parse_conditional_group(self) -> tuple[ast.Expr, tuple[ast.BlockItem, ...]]:
+        """Parse `if cond { fields }`; returns (condition, items)."""
+        self.pos += 1  # 'if'
+        cond = self.parse_expr()
+        items = self.parse_block_type().items
+        return cond, items
 
     def parse_type_body(self) -> ast.TypeRef | ast.BlockType:
         if self.at(TokKind.LBRACE):

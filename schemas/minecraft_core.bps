@@ -18,6 +18,21 @@ encoding uuid = {
     lsb: u64be
 }
 
+// Player profile: UUID, username, then Mojang-style properties.
+encoding game_profile = {
+    profile_uuid: uuid
+    username:     string(16)
+    properties_count: varint
+    properties: {
+        name:  string(64)
+        value: string(32767)
+        has_signature: varint
+        if has_signature != 0 {
+            signature: string(1024)
+        }
+    }[] count = properties_count
+}
+
 encoding boolean = {
     value: u8
 }
@@ -45,4 +60,131 @@ encoding meta_entry = {
 
 encoding entity_metadata = {
     entries: meta_entry[] until 0xFF
+}
+
+// --- NBT (network format, protocol >= 764: root compound carries no name) ---
+
+encoding nbt_nothing = {
+}
+
+encoding nbt_string = {
+    byte_len: u16be
+    value:    bytes(byte_len) as utf8
+}
+
+encoding nbt_entry = {
+    tag_type: u8
+    name:     nbt_string
+    ...nbt_payload
+}
+
+// TAG_Compound payload (records until the TAG_End terminator).
+encoding nbt_compound_body = {
+    entries: nbt_entry[] until 0x00
+}
+
+// TAG_List payload: element type, then count, then elements without type prefixes.
+encoding nbt_list_body = {
+    elem_type: u8
+    count:     i32be
+    items: { v: match elem_type {
+        1  => i8
+        2  => i16be
+        3  => i32be
+        4  => i64be
+        5  => f32be
+        6  => f64be
+        7  => { byte_len: i32be, data: bytes(byte_len) }
+        8  => nbt_string
+        9  => nbt_list_body
+        10 => nbt_compound_body
+        _ => nbt_nothing
+    } }[] count = count
+}
+
+// Payload of a tag; the tag type is read from the enclosing scope's tag_type field.
+// NBT ids: 1 byte, 2 short, 3 int, 4 long, 5 float, 6 double, 7 byte array,
+// 8 string, 9 list, 10 compound, 11 int array, 12 long array.
+encoding nbt_payload = {
+    value: match tag_type {
+        1  => i8
+        2  => i16be
+        3  => i32be
+        4  => i64be
+        5  => f32be
+        6  => f64be
+        7  => { byte_len: i32be, data: bytes(byte_len) }
+        8  => nbt_string
+        9  => nbt_list_body
+        10 => nbt_compound_body
+        11 => { byte_len: i32be, data: bytes(byte_len * 4) }
+        12 => { byte_len: i32be, data: bytes(byte_len * 8) }
+        _ => nbt_nothing
+    }
+}
+
+// Network NBT root (protocol >= 764): TAG_Compound payload without a root name.
+encoding nbt = {
+    ...nbt_compound_body
+}
+
+// 26.3 Text Component: an NBT tag — String Tag for plain text, Compound otherwise.
+encoding text_component = {
+    tag_type: u8
+    ...nbt_payload
+}
+
+// Rotation angle in steps of 1/256 of a full turn.
+encoding angle = u8
+
+// Sound Event: either an inline definition or a registry reference + 1.
+encoding sound_event = {
+    name:             identifier
+    has_fixed_range:  boolean
+    if has_fixed_range {
+        fixed_range: f32be
+    }
+}
+
+// "ID or X": 0 means the value follows inline; otherwise registry ID + 1.
+encoding id_or_sound_event = {
+    id: varint
+    if id == 0 {
+        value: sound_event
+    }
+}
+
+// --- Bit sets ---
+
+encoding bitset = {
+    long_count: varint
+    longs:       i64be[] count = long_count
+}
+
+encoding fixed_bitset(bits = 64) {
+    data: bytes(1 + (bits - 1) / 8)
+}
+
+// --- Registry-dependent (opaque ids in v1, see spec §2) ---
+
+// Slot: fixed frame. Component payload formats are keyed by the
+// minecraft:data_component_type registry, which v1 does not model; the add-array
+// payloads are therefore not walked.
+encoding slot = {
+    item_count: varint
+    if item_count > 0 {
+        item_id:      varint
+        add_count:    varint
+        remove_count: varint
+    }
+}
+
+encoding hashed_slot = {
+    has_item: boolean
+    if has_item {
+        item_id:      varint
+        item_count:   varint
+        add_count:    varint
+        remove_count: varint
+    }
 }
