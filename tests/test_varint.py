@@ -15,6 +15,7 @@ def load_minecraft():
         "minecraft_core.bps",
         "minecraft_26_3.bps",
         "minecraft_26_3_login.bps",
+        "minecraft_26_3_remaining.bps",
         "minecraft_26_3_play.bps",
         "minecraft_26_3_play_serverbound.bps",
         "minecraft_26_3_wiki.bps",

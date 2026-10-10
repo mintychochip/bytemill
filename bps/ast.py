@@ -71,6 +71,7 @@ class BlockItem:
     spread_args: tuple[Expr, ...] = ()
     group_if: Expr | None = None
     group_items: tuple["BlockItem", ...] = ()
+    _param_env: dict | None = None
 
 
 @dataclass(frozen=True)

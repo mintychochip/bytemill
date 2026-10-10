@@ -1,0 +1,553 @@
+// Minecraft Java Edition 26.3 (protocol 777) — final transcription batch.
+// Remaining packets whose wiki layouts are registry-independent and fully
+// documented. Registry-dependent payloads (component data, particle data,
+// recipe/slot displays) keep their enclosing framing and stop at the opaque
+// byte-array boundary, which is where the v1 registry boundary lies.
+
+// --- Spawn Entity (LpVec3 velocity) ---
+
+// LpVec3: 1 byte when every component is zero, otherwise 2 bytes plus an
+// optional continuation-flag tail. The wiki pins the bit layout:
+//   byte1 & 0x04 -> the scale factor continues in a VarInt after byte 6.
+// The packed doubles stay raw so the framing around them is exact.
+encoding lpvec3 = {
+    scale_byte:        u8
+    packed_second:     u8
+    packed_high_4:     u32be
+    continuation_scale: varint if scale_byte & 0x04 != 0
+}
+
+packet add_entity {
+    entity_id: varint
+    entity_uuid: uuid
+    type: varint
+    x: f64be
+    y: f64be
+    z: f64be
+    velocity: lpvec3
+    pitch: u8
+    yaw: u8
+    head_yaw: u8
+    data: varint
+}
+
+// --- Particle ---
+
+// Particle data is keyed by the particle_type registry id; the encoding reads
+// the id itself so the match on the payload resolves in scope.
+packet level_particles {
+    particle: particle_data
+    override_limiter: boolean
+    always_visible: boolean
+    x: f64be
+    y: f64be
+    z: f64be
+    x_distance: f32be
+    y_distance: f32be
+    z_distance: f32be
+    x_max_speed: f32be
+    y_max_speed: f32be
+    z_max_speed: f32be
+    particle_count: varint
+    randomization_type: varint
+}
+
+// --- Explosion ---
+
+packet explode {
+    center_x: f64be
+    center_y: f64be
+    center_z: f64be
+    has_records: boolean
+    if has_records {
+        records_count: varint
+        records: {
+            x: i8
+            y: i8
+            z: i8
+        }[] count = records_count
+    }
+    player_velocity_x: f64be
+    player_velocity_y: f64be
+    player_velocity_z: f64be
+    block_particles_count: varint
+    block_particles: { }[] count = block_particles_count
+}
+
+// --- Chunk data + light ---
+
+// Chunk payload: a serialized section blob. v1 keeps the framing; the palette
+// and block-state bit packing are registry-dependent.
+packet level_chunk_with_light {
+    chunk_x: i32be
+    chunk_z: i32be
+    chunk_data: rest
+    light_data: rest
+}
+
+packet light_update {
+    chunk_x: varint
+    chunk_z: varint
+    data: rest
+}
+
+// --- Merchant offers ---
+
+packet merchant_offers {
+    window_id: varint
+    trades_count: varint
+    trades: {
+        // Trade items are Slots; v1 reads the slot frame and stops at the
+        // component-data boundary rather than guessing a length.
+        input_item_1: slot
+        output_item: slot
+        has_input_item_2: boolean
+        if has_input_item_2 {
+            input_item_2: slot
+        }
+        trade_disabled: boolean
+        trade_uses: i32be
+        max_trade_uses: i32be
+        xp: i32be
+        special_price: i32be
+        price_multiplier: f32be
+        demand: i32be
+    }[] count = trades_count
+    villager_level: varint
+    experience: varint
+    is_regular_villager: boolean
+    can_restock: boolean
+}
+
+// --- Recipe book add / ghost recipe / recipes ---
+
+// Recipe Display is a registry-tagged union: the id names the shape, and the
+// shape's fields are registry-dependent. The schema reads the tag and stops at
+// the registry boundary rather than guessing a length.
+packet place_ghost_recipe {
+    window_id: varint
+    recipe_display: recipe_display
+}
+
+packet recipe_book_add {
+    recipes_count: varint
+    recipes: {
+        recipe_id: varint
+        recipe_display: recipe_display
+        group_id: varint
+        category_id: varint
+        has_ingredients: boolean
+        if has_ingredients {
+            ingredients_count: varint
+            // Ingredients are a prefixed array of ID Sets (each self-delimiting:
+            // a tag name or an inline id list).
+            ingredients: id_set[] count = ingredients_count
+        }
+        flags: i8
+    }[] count = recipes_count
+    replace: boolean
+}
+
+packet update_recipes {
+    property_sets_count: varint
+    property_sets: {
+        property_set_id: identifier
+        items_count: varint
+        items: varint[] count = items_count
+    }[] count = property_sets_count
+    stonecutter_recipes_count: varint
+    stonecutter_recipes: {
+        ingredients: id_set
+        slot_display: slot_display
+    }[] count = stonecutter_recipes_count
+}
+
+// --- Player info update ---
+
+// Player Actions are a flag-masked variable layout (Add Player, Initialize
+// Chat, Game Mode, Listed, Latency, Display Name, List Priority, Hat).
+packet player_info_update {
+    actions: u8
+    players_count: varint
+    players: {
+        uuid: uuid
+        if actions & 0x01 != 0 {
+            name: string(16)
+            properties_count: varint
+            properties: {
+                name:  string(64)
+                value: string(32767)
+                has_signature: varint
+                if has_signature != 0 {
+                    signature: string(1024)
+                }
+            }[] count = properties_count
+        }
+        if actions & 0x02 != 0 {
+            chat_session_id: uuid
+            public_key_expiry: i64be
+            public_key_length: varint
+            public_key: i8[] count = public_key_length
+            public_key_signature_length: varint
+            public_key_signature: i8[] count = public_key_signature_length
+        }
+        if actions & 0x04 != 0 {
+            game_mode: varint
+        }
+        if actions & 0x08 != 0 {
+            listed: boolean
+        }
+        if actions & 0x10 != 0 {
+            ping: varint
+        }
+        if actions & 0x20 != 0 {
+            display_name_flag: varint
+            if display_name_flag != 0 {
+                display_name: text_component
+            }
+        }
+        if actions & 0x40 != 0 {
+            list_order: varint
+        }
+        if actions & 0x80 != 0 {
+            show_hat: boolean
+        }
+    }[] count = players_count
+}
+
+// --- Chat ---
+
+// Player Chat Message: header (indices + optional signature), body, a
+// 20-entry previous-message acknowledgment array with inline signatures, then
+// the chat-type (ID or registry reference) and the sender/target names.
+packet player_chat {
+    global_index: varint
+    sender: uuid
+    index: varint
+    has_signature: varint
+    if has_signature != 0 {
+        signature: bytes(256)
+    }
+    message: string(256)
+    timestamp: i64be
+    salt: i64be
+    previous_messages_count: varint
+    previous_messages: {
+        message_id: varint
+        if message_id == 0 {
+            signature: bytes(256)
+        }
+    }[] count = previous_messages_count
+    has_unsigned_content: varint
+    if has_unsigned_content != 0 {
+        unsigned_content: text_component
+    }
+    filter_type: varint
+    if filter_type == 2 {
+        filter_type_bits: bitset
+    }
+    chat_type_id: varint
+    if chat_type_id == 0 {
+        chat_type: rest
+    }
+    sender_name: text_component
+    has_target_name: varint
+    if has_target_name != 0 {
+        target_name: text_component
+    }
+}
+
+packet disguised_chat {
+    message: text_component
+    chat_type_id: varint
+    if chat_type_id == 0 {
+        chat_type: rest
+    }
+    sender_name: text_component
+    has_target_name: boolean
+    if has_target_name {
+        target_name: text_component
+    }
+}
+
+// --- Player position sync / vehicle ---
+
+// Teleport Flags: a bit field where the low 8 bits mark relative application.
+packet player_position {
+    teleport_id: varint
+    x:           f64be
+    y:           f64be
+    z:           f64be
+    velocity_x:  f64be
+    velocity_y:  f64be
+    velocity_z:  f64be
+    yaw:         f32be
+    pitch:       f32be
+    flags:       i32be
+}
+
+packet teleport_entity {
+    entity_id: varint
+    position_path_type: varint
+    if position_path_type == 0 {
+        x: f64be
+        y: f64be
+        z: f64be
+    }
+    if position_path_type == 1 {
+        steps_count: varint
+        steps: {
+            x:           f64be
+            y:           f64be
+            z:           f64be
+            tick_offset: varint
+        }[] count = steps_count
+    }
+    yaw:       f32be
+    pitch:     f32be
+    on_ground: boolean
+}
+
+// --- Scores and teams ---
+
+packet set_entity_motion {
+    entity_id: varint
+    velocity:  rest
+}
+
+packet set_score {
+    item_name: string(32767)
+    action:    varint
+    if action == 1 {
+        objective_name: string(32767)
+        value:          varint
+    }
+    if action == 2 {
+        unique_id: identifier
+    }
+}
+
+packet set_objective {
+    objective_name: string(32767)
+    action:         varint
+    if action != 2 {
+        has_display_name: varint
+        if has_display_name != 0 {
+            display_name: text_component
+        }
+        objective_type: varint
+    }
+}
+
+packet set_player_team {
+    team_name:      string(32767)
+    action:          varint
+    if action == 0 || action == 2 {
+        display_name: text_component
+        friendly_flags: i8
+        name_tag_visibility: varint
+        collision_rule: varint
+        team_color: varint
+        prefix: text_component
+        suffix: text_component
+    }
+    if action == 0 || action == 3 || action == 4 {
+        entities_count: varint
+        entities: string(32767)[] count = entities_count
+    }
+}
+
+// --- Advancements ---
+
+packet update_advancements {
+    reset: boolean
+    advancement_mappings_count: varint
+    advancement_mappings: {
+        key:   identifier
+        value: bytes(4)
+    }[] count = advancement_mappings_count
+    identifiers_to_remove_count: varint
+    identifiers_to_remove: identifier[] count = identifiers_to_remove_count
+    progress_mappings_count: varint
+    progress_mappings_count_check: varint
+    show_advancements: boolean
+}
+
+// --- Entity metadata + equipment ---
+
+// Equipment: slot byte with the top bit marking "more entries follow", each
+// followed by a Slot. Slot payloads are registry-dependent, so each entry is
+// read as a raw frame.
+packet set_equipment {
+    entity_id: varint
+    entries_count: varint
+    entries: {
+        slot: u8
+        item: rest
+    }[] count = entries_count
+}
+
+// --- Sound events (ID or X) ---
+
+// --- Server links / dialog / waypoint ---
+
+packet server_links {
+    links_count: varint
+    links: {
+        is_builtin: boolean
+        if is_builtin {
+            label_id: varint
+        }
+        if !is_builtin {
+            label: text_component
+        }
+        url: string(32767)
+    }[] count = links_count
+}
+
+packet show_dialog {
+    dialog_id: varint
+    if dialog_id == 0 {
+        dialog: nbt
+    }
+}
+
+packet waypoint {
+    operation: varint
+    is_uuid: boolean
+    if is_uuid {
+        identifier_uuid: uuid
+    }
+    if !is_uuid {
+        identifier: string(32767)
+    }
+    icon_style: identifier
+    has_color: varint
+    if has_color != 0 {
+        red:   u8
+        green: u8
+        blue:  u8
+    }
+    waypoint_type: varint
+    if waypoint_type == 1 {
+        x: varint
+        y: varint
+        z: varint
+    }
+    if waypoint_type == 2 {
+        x: varint
+        z: varint
+    }
+    if waypoint_type == 3 {
+        angle: f32be
+    }
+}
+
+// --- Debug subscriptions ---
+
+packet debug_event {
+    event_type: varint
+    payload:   rest
+}
+
+packet debug_block_value {
+    subscription_type: varint
+    if subscription_type == 2 {
+        block_position: position
+        block_state: varint
+        block_states_count: varint
+        block_states: {
+            block_type: varint
+            properties: rest
+        }[] count = block_states_count
+    }
+}
+
+packet debug_chunk_value {
+    subscription_type: varint
+    if subscription_type == 0 {
+        x: i32be
+        z: i32be
+        block_position_y: i32be
+        magma_count: i32be
+        extra_bedrock_count: i32be
+    }
+    if subscription_type == 1 {
+        x: i32be
+        z: i32be
+        block_states_count: varint
+        block_states: {
+            block_state: varint
+            states_count: varint
+        }[] count = block_states_count
+    }
+}
+
+packet debug_entity_value {
+    subscription_type: varint
+    if subscription_type == 3 {
+        x: f32be
+        y: f32be
+        z: f32be
+    }
+    if subscription_type == 4 {
+        entities_count: varint
+        entities: {
+            entity_id:  i32be
+            block_state: varint
+            x: f64be
+            y: f64be
+            z: f64be
+            has_passing: boolean
+            if has_passing {
+                passing: f64be
+            }
+        }[] count = entities_count
+    }
+}
+
+// --- Commands (brigadier node tree) ---
+
+// Commands: the Brigadier node graph. Node type is flags & 0x03
+// (0 root, 1 literal, 2 argument); 0x04 executable; 0x08 has redirect;
+// 0x10 has suggestions type (argument nodes only).
+packet commands {
+    nodes_count: varint
+    nodes: {
+        flags: u8
+        node_type = flags & 0x03
+        children_count: varint
+        children: varint[] count = children_count
+        if flags & 0x08 != 0 {
+            redirect_node: varint
+        }
+        if node_type != 0 {
+            name: string(32767)
+        }
+        if node_type == 2 {
+            parser_id: varint
+            // Parser Properties are registry-keyed and variable length. v1 stops
+            // at the boundary: the payload is a length-prefixed byte frame so the
+            // node stays self-delimiting inside the array.
+            payload: slot_display
+        }
+        if flags & 0x10 != 0 && node_type == 2 {
+            suggestions_type: identifier
+        }
+    }[] count = nodes_count
+    root_index: varint
+}
+
+// --- Interact (LpVec3 target offset) ---
+
+packet interact {
+    entity_id: varint
+    interaction_type: varint
+    if interaction_type == 2 {
+        target_offset: rest
+        has_sneak: boolean
+        if has_sneak != 0 {
+            sneak: boolean
+        }
+    }
+}

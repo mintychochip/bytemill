@@ -175,17 +175,20 @@ class Parser:
             type_ref = self.parse_field_type()
             if_expr = None
             if self.cur().value == "if":
-                # `if cond {` opens a conditional group for the following fields;
-                # `if cond` after a field type is a per-field presence modifier.
+                # `if cond {` after a *complete field* opens a conditional group
+                # for the fields that follow it, so this field is emitted first.
                 mark = self.pos
                 self.pos += 1
                 cond = self.parse_expr()
                 if self.at(TokKind.LBRACE):
                     self.pos = mark
-                    group_items = self.parse_conditional_group()
                     items.append(
-                        ast.BlockItem("group", group_if=group_items[0], group_items=group_items[1])
+                        ast.BlockItem(
+                            "field",
+                            wire=ast.WireField(name, type_ref, None, None),
+                        )
                     )
+                    items.append(self.parse_conditional_group_item())
                     continue
                 if_expr = cond
             repeat = None
@@ -251,6 +254,11 @@ class Parser:
     def parse_block_type(self) -> ast.BlockType:
         items = self.parse_block_items()
         return ast.BlockType(items)
+
+    def parse_conditional_group_item(self) -> ast.BlockItem:
+        """Parse `if cond { fields }` as a single group BlockItem."""
+        cond, items = self.parse_conditional_group()
+        return ast.BlockItem("group", group_if=cond, group_items=items)
 
     def parse_conditional_group(self) -> tuple[ast.Expr, tuple[ast.BlockItem, ...]]:
         """Parse `if cond { fields }`; returns (condition, items)."""
@@ -346,11 +354,11 @@ class Parser:
         return left
 
     def parse_shift(self) -> ast.Expr:
-        left = self.parse_add()
+        left = self.parse_bitwise()
         while self.cur().kind == TokKind.OP and self.cur().value in ("<<", ">>"):
             op = self.cur().value
             self.pos += 1
-            left = ast.Expr("binop", value=op, left=left, right=self.parse_add())
+            left = ast.Expr("binop", value=op, left=left, right=self.parse_bitwise())
         return left
 
     def parse_add(self) -> ast.Expr:
@@ -359,6 +367,14 @@ class Parser:
             op = self.cur().value
             self.pos += 1
             left = ast.Expr("binop", value=op, left=left, right=self.parse_mul())
+        return left
+
+    def parse_bitwise(self) -> ast.Expr:
+        left = self.parse_add()
+        while self.cur().kind == TokKind.OP and self.cur().value in ("&", "|", "^"):
+            op = self.cur().value
+            self.pos += 1
+            left = ast.Expr("binop", value=op, left=left, right=self.parse_add())
         return left
 
     def parse_mul(self) -> ast.Expr:

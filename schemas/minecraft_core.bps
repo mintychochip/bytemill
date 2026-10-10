@@ -44,16 +44,64 @@ encoding position = {
     z = sign_extend((raw >> 12) % 67108864, 26)
 }
 
+// Entity metadata entries. The `kind` tag selects the value layout; ids follow
+// minecraft.wiki (Byte=0 … Dye Color=43). Types with registry-dependent
+// payloads (Particle, Particles, Slot, Text Component, Resolvable Profile)
+// carry their fixed framing and stop at the registry boundary.
 encoding meta_entry = {
     index: u8
     kind:  varint
     value: match kind {
-        0 => i8
-        1 => varint
-        2 => varlong
-        3 => f32be
-        4 => string(32767)
-        8 => boolean
+        0  => i8
+        1  => varint
+        2  => varlong
+        3  => f32be
+        4  => string(32767)
+        5  => text_component
+        6  => { has_value: boolean, if has_value { value: text_component } }
+        7  => slot
+        8  => boolean
+        9  => { x: f32be, y: f32be, z: f32be }
+        10 => position
+        11 => { has_value: boolean, if has_value { value: position } }
+        12 => varint
+        13 => { has_value: boolean, if has_value { value: uuid } }
+        14 => varint
+        15 => varint
+        16 => { particle_id: varint, data: rest }
+        17 => { count: varint, items: { particle_id: varint, data: rest }[] count = count }
+        18 => { villager_type: varint, profession: varint, level: varint }
+        19 => { raw: varint, value: varint if raw != 0 }
+        20 => varint
+        21 => varint
+        22 => varint
+        23 => varint
+        24 => varint
+        25 => varint
+        26 => varint
+        27 => varint
+        28 => varint
+        29 => varint
+        30 => varint
+        31 => varint
+        32 => varint
+        33 => {
+            has_dimension: boolean
+            if has_dimension {
+                dimension: identifier
+                position: position
+            }
+        }
+        34 => { id: varint, if id == 0 { value: rest } }
+        35 => varint
+        36 => varint
+        37 => varint
+        38 => varint
+        39 => { x: f32be, y: f32be, z: f32be }
+        40 => { x: f32be, y: f32be, z: f32be, w: f32be }
+        41 => rest
+        42 => varint
+        43 => varint
         _ => varint
     }
 }
@@ -146,13 +194,48 @@ encoding sound_event = {
     }
 }
 
+// --- Registry-tagged payloads (v1 stops at the registry boundary) ---
+
 // "ID or X": 0 means the value follows inline; otherwise registry ID + 1.
+// The inline body is registry-keyed, so v1 records the id and stops.
 encoding id_or_sound_event = {
     id: varint
     if id == 0 {
         value: sound_event
     }
 }
+
+encoding id_or_nbt = {
+    id: varint
+    if id == 0 {
+        value: nbt
+    }
+}
+
+// ID Set: either a tag name (Type 0) or an inline list of `Type - 1` ids.
+encoding id_set = {
+    type: varint
+    if type == 0 {
+        tag_name: identifier
+    }
+    if type > 0 {
+        ids: varint[] count = type - 1
+    }
+}
+
+// "ID or X" where the inline X is a registry-tagged union of display shapes.
+// The id names the shape; its fields are registry-dependent, so v1 records the
+// id and stops rather than guessing a length.
+encoding id_or_payload = {
+    id: varint
+    if id == 0 {
+        body: rest
+    }
+}
+
+encoding slot_display = id_or_payload
+
+encoding recipe_display = id_or_payload
 
 // --- Bit sets ---
 
@@ -163,6 +246,81 @@ encoding bitset = {
 
 encoding fixed_bitset(bits = 64) {
     data: bytes(1 + (bits - 1) / 8)
+}
+
+// --- Particles ---
+//
+// Particle data is keyed by the particle_type registry id (declaration order on
+// minecraft.wiki). Only 22 of 125 types carry a payload; the rest send none.
+// The tag is read inside the encoding so the match resolves in scope.
+encoding particle_data = {
+    particle_type: varint
+    value: match particle_type {
+        1  => block_state          // block
+        2  => block_state          // block_marker
+        7  => water_blocks         // geyser
+        8  => water_blocks_burst    // geyser_base
+        9  => water_blocks_burst    // geyser_poof
+        10 => water_blocks         // geyser_plume
+        15 => power                 // dragon_breath
+        21 => dust_color_scale      // dust
+        22 => dust_color_transition // dust_color_transition
+        23 => dust_color_scale      // effect
+        28 => dust_color            // entity_effect
+        36 => block_state           // falling_dust
+        43 => dust_color            // tinted_leaves
+        45 => sculk_charge_roll     // sculk_charge
+        49 => dust_color            // flash
+        53 => dust_color_scale      // instant_effect
+        54 => slot                  // item
+        55 => vibration_source      // vibration
+        56 => trail_data            // trail
+        112 => shriek_delay         // shriek
+        118 => block_state          // dust_pillar
+        122 => block_state          // block_crumble
+        _ => nbt_nothing
+    }
+}
+
+encoding block_state         = { block_state: varint }
+encoding water_blocks        = { water_blocks: i32be }
+encoding water_blocks_burst  = { water_blocks: i32be, burst_impulse_base: f32be }
+encoding power               = { power: f32be }
+encoding dust_color          = { color: i32be }
+encoding dust_color_scale    = { color: i32be, scale: f32be }
+encoding dust_color_transition = { from_color: i32be, to_color: i32be, scale: f32be }
+encoding sculk_charge_roll   = { roll: f32be }
+encoding shriek_delay        = { delay: varint }
+encoding vibration_source    = {
+    block_position: position
+    entity_id: varint
+    entity_eye_height: f32be
+}
+encoding trail_data = {
+    x: f64be
+    y: f64be
+    z: f64be
+    color: i32be
+    duration: varint
+}
+
+// A light array is always 2048 bytes (half a byte per light value).
+encoding light_array = {
+    count: varint
+    data:  i8[] count = 2048
+}
+
+// Light Data: four bit sets (sky/block light mask, empty sky/block mask), then
+// the prefixed arrays of 2048-byte light arrays.
+encoding light_data = {
+    sky_light_mask:           bitset
+    block_light_mask:         bitset
+    empty_sky_light_mask:     bitset
+    empty_block_light_mask:   bitset
+    sky_light_arrays_count:   varint
+    sky_light_arrays:         light_array[] count = sky_light_arrays_count
+    block_light_arrays_count: varint
+    block_light_arrays:       light_array[] count = block_light_arrays_count
 }
 
 // --- Registry-dependent (opaque ids in v1, see spec §2) ---

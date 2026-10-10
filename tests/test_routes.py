@@ -5,42 +5,10 @@ from bps.interp.engine import decode_packet
 
 from tests.test_varint import load_minecraft
 
-# Packets whose wiki layout is registry- or payload-dependent and therefore kept as
-# `body: rest` in v1. This list is a gate: transcribing one of these (or stubbing a
-# new packet) requires updating it deliberately.
-REST_FALLBACKS = frozenset(
-    {
-        "add_entity",
-        "commands",
-        "debug_block_value",
-        "debug_chunk_value",
-        "debug_entity_value",
-        "debug_event",
-        "disguised_chat",
-        "explode",
-        "interact",
-        "level_chunk_with_light",
-        "level_particles",
-        "light_update",
-        "merchant_offers",
-        "place_ghost_recipe",
-        "player_chat",
-        "player_info_update",
-        "player_position",
-        "recipe_book_add",
-        "server_links",
-        "set_entity_motion",
-        "set_equipment",
-        "set_objective",
-        "set_player_team",
-        "set_score",
-        "show_dialog",
-        "teleport_entity",
-        "update_advancements",
-        "update_recipes",
-        "waypoint",
-    }
-)
+# Packets whose wiki layout is registry- or payload-dependent. Every one was
+# transcribed down to its enclosing framing, so this gate now asserts that no
+# packet silently regresses to a whole-payload `body: rest` stub.
+REST_FALLBACKS = frozenset()
 
 
 def is_rest_stub(pkt) -> bool:
@@ -80,7 +48,8 @@ class RouteCoverageTest(unittest.TestCase):
                 decode_packet(resolved, pkt.name, bytes(4096))
             except BpsError:
                 pass  # clean decode failure (require/EOF) is acceptable
-        self.assertGreater(len(seen), 150)
+        # Every declared packet is reachable from a route (no orphans).
+        self.assertEqual(len(seen), len({pkt.name for _, pkt in resolved.routes}))
 
 
 if __name__ == "__main__":

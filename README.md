@@ -50,9 +50,9 @@ encoding meta_entry = {
 | `schemas/minecraft_26_3_login.bps` | Login/configuration shared layouts + remaining mechanical packets |
 | `schemas/minecraft_26_3_wiki.bps` | The **261 routes** (state × direction × packet id → packet) from minecraft.wiki |
 
-231 packets are declared; 29 remain `body: rest` because the wiki layout is registry- or
-payload-dependent (chunk data, particles, recipes, sound events, …). The exact set is pinned
-by `tests/test_routes.py::REST_FALLBACKS`.
+**231 packets, 261 routes, 45 encodings, zero `body: rest` stubs.** Every packet carries its
+transcribed field layout; registry-keyed payloads (component data, recipe displays, chunk data)
+stop at a self-delimiting boundary via `id_or_payload`, `id_set`, `slot`, `particle_data`.
 
 Regenerate the route table:
 
@@ -66,7 +66,7 @@ python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps \
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 18 tests, includes cargo differential
+python -m unittest discover -s tests -t . -v     # 20 tests, includes cargo differential
 SCHEMAS="schemas/minecraft_core.bps schemas/minecraft_26_3.bps schemas/minecraft_26_3_login.bps \
 schemas/minecraft_26_3_play.bps schemas/minecraft_26_3_play_serverbound.bps \
 schemas/minecraft_26_3_wiki.bps"

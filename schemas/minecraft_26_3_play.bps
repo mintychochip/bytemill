@@ -6,10 +6,6 @@
 packet bundle_delimiter {
 }
 
-packet add_entity {
-    body: rest
-}
-
 packet animate {
     entity_id: varint
     animation: u8
@@ -117,10 +113,6 @@ packet command_suggestions {
     }[] count = matches_count
 }
 
-packet commands {
-    body: rest
-}
-
 packet container_close {
     window_id: varint
 }
@@ -170,22 +162,6 @@ packet damage_event {
     }
 }
 
-packet debug_block_value {
-    body: rest
-}
-
-packet debug_chunk_value {
-    body: rest
-}
-
-packet debug_entity_value {
-    body: rest
-}
-
-packet debug_event {
-    body: rest
-}
-
 packet debug_sample {
     sample_count: varint
     sample:       i64be[] count = sample_count
@@ -197,10 +173,6 @@ packet delete_chat {
     if message_id == 0 {
         signature: bytes(256)
     }
-}
-
-packet disguised_chat {
-    body: rest
 }
 
 packet entity_event {
@@ -228,10 +200,6 @@ packet entity_position_sync {
     yaw:       f32be
     pitch:     f32be
     on_ground: boolean
-}
-
-packet explode {
-    body: rest
 }
 
 packet add_transient_block {
@@ -284,23 +252,11 @@ packet initialize_border {
     warning_time: varint
 }
 
-packet level_chunk_with_light {
-    body: rest
-}
-
 packet level_event {
     event: i32be
     location: position
     data: i32be
     disable_relative_volume: boolean
-}
-
-packet level_particles {
-    body: rest
-}
-
-packet light_update {
-    body: rest
 }
 
 packet login {
@@ -363,10 +319,6 @@ packet map_item_data {
             data: u8[] count = data_count
         }
     }
-}
-
-packet merchant_offers {
-    body: rest
 }
 
 packet move_entity_pos {
@@ -453,18 +405,10 @@ packet open_sign_editor {
     text_slot: varint
 }
 
-packet place_ghost_recipe {
-    body: rest
-}
-
 packet player_abilities {
     flags: i8
     flying_speed: f32be
     field_of_view_modifier: f32be
-}
-
-packet player_chat {
-    body: rest
 }
 
 packet player_combat_end {
@@ -481,10 +425,6 @@ packet player_combat_kill {
 packet player_info_remove {
     uuids_count: varint
     uuids: uuid[] count = uuids_count
-}
-
-packet player_info_update {
-    body: rest
 }
 
 // Configuration clientbound + serverbound (Finish Configuration .. Accept Code of Conduct)
@@ -520,10 +460,6 @@ packet select_known_packs {
     }[] count = known_packs_count
 }
 
-packet show_dialog {
-    body: rest
-}
-
 packet code_of_conduct {
     code_of_conduct: string(32767)
 }
@@ -542,19 +478,11 @@ packet player_look_at {
     }
 }
 
-packet player_position {
-    body: rest
-}
-
 packet player_rotation {
     yaw: f32be
     relative_yaw: boolean
     pitch: f32be
     relative_pitch: boolean
-}
-
-packet recipe_book_add {
-    body: rest
 }
 
 packet recipe_book_remove {
@@ -702,14 +630,6 @@ packet set_entity_link {
     holding_entity_id: i32be
 }
 
-packet set_entity_motion {
-    body: rest
-}
-
-packet set_equipment {
-    body: rest
-}
-
 packet set_experience {
     experience_bar: f32be
     level: varint
@@ -726,10 +646,6 @@ packet set_held_slot {
     slot: varint
 }
 
-packet set_objective {
-    body: rest
-}
-
 packet set_passengers {
     entity_id: varint
     passengers_count: varint
@@ -739,14 +655,6 @@ packet set_passengers {
 packet set_player_inventory {
     slot: varint
     slot_data: slot
-}
-
-packet set_player_team {
-    body: rest
-}
-
-packet set_score {
-    body: rest
 }
 
 packet set_simulation_distance {
@@ -818,10 +726,6 @@ packet take_item_entity {
     pickup_item_count: varint
 }
 
-packet teleport_entity {
-    body: rest
-}
-
 packet test_instance_block_status {
     status: text_component
     has_size: boolean
@@ -839,10 +743,6 @@ packet ticking_state {
 
 packet ticking_step {
     tick_steps: varint
-}
-
-packet update_advancements {
-    body: rest
 }
 
 packet update_attributes {
@@ -868,15 +768,8 @@ packet update_mob_effect {
     flags: i8
 }
 
-packet update_recipes {
-    body: rest
-}
-
 packet projectile_power {
     entity_id: varint
     power: f64be
 }
 
-packet waypoint {
-    body: rest
-}

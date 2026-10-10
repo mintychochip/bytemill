@@ -50,8 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     dec_p.add_argument("--hex", action="store_true")
 
     enc_p = sub.add_parser("encode")
-    enc_p.add_argument("schemas", nargs="+")
     enc_p.add_argument("--packet", required=True)
+    enc_p.add_argument("schemas", nargs="*")
     enc_p.add_argument("json_value")
 
     emit_p = sub.add_parser("emit")

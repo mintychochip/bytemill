@@ -141,10 +141,6 @@ packet entity_tag_query {
     entity_id:      varint
 }
 
-packet interact {
-    body: rest
-}
-
 packet jigsaw_generate {
     location:      position
     levels:        varint

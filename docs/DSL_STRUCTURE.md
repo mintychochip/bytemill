@@ -117,7 +117,11 @@ encoding nbt_payload = {
 
 ## Example in this repo
 
-- `schemas/minecraft_core.bps` — VarInt, String, Position, NBT, Slot, entity metadata
-- `schemas/minecraft_26_3*.bps` — protocol **777**: 231 packets, 261 routes
+- `schemas/minecraft_core.bps` — 45 encodings: VarInt, String, UUID, Position, NBT (recursive),
+  Slot, entity metadata (all 44 kinds), 22-particle data table, Light Data, ID Set, LpVec3
+- `schemas/minecraft_26_3*.bps` — protocol **777**: 231 packets across 261 routes, all
+  transcribed (no `body: rest` stubs)
+
+Authoring rules and the per-packet workflow live in `docs/AUTHORING_GUIDE.md`.
 
 Run: `python -m bps.cli check schemas/minecraft_core.bps schemas/minecraft_26_3.bps`

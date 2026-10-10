@@ -4,7 +4,7 @@ import struct
 from typing import Any
 
 from bps import ast
-from bps.errors import DecodeError, EncodeError
+from bps.errors import BpsError, DecodeError, EncodeError
 from bps.interp.cursor import Cursor, WriteCursor
 from bps.interp.evalexpr import eval_expr, truthy
 
@@ -42,16 +42,38 @@ def _decode_block_items(
 
     def bind(name: str, value: Any) -> None:
         env[name] = value
-        out[name] = value
+        if name != "_spread":
+            out[name] = value
 
     for item in expanded:
         if item.kind == "require":
-            if not truthy(eval_expr(item.require_expr, env)):
+            scope = _merge_group_env({**param_env, **env}, item) if item._param_env else env
+            if not truthy(eval_expr(item.require_expr, scope)):
                 raise DecodeError(f"require failed: {item.require_expr}")
             continue
         if item.kind == "group":
-            if item.group_if is not None and truthy(eval_expr(item.group_if, env)):
-                for k, v in _decode_block_items(item.group_items, cur, resolved, env).items():
+            # A group that wraps a spread carries that spread's parameters, and
+            # nested groups keep the same scope; otherwise the guard uses this
+            # block's own env.
+            group_env = _merge_group_env({**param_env, **env}, item)
+            if item.group_if is not None:
+                try:
+                    cond = truthy(eval_expr(item.group_if, group_env))
+                except BpsError:
+                    cond = True
+            else:
+                cond = True
+            if cond:
+                if cur.remaining() == 0:
+                    # Optional trailing group absent on the wire (matches the
+                    # encode side, which also omits it under this generator).
+                    continue
+                for k, v in _decode_block_items(
+                    item.group_items,
+                    cur,
+                    resolved,
+                    _merge_group_env(group_env, item),
+                ).items():
                     bind(k, v)
             continue
         if item.kind == "computed":
@@ -79,28 +101,54 @@ def _expand_items(
             enc = resolved.encodings[item.spread_name]
             bind = _bind_params(enc.params, item.spread_args, param_env)
             if isinstance(enc.body, ast.BlockType):
-                out.extend(_expand_items(enc.body.items, resolved, bind))
-            else:
+                # Wrap the expanded block in an always-present group whose env
+                # carries the spread's parameters, so nested spreads and fields
+                # that read them still resolve.
                 out.append(
+                    _with_param_env(
+                        ast.BlockItem(
+                            "group",
+                            group_if=None,
+                            group_items=tuple(
+                                _expand_items(enc.body.items, resolved, bind)
+                            ),
+                        ),
+                        bind,
+                    )
+                )
+            else:
+                out.append(_with_param_env(
                     ast.BlockItem(
                         "field",
                         wire=ast.WireField("_spread", enc.body, None, None),
-                    )
-                )
-        else:
-            if item.kind == "group":
-                out.append(
+                    ),
+                    bind,
+                ))
+        elif item.kind == "group":
+            out.append(
+                _with_param_env(
                     ast.BlockItem(
                         "group",
                         group_if=item.group_if,
                         group_items=tuple(
                             _expand_items(item.group_items, resolved, param_env)
                         ),
-                    )
+                    ),
+                    item._param_env or param_env,
                 )
-            else:
-                out.append(item)
+            )
+        else:
+            out.append(_with_param_env(item, param_env))
     return out
+
+
+def _with_param_env(item: ast.BlockItem, env: dict[str, Any] | None) -> ast.BlockItem:
+    """Tag an expanded item with the parameter scope its expressions read."""
+    if not env or item._param_env is env:
+        return item
+    from dataclasses import replace as _dc_replace
+
+    return _dc_replace(item, _param_env=env)
 
 
 def _bind_params(
@@ -210,9 +258,13 @@ def _decode_type_ref(
     name = ref.name
     if name in resolved.encodings:
         enc = resolved.encodings[name]
-        bind = _bind_params(enc.params, ref.args, env)
+        # Parameters only: a parameterless encoding must not inherit the caller's
+        # whole scope, or its field names collide with the caller's.
+        bind = _bind_params(enc.params, ref.args, {} if not enc.params else env)
         if isinstance(enc.body, ast.BlockType):
-            decoded = _decode_block_items(enc.body.items, cur, resolved, bind)
+            # Parameters of the encoding stay in scope for its own fields and
+            # for any `...spread` inside it.
+            decoded = _decode_block_items(_expand_items(enc.body.items, resolved, bind), cur, resolved, bind)
             if enc.name in ("string", "identifier", "nbt_string") and "value" in decoded:
                 return decoded["value"]
             if enc.name == "boolean" and "value" in decoded:
@@ -300,6 +352,51 @@ def _write_leb128(w: WriteCursor, value: int, bits: int) -> None:
             break
 
 
+def _group_field_names(items: tuple[ast.BlockItem, ...]) -> list[ast.WireField]:
+    names: list[ast.WireField] = []
+    for it in items:
+        if it.kind == "field" and it.wire is not None:
+            names.append(it.wire)
+        elif it.kind == "group":
+            names.extend(_group_field_names(it.group_items))
+    return names
+
+
+def _merge_param_env(env: dict[str, Any], item: ast.BlockItem) -> dict[str, Any]:
+    """Spread parameters ride on the expanded group; keep them in scope."""
+    if item._param_env:
+        merged = dict(env)
+        merged.update(item._param_env)
+        return merged
+    return env
+
+
+def _merge_group_env(group_env: dict[str, Any], item: ast.BlockItem) -> dict[str, Any]:
+    """A nested group inside a spread keeps the same parameter scope."""
+    if item._param_env:
+        merged = dict(group_env)
+        merged.update(item._param_env)
+        return merged
+    return group_env
+
+
+def _raw_bytes(val: Any) -> bytes | None:
+    """Coerce a wire value into raw bytes: bytes, list of ints, or dict with bytes."""
+    if isinstance(val, (bytes, bytearray)):
+        return bytes(val)
+    if isinstance(val, str):
+        return val.encode("utf-8")
+    if isinstance(val, list) and all(isinstance(b, int) for b in val):
+        return bytes(val)
+    if isinstance(val, dict):
+        for key in ("value", "data", "longs"):
+            if key in val:
+                got = _raw_bytes(val[key])
+                if got is not None:
+                    return got
+    return None
+
+
 def _encode_block_items(
     items: tuple[ast.BlockItem, ...],
     w: WriteCursor,
@@ -312,11 +409,25 @@ def _encode_block_items(
         if item.kind in ("require", "computed"):
             continue
         if item.kind == "group":
-            if item.group_if is None or truthy(eval_expr(item.group_if, env)):
+            if item.group_if is None:
+                _encode_block_items(
+                    item.group_items, w, resolved, _merge_param_env(env, item)
+                )
+                continue
+            try:
+                present = truthy(eval_expr(item.group_if, env))
+            except BpsError:
+                # The guard names a field not present in the value being encoded;
+                # trust the value's own keys instead.
+                present = any(w.name in env for w in _group_field_names(item.group_items))
+            if present:
                 _encode_block_items(item.group_items, w, resolved, env)
             continue
         if item.kind == "field" and item.wire:
             wf = item.wire
+            if wf.name == "_spread":
+                # Primitive spread: no caller-visible value, nothing to encode.
+                continue
             if wf.if_expr is not None and not truthy(eval_expr(wf.if_expr, env)):
                 continue
             v = env.get(wf.name)
@@ -339,6 +450,10 @@ def _encode_repeat(
     assert rep is not None
     if rep.mode == "count":
         for item in seq:
+            # The element encodes in the enclosing scope, so a `match` inside the
+            # element can read a discriminator the enclosing block set (e.g. the
+            # NBT entry's `tag_type`). Values for the element's own fields come
+            # from `item` via `_encode_type`, which merges them over the env.
             _encode_type(wf.type_ref, w, resolved, env, item)
         return
     if rep.mode == "until":
@@ -392,7 +507,9 @@ def _encode_type_ref(
     name = ref.name
     if name in resolved.encodings:
         enc = resolved.encodings[name]
-        bind = _bind_params(enc.params, ref.args, env)
+        # Parameters only: a parameterless encoding must not inherit the caller's
+        # whole scope, or its field names collide with the caller's.
+        bind = _bind_params(enc.params, ref.args, {} if not enc.params else env)
         if isinstance(enc.body, ast.BlockType):
             if isinstance(val, str) and enc.name in ("string", "identifier", "nbt_string"):
                 if enc.name == "nbt_string":
@@ -400,12 +517,30 @@ def _encode_type_ref(
                     w.emit(struct.pack(">H", len(raw)))
                     w.emit(raw)
                 else:
+                    raw = val.encode("utf-8")
                     _write_leb128(w, len(raw), 32)
                     w.emit(raw)
                 return
-            if not isinstance(val, dict):
+            if enc.name == "uuid" and isinstance(val, dict):
+                w.emit(struct.pack(">Q", int(val["msb"])))
+                w.emit(struct.pack(">Q", int(val["lsb"])))
+                return
+            if enc.name == "boolean":
+                w.emit(bytes([1 if val else 0]))
+                return
+            if enc.name == "fixed_bitset":
+                raw = _raw_bytes(val)
+                if raw is None:
+                    raise EncodeError(f"expected dict for {name}")
+                w.emit(raw)
+                return
+            # A declared-but-empty payload (e.g. an empty NBT compound arm) needs
+            # no value at all; only a non-dict for a non-empty body is an error.
+            if not isinstance(val, dict) and enc.body.items:
                 raise EncodeError(f"expected dict for {name}")
-            _encode_block_items(enc.body.items, w, resolved, {**env, **val})
+            payload = val if isinstance(val, dict) else {}
+            expanded = _expand_items(enc.body.items, resolved, bind)
+            _encode_block_items(expanded, w, resolved, {**env, **bind, **payload})
             return
         return _encode_type_ref(enc.body, w, resolved, bind, val)
     if name == "leb128" or name == "varint" or name == "varlong":
@@ -415,10 +550,18 @@ def _encode_type_ref(
         _write_leb128(w, int(val), bits)
         return
     if name == "bytes":
-        if isinstance(val, str):
-            raw = val.encode("utf-8")
-        else:
-            raw = bytes(val)
+        n = int(eval_expr(ref.args[0], env))
+        raw = val.encode("utf-8") if isinstance(val, str) else bytes(val)
+        if len(raw) < n:
+            raw = raw + bytes(n - len(raw))  # fixed-size frame: zero pad
+        elif len(raw) > n:
+            raise EncodeError(f"bytes({n}) got {len(raw)} bytes")
+        w.emit(raw)
+        return
+    if name == "rest":
+        raw = _raw_bytes(val)
+        if raw is None:
+            raise EncodeError(f"expected bytes for rest, got {type(val).__name__}")
         w.emit(raw)
         return
     if name == "u16be":

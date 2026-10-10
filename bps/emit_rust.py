@@ -356,7 +356,7 @@ class Walker:
             return f'env.get("{e.name}").copied().unwrap_or(0)'
         if k == "unop":
             if e.value == "!":
-                return f"(!({self.expr(e.left)} != 0))"
+                return f"(if {self.expr(e.left)} == 0 {{ 1 }} else {{ 0 }})"
             return f"(-{self.expr(e.left)})"
         if k == "binop":
             left, right = self.expr(e.left), self.expr(e.right)
