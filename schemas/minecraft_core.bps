@@ -1,0 +1,48 @@
+// Minecraft Java Edition — shared wire encodings (protocol-family stable)
+
+encoding varint  = leb128(32, signed)
+encoding varlong = leb128(64, signed)
+
+encoding string(max_chars = 32767) {
+    byte_len: varint
+    value:    bytes(byte_len) as utf8
+    require   utf16_units(value) <= max_chars
+}
+
+encoding identifier = {
+    ...string(32767)
+}
+
+encoding uuid = {
+    msb: u64be
+    lsb: u64be
+}
+
+encoding boolean = {
+    value: u8
+}
+
+encoding position = {
+    raw: u64be
+    x = sign_extend(raw >> 38, 26)
+    y = sign_extend(raw % 4096, 12)
+    z = sign_extend((raw >> 12) % 67108864, 26)
+}
+
+encoding meta_entry = {
+    index: u8
+    kind:  varint
+    value: match kind {
+        0 => i8
+        1 => varint
+        2 => varlong
+        3 => f32be
+        4 => string(32767)
+        8 => boolean
+        _ => varint
+    }
+}
+
+encoding entity_metadata = {
+    entries: meta_entry[] until 0xFF
+}

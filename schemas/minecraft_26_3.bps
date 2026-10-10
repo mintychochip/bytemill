@@ -1,0 +1,73 @@
+// Minecraft Java Edition 26.3 — protocol 777 (see minecraft.wiki)
+
+enum intent : varint {
+    status = 1
+    login = 2
+    transfer = 3
+}
+
+packet handshake {
+    protocol_version: varint
+    server_address:   string(255)
+    server_port:      u16be
+    intent:           varint
+    require           protocol_version == 777
+}
+
+packet legacy_server_list_ping {
+    payload: u8
+}
+
+packet status_request { }
+
+packet status_response {
+    json: string(32767)
+}
+
+packet ping_request {
+    timestamp: i64be
+}
+
+packet pong_response {
+    timestamp: i64be
+}
+
+packet login_start {
+    name:        string(16)
+    player_uuid: uuid
+}
+
+packet encryption_response {
+    secret_len: varint
+    secret:     i8[] count = secret_len
+}
+
+packet keep_alive {
+    keep_alive_id: i64be
+}
+
+packet disconnect {
+    reason_raw: rest
+}
+
+protocol minecraft @ v26_3 {
+    id = 777
+    frame default {
+        length: varint
+        id: varint
+        payload: rest
+    }
+
+    route handshaking.serverbound 0x00 => handshake
+    route handshaking.serverbound 0xfe => legacy_server_list_ping
+    route status.serverbound 0x00 => status_request
+    route status.clientbound 0x00 => status_response
+    route status.serverbound 0x01 => ping_request
+    route status.clientbound 0x01 => pong_response
+    route login.serverbound 0x00 => login_start
+    route login.serverbound 0x01 => encryption_response
+    route play.clientbound 0x2d => keep_alive
+    route configuration.clientbound 0x04 => keep_alive
+    route play.clientbound 0x20 => disconnect
+    route configuration.clientbound 0x02 => disconnect
+}

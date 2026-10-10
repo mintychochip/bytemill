@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from bps.analyze import analyze
+from bps.emit_json import schema_to_json
+from bps.errors import BpsError
+from bps.interp.engine import decode_frame_payload, decode_packet, encode_packet
+from bps.parser import parse
+
+
+def _load_schema(paths: list[str]):
+    encodings: list = []
+    enums: list = []
+    packets: list = []
+    protocols: list = []
+    for p in paths:
+        s = parse(Path(p).read_text(encoding="utf-8"))
+        encodings.extend(s.encodings)
+        enums.extend(s.enums)
+        packets.extend(s.packets)
+        protocols.extend(s.protocols)
+    from bps.ast import Schema
+
+    return analyze(Schema(tuple(encodings), tuple(enums), tuple(packets), tuple(protocols)))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="bpsc")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    check_p = sub.add_parser("check")
+    check_p.add_argument("schemas", nargs="+")
+
+    dump_p = sub.add_parser("dump-json")
+    dump_p.add_argument("schemas", nargs="+")
+
+    routes_p = sub.add_parser("routes")
+    routes_p.add_argument("schemas", nargs="+")
+
+    dec_p = sub.add_parser("decode")
+    dec_p.add_argument("schemas", nargs="+")
+    dec_p.add_argument("--packet", help="packet name for raw payload decode")
+    dec_p.add_argument("--state")
+    dec_p.add_argument("--direction")
+    dec_p.add_argument("--hex", action="store_true")
+
+    enc_p = sub.add_parser("encode")
+    enc_p.add_argument("schemas", nargs="+")
+    enc_p.add_argument("--packet", required=True)
+    enc_p.add_argument("json_value")
+
+    args = parser.parse_args(argv)
+    try:
+        if args.cmd == "check":
+            _load_schema(args.schemas)
+            print("ok")
+            return 0
+        if args.cmd == "dump-json":
+            resolved = _load_schema(args.schemas)
+            print(schema_to_json(resolved.schema))
+            return 0
+        if args.cmd == "routes":
+            resolved = _load_schema(args.schemas)
+            for route, pkt in resolved.routes:
+                print(
+                    f"{route.state}.{route.direction} 0x{route.packet_id:02x} -> {pkt.name}"
+                )
+            return 0
+        if args.cmd == "decode":
+            resolved = _load_schema(args.schemas)
+            raw = sys.stdin.read().strip()
+            if args.hex:
+                data = bytes.fromhex(raw.replace(" ", ""))
+            else:
+                data = bytes.fromhex(raw.replace(" ", ""))
+            if args.packet:
+                out = decode_packet(resolved, args.packet, data)
+            elif args.state and args.direction:
+                pid, out = decode_frame_payload(resolved, args.state, args.direction, data)
+                out = {"id": pid, **out}
+            else:
+                print("need --packet or --state and --direction", file=sys.stderr)
+                return 1
+            print(json.dumps(out, sort_keys=True))
+            return 0
+        if args.cmd == "encode":
+            resolved = _load_schema(args.schemas)
+            val = json.loads(args.json_value)
+            out = encode_packet(resolved, args.packet, val)
+            print(out.hex())
+            return 0
+    except BpsError as e:
+        print(str(e), file=sys.stderr)
+        return 3
+    return 0
