@@ -67,7 +67,7 @@ python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps \
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 24 tests, includes cargo differential
+python -m unittest discover -s tests -t . -v     # 25 tests, includes cargo differential
 SCHEMAS="schemas/minecraft_core.bps schemas/minecraft_26_3.bps schemas/minecraft_26_3_login.bps \
 schemas/minecraft_26_3_remaining.bps schemas/minecraft_26_3_play.bps \
 schemas/minecraft_26_3_play_serverbound.bps schemas/minecraft_26_3_wiki.bps"
