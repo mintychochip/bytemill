@@ -39,7 +39,10 @@ packet custom_query {
 
 packet custom_query_answer {
     message_id: varint
-    data:       rest
+    has_data:   boolean
+    if has_data {
+        data: rest
+    }
 }
 
 packet login_acknowledged { }

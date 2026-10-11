@@ -44,17 +44,6 @@ _PRIM: dict[str, object] = {
     "nbt_string": "abc",
     "slot": {"item_count": 0},
     "hashed_slot": {"has_item": False},
-    "bitset": {"long_count": 0, "longs": []},
-    "light_data": {
-        "sky_light_mask": {"long_count": 0, "longs": []},
-        "block_light_mask": {"long_count": 0, "longs": []},
-        "empty_sky_light_mask": {"long_count": 0, "longs": []},
-        "empty_block_light_mask": {"long_count": 0, "longs": []},
-        "sky_light_arrays_count": 0,
-        "sky_light_arrays": [],
-        "block_light_arrays_count": 0,
-        "block_light_arrays": [],
-    },
     "id_or_sound_event": {"id": 1},
     "game_profile": {
         "profile_uuid": {"msb": 1, "lsb": 2},
@@ -73,7 +62,6 @@ _PRIM: dict[str, object] = {
         "packed_high_4": 0x00000000,
     },
     "particle_data": {"particle_type": 300, "value": {}},
-    "id_or_payload": {"id": 1},
     # An empty slot display, and a stonecutter recipe display of three empty ones.
     "slot_display": {"type": 0, "value": {}},
     "recipe_display": {
@@ -84,7 +72,6 @@ _PRIM: dict[str, object] = {
             "crafting_station": {"type": 0, "value": {}},
         },
     },
-    "id_or_nbt": {"id": 1},
     "id_set": {"type": 2, "ids": [300]},
     "block_state": {"block_state": 300},
     "water_blocks": {"water_blocks": 300},
@@ -204,7 +191,7 @@ def _block_value_shared(items: tuple[ast.BlockItem, ...], local: dict, scope: _E
         v = (
             [_value_for(wf.type_ref, local, scope)]
             if wf.repeat is not None
-            else _value_for(wf.type_ref, local, scope)
+            else _field_value(wf.type_ref, local, out, scope)
         )
         out[wf.name] = v
         local[wf.name] = v
@@ -264,7 +251,7 @@ def _block_value(items: tuple[ast.BlockItem, ...], env: dict, scope: _Env) -> di
         v = (
             [_value_for(wf.type_ref, local, scope)]
             if wf.repeat is not None
-            else _value_for(wf.type_ref, local, scope)
+            else _field_value(wf.type_ref, local, out, scope)
         )
         out[wf.name] = v
         local[wf.name] = v
@@ -331,3 +318,28 @@ def _fit_length(wf: ast.WireField, value: object, local: dict, out: dict) -> Non
         local[driver] = len(value)
         if driver in out:
             out[driver] = len(value)
+
+
+def _field_value(t, local: dict, out: dict, scope: _Env) -> object:
+    """A field's value; for a `match` type, the arm its scrutinee selects.
+
+    When no arm matches and there is no `_`, a plain identifier scrutinee is
+    retargeted onto the first concrete tag so the value can still encode.
+    """
+    if not isinstance(t, ast.MatchType):
+        return _value_for(t, local, scope)
+    try:
+        tag = int(eval_expr(t.tag_expr, local))
+    except (BpsError, TypeError, ValueError):
+        tag = None
+    arm = select_match_arm(t, tag) if tag is not None else None
+    if arm is None:
+        arm = next((a for a in t.arms if _concrete_arm_tag(a) is not None), None)
+        chosen = _concrete_arm_tag(arm) if arm is not None else None
+        if chosen is not None and t.tag_expr.kind == "ident" and t.tag_expr.name:
+            # `out` may be a conditional group's result, merged into its parent's.
+            local[t.tag_expr.name] = chosen
+            out[t.tag_expr.name] = chosen
+    if arm is None or arm.type_ref is None:
+        return {}
+    return _value_for(arm.type_ref, local, scope)

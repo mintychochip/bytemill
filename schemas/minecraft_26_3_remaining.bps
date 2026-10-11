@@ -88,39 +88,56 @@ packet explode {
 
 // --- Chunk data + light ---
 
-// Chunk payload: a serialized section blob. v1 keeps the framing; the palette
-// and block-state bit packing are registry-dependent.
-// Both payloads are byte arrays behind a VarInt length, the shape
-// `NetworkBuffer.BYTE_ARRAY` writes; the length field is declared so the
-// payload does not read to the end of the packet.
+// Chunk: the heightmaps (heightmap type id -> long array), the section blob as a
+// length-prefixed byte array (its palettes and bit packing are registry-dependent,
+// so v1 keeps the framing), the block entities, then the light data.
 packet level_chunk_with_light {
     chunk_x: i32be
     chunk_z: i32be
+    heightmaps_count: varint
+    heightmaps: {
+        heightmap_type:       varint
+        heightmap_data_count: varint
+        heightmap_data:       i64be[] count = heightmap_data_count
+    }[] count = heightmaps_count
     chunk_data_len: varint
-    chunk_data: bytes(chunk_data_len)
-    light_data_len: varint
-    light_data: bytes(light_data_len)
+    chunk_data:     bytes(chunk_data_len)
+    block_entities_count: varint
+    block_entities: {
+        packed_xz: u8
+        y:         i16be
+        type:      varint
+        data:      nbt
+    }[] count = block_entities_count
+    light: light_data
 }
 
 packet light_update {
     chunk_x: varint
     chunk_z: varint
-    data: rest
+    light:   light_data
 }
 
 // --- Merchant offers ---
+
+// ItemCost: an item registry id, a count, then a DataComponentExactPredicate, a
+// counted list of typed component values. v1 stops at that count: a non-empty
+// predicate carries registry-keyed values it cannot walk.
+encoding item_cost = {
+    item_id:         varint
+    count:           varint
+    predicate_count: varint
+}
 
 packet merchant_offers {
     window_id: varint
     trades_count: varint
     trades: {
-        // Trade items are Slots; v1 reads the slot frame and stops at the
-        // component-data boundary rather than guessing a length.
-        input_item_1: slot
+        input_item_1: item_cost
         output_item: slot
         has_input_item_2: boolean
         if has_input_item_2 {
-            input_item_2: slot
+            input_item_2: item_cost
         }
         trade_disabled: boolean
         trade_uses: i32be
@@ -411,17 +428,20 @@ packet update_advancements {
 
 // --- Entity metadata + equipment ---
 
-// Equipment: slot byte with the top bit marking "more entries follow", each
-// followed by a Slot. Slot payloads stop at the v1 registry boundary
-// (component data beyond count/id/add/remove is not represented), so the
-// entry item is a v1 Slot frame.
+// Equipment: a chain of (slot byte, item) entries. The slot byte's top bit says
+// another entry follows, so there is no entry count. Items stop at the
+// component-patch boundary like every Slot.
+encoding equipment_entry = {
+    slot_byte: u8
+    item:      slot
+    if slot_byte & 0x80 != 0 {
+        next: equipment_entry
+    }
+}
+
 packet set_equipment {
     entity_id: varint
-    entries_count: varint
-    entries: {
-        slot: u8
-        item: slot
-    }[] count = entries_count
+    entries:   equipment_entry
 }
 
 // --- Sound events (ID or X) ---
@@ -442,6 +462,8 @@ packet server_links {
     }[] count = links_count
 }
 
+// Show Dialog (play): a Holder<Dialog>, a registry id + 1 or 0 and the dialog
+// inline as network NBT. The configuration form below has no holder id.
 packet show_dialog {
     dialog_id: varint
     if dialog_id == 0 {
@@ -449,6 +471,16 @@ packet show_dialog {
     }
 }
 
+// Show Dialog (configuration): ClientboundShowDialogPacket.CONTEXT_FREE_STREAM_CODEC,
+// the dialog inline as network NBT with no holder id.
+packet show_dialog_configuration {
+    dialog: nbt
+}
+
+// Tracked waypoint: an operation (0 track, 1 untrack, 2 update), then the waypoint:
+// an identifier that is a UUID or a string, the icon (a style identifier and an
+// optional RGB color), and a waypoint type (0 empty, 1 block position, 2 chunk,
+// 3 azimuth) with its payload.
 packet waypoint {
     operation: varint
     is_uuid: boolean
@@ -466,115 +498,278 @@ packet waypoint {
         blue:  u8
     }
     waypoint_type: varint
-    if waypoint_type == 1 {
-        x: varint
-        y: varint
-        z: varint
-    }
-    if waypoint_type == 2 {
-        x: varint
-        z: varint
-    }
-    if waypoint_type == 3 {
-        angle: f32be
+    type_payload: match waypoint_type {
+        0 => nbt_nothing
+        1 => { x: varint, y: varint, z: varint }
+        2 => { x: varint, z: varint }
+        3 => { angle: f32be }
     }
 }
 
 // --- Debug subscriptions ---
+//
+// A debug value is keyed by a minecraft:debug_subscription id (0-15, the order
+// DebugSubscriptions registers them in), and each subscription has its own value
+// codec. Subscription 0 (the server tick time) has no value codec: it travels in
+// debug_sample instead, so a value or event for it is rejected.
+
+encoding debug_bee_info = {
+    has_hive_pos: boolean
+    if has_hive_pos {
+        hive_pos: position
+    }
+    has_flower_pos: boolean
+    if has_flower_pos {
+        flower_pos: position
+    }
+    travel_ticks: varint
+    blacklisted_hives_count: varint
+    blacklisted_hives: position[] count = blacklisted_hives_count
+}
+
+encoding debug_brain_dump = {
+    name:        string(32767)
+    profession:  string(32767)
+    xp:          i32be
+    health:      f32be
+    max_health:  f32be
+    inventory:   string(32767)
+    wants_golem: boolean
+    anger_level: i32be
+    activities_count: varint
+    activities:       string(32767)[] count = activities_count
+    behaviors_count: varint
+    behaviors:       string(32767)[] count = behaviors_count
+    memories_count: varint
+    memories:       string(32767)[] count = memories_count
+    gossips_count: varint
+    gossips:       string(32767)[] count = gossips_count
+    pois_count: varint
+    pois:       position[] count = pois_count
+    potential_pois_count: varint
+    potential_pois:       position[] count = potential_pois_count
+}
+
+encoding debug_breeze_info = {
+    has_attack_target: boolean
+    if has_attack_target {
+        attack_target: varint
+    }
+    has_jump_target: boolean
+    if has_jump_target {
+        jump_target: position
+    }
+}
+
+encoding debug_goal = {
+    priority:   varint
+    is_running: boolean
+    name:       string(255)
+}
+
+encoding debug_goal_info = {
+    goals_count: varint
+    goals:       debug_goal[] count = goals_count
+}
+
+// A path node (Node.DEBUG_STREAM_CODEC, also used for target nodes).
+encoding debug_path_node = {
+    x:               i32be
+    y:               i32be
+    z:               i32be
+    walked_distance: f32be
+    cost_malus:      f32be
+    closed:          boolean
+    path_type:       varint
+    f:               f32be
+}
+
+encoding debug_path_info = {
+    reached:         boolean
+    next_node_index: i32be
+    target:          position
+    nodes_count:     varint
+    nodes:           debug_path_node[] count = nodes_count
+    open_set_count:  varint
+    open_set:        debug_path_node[] count = open_set_count
+    closed_set_count: varint
+    closed_set:       debug_path_node[] count = closed_set_count
+    target_nodes_count: varint
+    target_nodes:       debug_path_node[] count = target_nodes_count
+    max_node_distance:  f32be
+}
+
+encoding debug_hive_info = {
+    block_type:     varint
+    occupant_count: varint
+    honey_level:    varint
+    sedated:        boolean
+}
+
+encoding debug_poi_info = {
+    pos:               position
+    poi_type_id:       varint
+    free_ticket_count: varint
+}
+
+// A bounding box is its minimum then its maximum block position.
+encoding debug_structure_piece = {
+    min:      position
+    max:      position
+    is_start: boolean
+}
+
+encoding debug_structure_info = {
+    min: position
+    max: position
+    pieces_count: varint
+    pieces:       debug_structure_piece[] count = pieces_count
+}
+
+encoding debug_game_event_info = {
+    game_event_id: varint
+    x:             f64be
+    y:             f64be
+    z:             f64be
+}
+
+// An Update: the subscription id, then an optional value.
+encoding debug_subscription_update = {
+    subscription_id: varint
+    has_value:       boolean
+    if has_value {
+        value: match subscription_id {
+            1  => debug_bee_info
+            2  => debug_brain_dump
+            3  => debug_breeze_info
+            4  => debug_goal_info
+            5  => debug_path_info
+            6  => { intersection_kind: varint }
+            7  => debug_hive_info
+            8  => debug_poi_info
+            9  => { orientation_index: varint }
+            10 => nbt_nothing
+            11 => { positions_count: varint, positions: position[] count = positions_count }
+            12 => { structures_count: varint, structures: debug_structure_info[] count = structures_count }
+            13 => { listener_radius: varint }
+            14 => position
+            15 => debug_game_event_info
+        }
+    }
+}
+
+// An Event: the subscription id, then its value (always present).
+encoding debug_subscription_event = {
+    subscription_id: varint
+    value: match subscription_id {
+        1  => debug_bee_info
+        2  => debug_brain_dump
+        3  => debug_breeze_info
+        4  => debug_goal_info
+        5  => debug_path_info
+        6  => { intersection_kind: varint }
+        7  => debug_hive_info
+        8  => debug_poi_info
+        9  => { orientation_index: varint }
+        10 => nbt_nothing
+        11 => { positions_count: varint, positions: position[] count = positions_count }
+        12 => { structures_count: varint, structures: debug_structure_info[] count = structures_count }
+        13 => { listener_radius: varint }
+        14 => position
+        15 => debug_game_event_info
+    }
+}
 
 packet debug_event {
-    event_type: varint
-    payload:   rest
+    event: debug_subscription_event
 }
 
-// The block-state properties are the one payload whose layout this schema
-// cannot transcribe: the value type is subscription-dependent and the wiki
-// documents no boundary, so it stays a `rest` marker. That is the only packet
-// without a pinned reference vector, and its test says so.
 packet debug_block_value {
-    subscription_type: varint
-    if subscription_type == 2 {
-        block_position: position
-        block_state: varint
-        block_states_count: varint
-        block_states: {
-            block_type: varint
-            properties: rest
-        }[] count = block_states_count
-    }
+    block_position: position
+    update:         debug_subscription_update
 }
 
+// The chunk position is a packed long: z in the high 32 bits, then x.
 packet debug_chunk_value {
-    subscription_type: varint
-    if subscription_type == 0 {
-        x: i32be
-        z: i32be
-        block_position_y: i32be
-        magma_count: i32be
-        extra_bedrock_count: i32be
-    }
-    if subscription_type == 1 {
-        x: i32be
-        z: i32be
-        block_states_count: varint
-        block_states: {
-            block_state: varint
-            states_count: varint
-        }[] count = block_states_count
-    }
+    chunk_z: i32be
+    chunk_x: i32be
+    update:  debug_subscription_update
 }
 
 packet debug_entity_value {
-    subscription_type: varint
-    if subscription_type == 3 {
-        x: f32be
-        y: f32be
-        z: f32be
-    }
-    if subscription_type == 4 {
-        entities_count: varint
-        entities: {
-            entity_id:  i32be
-            block_state: varint
-            x: f64be
-            y: f64be
-            z: f64be
-            has_passing: boolean
-            if has_passing {
-                passing: f64be
-            }
-        }[] count = entities_count
-    }
+    entity_id: varint
+    update:    debug_subscription_update
 }
 
 // --- Commands (brigadier node tree) ---
 
-// Commands: the Brigadier node graph. Node type is flags & 0x03
-// (0 root, 1 literal, 2 argument); 0x04 executable; 0x08 has redirect;
-// 0x10 has suggestions type (argument nodes only).
-packet commands {
-    nodes_count: varint
-    nodes: {
-        flags: u8
-        node_type = flags & 0x03
-        children_count: varint
-        children: varint[] count = children_count
-        if flags & 0x08 != 0 {
-            redirect_node: varint
-        }
-        if node_type != 0 {
-            name: string(32767)
-        }
-        if node_type == 2 {
-            parser_id: varint
-            // Parser Properties are registry-keyed and variable length. v1 stops
-            // at the boundary rather than modelling Brigadier property shapes.
-            payload: id_or_payload
-        }
-        if flags & 0x10 != 0 && node_type == 2 {
+// Brigadier numeric argument ranges: flags bit 0 = a minimum follows, bit 1 = a
+// maximum follows.
+encoding brigadier_int_range = {
+    flags: u8
+    if flags & 0x01 != 0 { min: i32be }
+    if flags & 0x02 != 0 { max: i32be }
+}
+encoding brigadier_long_range = {
+    flags: u8
+    if flags & 0x01 != 0 { min: i64be }
+    if flags & 0x02 != 0 { max: i64be }
+}
+encoding brigadier_float_range = {
+    flags: u8
+    if flags & 0x01 != 0 { min: f32be }
+    if flags & 0x02 != 0 { max: f32be }
+}
+encoding brigadier_double_range = {
+    flags: u8
+    if flags & 0x01 != 0 { min: f64be }
+    if flags & 0x02 != 0 { max: f64be }
+}
+
+// An argument type: its id in the minecraft:command_argument_type registry (62 types,
+// in ArgumentTypeInfos' registration order), then that type's properties as its
+// ArgumentTypeInfo.serializeToNetwork writes them. Most types write none.
+encoding argument_properties = {
+    parser_id: varint
+    properties: match parser_id {
+        1  => brigadier_float_range
+        2  => brigadier_double_range
+        3  => brigadier_int_range
+        4  => brigadier_long_range
+        5  => { string_kind: varint }          // 0 word, 1 phrase, 2 greedy
+        6  => { entity_flags: u8 }             // bit 0 single, bit 1 players only
+        31 => { score_holder_flags: u8 }       // bit 0 multiple
+        43 => { min_time: i32be }
+        44 | 45 | 46 | 47 | 48 => { registry_key: identifier }
+        0 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30 | 32 | 33 | 34 | 35 | 36 | 37 | 38 | 39 | 40 | 41 | 42 | 49 | 50 | 51 | 52 | 53 | 54 | 55 | 56 | 57 | 58 | 59 | 60 | 61 => nbt_nothing
+    }
+}
+
+// One node: flags (type in bits 0-1: 0 root, 1 literal, 2 argument; 0x04 executable,
+// 0x08 redirect, 0x10 custom suggestions, 0x20 restricted), the child node indexes, an
+// optional redirect, then a literal's or argument's name and an argument's type.
+encoding commands_node = {
+    flags: u8
+    node_type = flags & 0x03
+    children_count: varint
+    children: varint[] count = children_count
+    if flags & 0x08 != 0 {
+        redirect_node: varint
+    }
+    if node_type != 0 {
+        name: string(32767)
+    }
+    if node_type == 2 {
+        parser: argument_properties
+        if flags & 0x10 != 0 {
             suggestions_type: identifier
         }
-    }[] count = nodes_count
+    }
+}
+
+packet commands {
+    nodes_count: varint
+    nodes: commands_node[] count = nodes_count
     root_index: varint
 }
 

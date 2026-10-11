@@ -43,7 +43,7 @@ protocol minecraft @ v26_3 {
     route configuration.clientbound 0x10 => custom_report_details
     route configuration.clientbound 0x11 => server_links
     route configuration.clientbound 0x12 => clear_dialog
-    route configuration.clientbound 0x13 => show_dialog
+    route configuration.clientbound 0x13 => show_dialog_configuration
     route configuration.clientbound 0x14 => code_of_conduct
     route configuration.serverbound 0x00 => client_information
     route configuration.serverbound 0x01 => cookie_response

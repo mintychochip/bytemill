@@ -29,6 +29,11 @@ KNOWN_MISMATCHES: dict[str, str] = {
     ),
 }
 
+# Java classes that serve two BPS packets because vanilla writes them differently by state.
+SPLIT_CLASSES: dict[str, list[str]] = {
+    "ShowDialogPacket": ["show_dialog", "show_dialog_configuration"],
+}
+
 # Packets with at least one recorded sample. The recorded packets are the only
 # independent check these layouts get, so this must not shrink unnoticed.
 COVERED_PACKETS = 136
@@ -49,8 +54,11 @@ class JavaGroundTruthTest(unittest.TestCase):
         self.assertEqual(sorted(set(route) - java_slots), legacy, "ids BPS has and Java lacks")
 
     def test_each_java_class_is_one_bps_packet(self) -> None:
-        many = {c: p for c, p in java.packets_by_class(self.resolved).items() if len(p) != 1}
+        by_class = java.packets_by_class(self.resolved)
+        many = {c: p for c, p in by_class.items() if len(p) != 1 and c not in SPLIT_CLASSES}
         self.assertEqual(many, {})
+        for java_class, packets in SPLIT_CLASSES.items():
+            self.assertEqual(by_class[java_class], sorted(packets))
 
     def test_every_recorded_sample_belongs_to_a_bps_packet(self) -> None:
         by_class = java.packets_by_class(self.resolved)

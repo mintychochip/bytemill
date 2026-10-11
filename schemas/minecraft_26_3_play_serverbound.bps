@@ -26,7 +26,7 @@ packet bundle_item_selected {
 }
 
 packet change_difficulty_serverbound {
-    new_difficulty: u8
+    new_difficulty: varint
 }
 
 packet change_game_mode {
@@ -349,8 +349,9 @@ packet sign_update {
     text_slot: varint
 }
 
+// OPTIONAL_VAR_INT: 0 means no entity (stop spectating), otherwise the entity id + 1.
 packet spectator_action {
-    entity_id: varint
+    optional_entity_id: varint
 }
 
 packet teleport_to_entity {

@@ -159,7 +159,7 @@ class ShippedSchemaImportTest(unittest.TestCase):
     def test_the_route_file_is_one_root_for_the_whole_protocol(self) -> None:
         resolved = analyze(load_schema([ROOT / "schemas" / "minecraft_26_3_wiki.bps"]))
         self.assertEqual(len(resolved.routes), 261)
-        self.assertEqual(len(resolved.packets), 231)
+        self.assertEqual(len(resolved.packets), 232)
         self.assertIn("varint", resolved.encodings)
 
 

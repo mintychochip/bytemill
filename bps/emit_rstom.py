@@ -12,12 +12,9 @@ contract `tools/packets_gen` emits:
 * The interpreter and this emitter share the grammar, so a schema that
   round-trips in Python emits a serializer that round-trips in Rust.
 * Each packet's `roundtrip_*.rs` pins the Rust encoder against the Python
-  interpreter's bytes for the same synthetic value (`bps/synth.py`), except
-  `debug_block_value`, whose block-state properties payload has no documented
-  boundary and stays a bare `rest` marker; that one keeps the encode/decode
-  consistency check and says so in the test.
+  interpreter's bytes for the same synthetic value (`bps/synth.py`).
 
-Registry-keyed payloads (`slot`, `nbt`, `particle_data`, `id_or_payload`) are
+Registry-keyed payloads (`slot`, `nbt`, `particle_data`) are
 carried as the opaque byte frames the schema declares, which keeps the crate
 compilable without rstom's domain types; `tests/roundtrip.rs` covers every
 emitted payload.
@@ -74,8 +71,6 @@ OPAQUE = frozenset(
         "nbt_payload",
         "nbt_nothing",
         "fixed_bitset",
-        "light_data",
-        "light_array",
         "entity_metadata",
         "meta_entry",
     }
@@ -237,8 +232,6 @@ SELF_DELIMITING: dict[str, str] = {
     "text_component": "nbt_tag_len",
     "nbt": "nbt_tag_len",
     "slot": "slot_len",
-    "hashed_slot": "hashed_slot_len",
-    "id_or_payload": "id_or_payload_len",
 }
 
 # The smallest self-delimiting payload of each hand-scanned kind, used as a
@@ -250,16 +243,23 @@ SELF_DELIMITING_DEFAULT: dict[str, bytes] = {
     "nbt": b"\x00",
     # item_count = 0.
     "slot": b"\x00",
-    # has_item = false.
-    "hashed_slot": b"\x00",
-    # a registry id (1) with no inline body.
-    "id_or_payload": b"\x01",
 }
 
 # Encodings carried as one frame wherever they appear, never flattened into
-# packet fields: an id set is a tag name or a list of ids, a recipe display a
-# tagged union of displays.
-GENERATED_FRAMES = frozenset({"id_set", "ingredient", "recipe_display"})
+# packet fields: an id set is a tag name or a list of ids, a recipe display and a
+# debug value are tagged unions of unrelated shapes, and a bit set and a hashed
+# slot are length-delimited structures.
+GENERATED_FRAMES = frozenset(
+    {
+        "id_set",
+        "ingredient",
+        "recipe_display",
+        "hashed_slot",
+        "bitset",
+        "debug_subscription_update",
+        "debug_subscription_event",
+    }
+)
 
 
 class _Frames:
@@ -2536,30 +2536,6 @@ pub fn slot_len(bytes: &[u8]) -> usize {
         }
     }
     pos.min(bytes.len())
-}
-
-/// Length of one Hashed Slot payload.
-#[must_use]
-pub fn hashed_slot_len(bytes: &[u8]) -> usize {
-    let mut pos = 1usize;
-    if bytes.first().copied().unwrap_or(0) != 0 {
-        for _ in 0..3 {
-            let n = varint_len(bytes.get(pos..).unwrap_or(&[])).unwrap_or(0);
-            pos += n;
-        }
-    }
-    pos.min(bytes.len())
-}
-
-/// Length of one registry id or inline payload: the id VarInt, plus the
-/// inline body (which reads to end of buffer) when the id is 0.
-#[must_use]
-pub fn id_or_payload_len(bytes: &[u8]) -> usize {
-    let id_len = varint_len(bytes).unwrap_or(bytes.len());
-    if varint_value(bytes).unwrap_or(1) == 0 {
-        return bytes.len();
-    }
-    id_len.min(bytes.len())
 }
 '''
 

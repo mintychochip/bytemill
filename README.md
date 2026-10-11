@@ -79,11 +79,11 @@ each shared name lives and which tool behaviors still depend on a std name.
 
 Each packet file imports `std/integers.bps`, `std/varint.bps` and `minecraft_core.bps`.
 
-**231 packets, 261 routes, 69 encodings, zero `body: rest` stubs.** Every packet carries its
+**232 packets, 261 routes, 90 encodings, zero `body: rest` stubs.** Every packet carries its
 transcribed field layout. Registries vanilla enumerates (recipe and slot displays, particles,
-position sources, chat types, number formats) are modeled in full; open ones (data-component
-patches, command argument properties, chunk data) stop at a self-delimiting boundary via
-`id_or_payload`, `slot`, `item_stack_template`.
+position sources, chat types, number formats, command argument types) are modeled in full;
+open ones (data-component patches, chunk section data) stop at a self-delimiting boundary via
+`slot`, `item_stack_template`, `item_cost`.
 
 Regenerate the route table:
 
@@ -137,9 +137,8 @@ agree.
 `bpsc emit rstom` targets the `rstom` workspace crate shape. The output is rustfmt-canonical,
 and each emit drops files the current schema no longer declares, so the generated tree
 always matches its `lib.rs`. Every packet's `roundtrip_*.rs` pins the Rust encoder against
-the Python interpreter's bytes for the same synthetic value (`bps/synth.py`); the only
-exception is `debug_block_value`, whose block-state properties payload has no documented
-boundary and stays a bare `rest` marker, and it keeps the encode/decode consistency check.
+the Python interpreter's bytes for the same synthetic value (`bps/synth.py`), and
+`tests/test_emit_rstom.py` fails if any packet stops pinning.
 
 A payload with no length prefix (a recipe display, a particle, an advancement) is carried
 as raw bytes, so a reader has to scan the structure to find its end. `src/frames.rs` holds

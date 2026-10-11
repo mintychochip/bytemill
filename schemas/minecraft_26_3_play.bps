@@ -78,7 +78,7 @@ packet boss_event {
 }
 
 packet change_difficulty {
-    difficulty:        u8
+    difficulty:        varint
     difficulty_locked: boolean
 }
 
@@ -758,7 +758,7 @@ packet update_attributes {
         modifiers: {
             id: identifier
             amount: f64be
-            operation: i8
+            operation: varint
         }[] count = modifiers_count
     }[] count = property_count
 }

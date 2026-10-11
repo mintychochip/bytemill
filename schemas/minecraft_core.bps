@@ -257,13 +257,6 @@ encoding id_or_sound_event = {
     }
 }
 
-encoding id_or_nbt = {
-    id: varint
-    if id == 0 {
-        value: nbt
-    }
-}
-
 // ID Set: either a tag name (Type 0) or an inline list of `Type - 1` ids.
 encoding id_set = {
     type: varint
@@ -272,14 +265,6 @@ encoding id_set = {
     }
     if type > 0 {
         ids: varint[] count = type - 1
-    }
-}
-
-// Registry-tagged union for opaque parser-property frames (not Slot Display).
-encoding id_or_payload = {
-    id: varint
-    if id == 0 {
-        body: rest
     }
 }
 
@@ -369,10 +354,13 @@ encoding recipe_display = {
 }
 
 // --- Bit sets ---
+//
+// A bit set as ByteBufCodecs.BIT_SET writes it: a length-prefixed byte array
+// (BitSet.toByteArray()). Chat filter masks and chunk light masks use this form.
 
 encoding bitset = {
-    long_count: varint
-    longs:       i64be[] count = long_count
+    byte_len: varint
+    data:     bytes(byte_len)
 }
 
 // FilterMask (chat): enum ordinal, then a length-prefixed byte array when
@@ -455,14 +443,14 @@ encoding trail_data = {
     duration: varint
 }
 
-// A light array is always 2048 bytes (half a byte per light value).
+// A light section: ByteBufCodecs.byteArray(2048), a length-prefixed byte array.
 encoding light_array = {
-    count: varint
-    data:  i8[] count = 2048
+    byte_len: varint
+    data:     bytes(byte_len)
 }
 
-// Light Data: four bit sets (sky/block light mask, empty sky/block mask), then
-// the prefixed arrays of 2048-byte light arrays.
+// ClientboundLightUpdatePacketData: four bit sets (sky and block masks, then the
+// empty sky and block masks), then the sky and block light arrays.
 encoding light_data = {
     sky_light_mask:           bitset
     block_light_mask:         bitset
@@ -488,12 +476,24 @@ encoding slot = {
     }
 }
 
+// Hashed Slot (serverbound): a present flag, the item registry id and count, then
+// the HashedPatchMap: the components added (type id + a 32-bit hash of the value)
+// and removed (type ids). Unlike a Slot's patch, nothing here is registry-keyed.
+encoding hashed_patch_map = {
+    added_count: varint
+    added: {
+        component_type: varint
+        hash:           i32be
+    }[] count = added_count
+    removed_count: varint
+    removed:       varint[] count = removed_count
+}
+
 encoding hashed_slot = {
     has_item: boolean
     if has_item {
-        item_id:      varint
-        item_count:   varint
-        add_count:    varint
-        remove_count: varint
+        item_id:    varint
+        item_count: varint
+        components: hashed_patch_map
     }
 }

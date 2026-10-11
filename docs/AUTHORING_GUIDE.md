@@ -260,12 +260,13 @@ protocol minecraft @ v26_3 {
 ## 6. Registry-dependent payloads
 
 Where vanilla enumerates a registry's variants (slot and recipe displays,
-particles, position sources, number formats, chat types), model them: a `match`
-on the id, and an unknown id is an error because vanilla rejects it too. Where the
-body is keyed by an open registry (data-component patches, command argument
-properties, chunk data), the schema stops at the registry boundary: the framing is
-transcribed, the registry-keyed body stays opaque. That is the line between
-"described" and "data".
+particles, position sources, number formats, chat types, command argument types,
+debug subscriptions), model them: a `match` on the id, and an unknown id is an
+error because vanilla rejects it too. Where the body is keyed by an open registry
+with bespoke codecs per entry (data-component patches, chunk section data), the
+schema stops at the registry boundary: the framing is transcribed, the
+registry-keyed body stays opaque. That is the line between "described" and
+"data".
 
 ```bps
 // Sound Event: 0 means inline; otherwise registry ID + 1.
@@ -346,7 +347,7 @@ is an implementation, not the protocol: vanilla's decompiled
 `net/minecraft/network/protocol/**` is. Where Minestom's bytes differ from
 vanilla's wire format, follow vanilla and list the packet in `KNOWN_MISMATCHES` in
 `tests/test_java_ground_truth.py` with the reason. Packets without a recorded
-sample (95 of 231) are checked only against vanilla's source.
+sample (96 of 232) are checked only against vanilla's source.
 
 ## 8. Adding a packet to an existing family
 

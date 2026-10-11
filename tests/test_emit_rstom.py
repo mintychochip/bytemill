@@ -103,30 +103,25 @@ class EmitRstomTest(unittest.TestCase):
             )
 
     def test_pinned_reference_coverage(self) -> None:
-        """Most packets must pin the Rust encoder to the Python reference.
+        """Every packet must pin the Rust encoder to the Python reference.
 
         The pin is what makes the round-trip meaningful; without it the
         encode/decode pair is only checked for self-consistency. A regression
-        that renders more packets as consistency-only (wrong wire types,
-        unframed payloads, dropped fields) must not pass silently.
+        that renders a packet as consistency-only (wrong wire types, unframed
+        payloads, dropped fields) must not pass silently.
         """
         resolved = load_minecraft()
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "crate"
             emit_rstom(resolved, out)
             test_files = list((out / "tests").glob("roundtrip_*.rs"))
-            pinned = sum(
-                "Pinned by the Python interpreter" in f.read_text(encoding="utf-8")
+            unpinned = sorted(
+                f.stem.removeprefix("roundtrip_")
                 for f in test_files
+                if "Pinned by the Python interpreter" not in f.read_text(encoding="utf-8")
             )
-            self.assertGreaterEqual(
-                len(test_files), 231, msg="one roundtrip test per declared packet"
-            )
-            self.assertGreaterEqual(
-                pinned,
-                229,
-                msg=f"only {pinned} of {len(test_files)} packets pin reference bytes",
-            )
+            self.assertEqual(len(test_files), len(resolved.packets), "one test per packet")
+            self.assertEqual(unpinned, [], "packets that only check consistency")
 
     def test_an_encoding_reused_in_one_packet_is_rejected(self) -> None:
         """The generated struct has one namespace per packet.

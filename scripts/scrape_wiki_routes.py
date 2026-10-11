@@ -87,13 +87,16 @@ def parse_tables(html: str) -> list[RouteRow]:
     return rows
 
 
-# Serverbound packets whose official name collides with a clientbound packet; the
-# hand-transcribed declarations use a `_serverbound` suffix.
+# Routes whose official name needs a different BPS packet: a serverbound packet that
+# collides with a clientbound one (the hand-transcribed declarations use a
+# `_serverbound` suffix), and packets whose wire form differs between states.
 SERVERBOUND_ALIASES: dict[tuple[str, str, str], str] = {
     ("play", "serverbound", "change_difficulty"): "change_difficulty_serverbound",
     ("play", "serverbound", "container_close"): "container_close_serverbound",
     ("play", "serverbound", "move_vehicle"): "move_vehicle_serverbound",
     ("play", "serverbound", "player_abilities"): "player_abilities_serverbound",
+    # Vanilla's configuration codec writes the dialog without the holder id play uses.
+    ("configuration", "clientbound", "show_dialog"): "show_dialog_configuration",
 }
 
 

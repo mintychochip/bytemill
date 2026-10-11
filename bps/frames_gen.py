@@ -386,7 +386,7 @@ class _Body:
             raise self.fail(f"spread of {item.spread_name!r} is not supported")
         if item.kind == "computed":
             code = self.as_int(self.expr(item.computed_expr))
-            self.emit(indent, f"{self.local(item.computed_name)} = {code};")
+            self.emit(indent, f"{self.local(item.computed_name)} = {_unparen(code)};")
             return
         if item.kind == "group":
             self.emit(indent, f"if {_unparen(self.as_bool(self.expr(item.group_if)))} {{")

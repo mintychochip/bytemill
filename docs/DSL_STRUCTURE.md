@@ -123,7 +123,7 @@ encoding nbt_payload = {
 - `schemas/std/` — integers, boolean, VarInt, and VarLong; a file imports them to use them
 - `schemas/minecraft_core.bps` — String, UUID, Position, NBT (recursive),
   Slot, entity metadata (all 44 kinds), 22-particle data table, Light Data, ID Set, LpVec3
-- `schemas/minecraft_26_3*.bps` — protocol **777**: 231 packets across 261 routes, all
+- `schemas/minecraft_26_3*.bps` — protocol **777**: 232 packets across 261 routes, all
   transcribed (no `body: rest` stubs). Each packet file imports `std/integers.bps`,
   `std/varint.bps` and `minecraft_core.bps`; `minecraft_26_3_wiki.bps` (the routes)
   imports every packet file, so it is the one root that loads the whole protocol
