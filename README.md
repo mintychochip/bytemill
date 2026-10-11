@@ -101,7 +101,10 @@ agree.
 
 `bpsc emit rstom` targets the `rstom` workspace crate shape. The output is rustfmt-canonical,
 and each emit drops files the current schema no longer declares, so the generated tree
-always matches its `lib.rs`.
+always matches its `lib.rs`. Every packet's `roundtrip_*.rs` pins the Rust encoder against
+the Python interpreter's bytes for the same synthetic value (`bps/synth.py`), except packets
+whose payloads this emitter must frame itself; those keep the encode/decode consistency
+check and state why in the test.
 
 ## Docs
 
