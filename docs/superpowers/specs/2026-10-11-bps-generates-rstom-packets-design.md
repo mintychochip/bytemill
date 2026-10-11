@@ -82,7 +82,7 @@ from the hand file once (`bps shapes extract`) and is the input from then on:
 | `module_docs`, `struct.docs`, `fields[].docs`, `new.docs`, `serializer_fn.docs`, `serializer_struct.docs` | doc lines kept from the hand file |
 | `struct.derives`, `struct.form` | exact derive list; `braced` or `unit` |
 | `fields[]` | `name`, Rust `type`, in wire order |
-| `new` | `present`, `must_use`, `const` |
+| `new` | `present`, `must_use`, `const`, `attrs` (other attributes on `new`, verbatim) |
 | `serializer_struct` | `style` (`struct` or `constant`), `name`, `pub` |
 | `extras` | optional sibling `<stem>.ext.rs` holding hand-written `impl` helpers |
 
@@ -96,7 +96,7 @@ module docs from the shape, the struct with the shape's derives and docs, `new()
 `serializer()` as the shape says, `impl Packet` (`CLASS_NAME`), the marker traits, and the
 serializer (`XSerializer` struct or `ConstantSerializer`). `write`/`read` come from the BPS
 schema through the existing emitter. If `extras` is set the file ends with
-`#[path = "<stem>.ext.rs"] mod ext;`; the hand `ext` file holds helpers such as
+`#[path = "<stem>.ext.rs"] mod ext;` and `pub use ext::*;` (so a module-level constant keeps its path); the hand `ext` file holds helpers such as
 `ClientInputPacket::forward()`. Inline hand tests are not carried over: the pin gate replaces them.
 
 ### 4.3 CLI (`protoc`)

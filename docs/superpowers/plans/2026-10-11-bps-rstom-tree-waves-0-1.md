@@ -302,7 +302,7 @@ BPS is wrong (with a ground-truth test in `tests/test_java_ground_truth.py` or a
 @dataclass(frozen=True)
 class FieldShape: name: str; type: str; docs: tuple[str, ...]
 @dataclass(frozen=True)
-class NewShape: present: bool; const: bool; must_use: bool; docs: tuple[str, ...]
+class NewShape: present: bool; const: bool; must_use: bool; attrs: tuple[str, ...]; docs: tuple[str, ...]  # attrs: other `#[...]` lines on `new`, verbatim (e.g. `#[allow(clippy::fn_params_excessive_bools)]`)
 @dataclass(frozen=True)
 class SerializerShape: style: str; name: str; public: bool; docs: tuple[str, ...]  # style: "struct"|"constant"
 @dataclass(frozen=True)
@@ -365,14 +365,14 @@ create `tests/fixtures/rstom_tree/client_keep_alive_packet.rs`.
   - `test_unit_packet_uses_constant_serializer_and_has_no_new`;
   - `test_copy_fields_are_not_cloned` (no `.clone()` on an `i64` field; a `String` field is cloned);
   - `test_no_rstom_paths_in_a_tree_file` (`crate::` only);
-  - `test_extras_adds_the_path_mod` (`#[path = "<stem>.ext.rs"] mod ext;`);
+  - `test_extras_adds_the_path_mod_and_reexports_it` (`#[path = "<stem>.ext.rs"] mod ext;` then `pub use ext::*;`, so a module-level `pub const` in the ext file keeps its old path);
   - `test_shape_that_disagrees_with_the_wire_is_an_error` (message names the field);
   - `test_check_flags_a_shaped_packet_whose_file_is_hand_written` and
     `test_check_flags_a_generated_file_with_no_shape`.
 - [ ] **Step 3:** implement `_tree_packet`: banner, `module_docs`, `use` lines for exactly the wire
   constants used plus `Arc`, `NetworkBuffer`, the marker trait, `Packet`, serializer items (and
   `ConstantSerializer` for the constant style); the struct with the shape's derives/docs (or
-  `pub struct X;`); `new` per shape (params = fields in order; body a struct literal); `serializer()`
+  `pub struct X;`); `new` per shape (params = fields in order; body a struct literal; the shape's `attrs` verbatim, after `#[must_use]`); `serializer()`
   per shape; `impl Packet`; marker impls; the serializer struct (`pub` per shape) with `write`
   (`let value = downcast::<X>(value);` then the writes) and `read` (the reads, then
   `Box::new(X { ... })` or `Box::new(X)`); the `ext` mod line. Fields of Copy types
@@ -456,7 +456,7 @@ impl PacketSerializer for ClientKeepAliveSerializer {
 - [ ] **Step 2:** for each shape with `extras` (expected: `ClientInputPacket`,
   `ClientPlayerPositionStatusPacket`, `ClientPlayerRotationPacket`, `PluginMessagePacket`,
   `ClientTabCompletePacket`), copy the hand `impl` items other than `new`/`serializer` (and their
-  inline tests) into `<stem>.ext.rs` (`use super::*;` + the items) **before** generating.
+  inline tests, and any module-level `const`/`pub const` the hand file declares outside the struct, e.g. `MAX_TEXT_LENGTH`) into `<stem>.ext.rs` (`use super::*;` + the items) **before** generating.
 - [ ] **Step 3:** `python -m bps.cli emit rstom-tree schemas/minecraft_26_3_wiki.bps --rstom
   /home/jlo/dev/rstom-bps`. Then the gates, in order, each through `scripts/rstom_cargo.sh`:
   `tools/check-file-length.sh --report` (no new violation versus `0bbef38`);
