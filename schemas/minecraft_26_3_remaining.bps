@@ -1,4 +1,4 @@
-// Minecraft Java Edition 26.3 (protocol 777) — final transcription batch.
+// Minecraft 26.3 (protocol 777) — final transcription batch.
 // Remaining packets whose wiki layouts are registry-independent and fully
 // documented. Registry-dependent payloads (component data, particle data,
 // recipe/slot displays) keep their enclosing framing and stop at the opaque
@@ -84,11 +84,16 @@ packet explode {
 
 // Chunk payload: a serialized section blob. v1 keeps the framing; the palette
 // and block-state bit packing are registry-dependent.
+// Both payloads are byte arrays behind a VarInt length, the shape
+// `NetworkBuffer.BYTE_ARRAY` writes; the length field is declared so the
+// payload does not read to the end of the packet.
 packet level_chunk_with_light {
     chunk_x: i32be
     chunk_z: i32be
-    chunk_data: rest
-    light_data: rest
+    chunk_data_len: varint
+    chunk_data: bytes(chunk_data_len)
+    light_data_len: varint
+    light_data: bytes(light_data_len)
 }
 
 packet light_update {
@@ -254,7 +259,7 @@ packet player_chat {
     }
     chat_type_id: varint
     if chat_type_id == 0 {
-        chat_type: rest
+        chat_type: nbt
     }
     sender_name: text_component
     has_target_name: varint
@@ -267,7 +272,7 @@ packet disguised_chat {
     message: text_component
     chat_type_id: varint
     if chat_type_id == 0 {
-        chat_type: rest
+        chat_type: text_component
     }
     sender_name: text_component
     has_target_name: boolean
@@ -550,7 +555,7 @@ packet interact {
     entity_id: varint
     interaction_type: varint
     if interaction_type == 2 {
-        target_offset: rest
+        target_offset: lpvec3
         has_sneak: boolean
         if has_sneak != 0 {
             sneak: boolean

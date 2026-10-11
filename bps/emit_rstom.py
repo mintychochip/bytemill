@@ -12,11 +12,10 @@ contract `tools/packets_gen` emits:
 * The interpreter and this emitter share the grammar, so a schema that
   round-trips in Python emits a serializer that round-trips in Rust.
 * Each packet's `roundtrip_*.rs` pins the Rust encoder against the Python
-  interpreter's bytes for the same synthetic value (`bps/synth.py`), except
-  the 24 packets that carry a registry-keyed payload or repeat element with no
-  declared length in a non-final position — this emitter must length-prefix
-  those to be self-delimiting, which the reference's concatenated payloads are
-  not — so those keep the encode/decode consistency check instead.
+  interpreter's bytes for the same synthetic value (`bps/synth.py`), except the
+  two packets whose payload the v1 registry boundary stops at a bare `rest`
+  marker (`set_equipment`'s ItemStack, `debug_block_value`'s block-state
+  properties); those keep the encode/decode consistency check and say so.
 
 Registry-keyed payloads (`slot`, `nbt`, `particle_data`, `id_or_payload`) are
 carried as the opaque byte frames the schema declares, which keeps the crate
@@ -63,7 +62,8 @@ WIRE_TYPES: dict[str, tuple[str, str]] = {
 }
 
 # Types the schema declares that this emitter cannot render as a Rust field yet:
-# they are carried as opaque frames.
+# they are carried as opaque frames. Slot/Hashed Slot are declared in full and
+# non-recursive, so they are *not* here — they flatten into their own fields.
 OPAQUE = frozenset(
     {
         "nbt",
@@ -72,17 +72,9 @@ OPAQUE = frozenset(
         "nbt_list_body",
         "nbt_payload",
         "nbt_nothing",
-        "slot",
-        "hashed_slot",
         "fixed_bitset",
         "light_data",
         "light_array",
-        "lpvec3",
-        "id_or_nbt",
-        "id_or_payload",
-        "slot_display",
-        "recipe_display",
-        "id_set",
         "entity_metadata",
         "meta_entry",
     }
@@ -116,7 +108,7 @@ def _opaque_len(
         if val is not None:
             return str(val)
         return None
-    if resolved is None:
+    if resolved is None or ref is None:
         return None
     enc = resolved.encodings.get(ref.name)
     if enc is None or not isinstance(enc.body, ast.BlockType):
@@ -231,6 +223,68 @@ def _expand_encoding(
     return True
 
 
+# Payload types whose on-wire frame is self-delimiting: a reader scans the
+# structure instead of consuming the buffer. Each maps to the scanner in
+# `frames.rs` that measures one payload.
+SELF_DELIMITING: dict[str, str] = {
+    "text_component": "nbt_tag_len",
+    "nbt": "nbt_compound_len",
+    "slot": "slot_len",
+    "hashed_slot": "hashed_slot_len",
+    "id_set": "id_set_len",
+    "id_or_payload": "id_or_payload_len",
+    "slot_display": "id_or_payload_len",
+    "recipe_display": "id_or_payload_len",
+}
+
+# The smallest self-delimiting payload of each kind, used as a field's default:
+# an empty buffer has no payload to scan, and a zero-length frame is not a
+# valid instance of any of these types.
+SELF_DELIMITING_DEFAULT: dict[str, bytes] = {
+    # TAG_END: an NBT body with no content.
+    "text_component": b"\x00",
+    "nbt": b"\x00",
+    # item_count = 0.
+    "slot": b"\x00",
+    # has_item = false.
+    "hashed_slot": b"\x00",
+    # type = 0, then an empty name.
+    "id_set": b"\x00\x00\x00",
+    # a registry id (1) with no inline body.
+    "id_or_payload": b"\x01",
+    "slot_display": b"\x01",
+    "recipe_display": b"\x01",
+}
+
+
+def _frame_walker(f: "PacketShape") -> str | None:
+    """The scanner for a self-delimiting payload field, if it is one."""
+    if f.ref is None or not f.opaque:
+        return None
+    return SELF_DELIMITING.get(f.ref.name)
+
+
+def _elem_frame_mode(e: "PacketShape", resolved: ResolvedSchema) -> str:
+    """How one repeat element's payload is framed: prefixed or self-delimiting."""
+    walker = _frame_walker(e)
+    if walker:
+        return walker
+    if _opaque_len(e.ref, resolved, e.params) is None and (
+        e.opaque or e.wire == "RAW_BYTES"
+    ):
+        return "prefix"
+    return "plain"
+
+
+def _len_field(f: "PacketShape") -> str | None:
+    """The field a `bytes(<ident>)` payload takes its length from."""
+    ref = f.ref
+    if ref is None or ref.name != "bytes" or not ref.args:
+        return None
+    arg = ref.args[0]
+    return arg.name if arg.kind == "ident" else None
+
+
 def _elem_needs_prefix(e: "PacketShape", resolved: ResolvedSchema) -> bool:
     """An opaque payload with no declared length is not self-delimiting.
 
@@ -238,9 +292,7 @@ def _elem_needs_prefix(e: "PacketShape", resolved: ResolvedSchema) -> bool:
     This is the same varint-length + fixed-frame convention the single-field
     path uses (`_emit_packet`'s `prefixed` rest mode).
     """
-    if e.wire != "RAW_BYTES" or e.repeat_mode is not None:
-        return False
-    return _opaque_len(e.ref, resolved, e.params) is None
+    return _elem_frame_mode(e, resolved) == "prefix"
 
 
 def _prefix_write(ident: str, indent: str) -> list[str]:
@@ -261,6 +313,50 @@ def _prefix_read(ident: str, indent: str) -> list[str]:
     ]
 
 
+def _scan_read(ident: str, walker: str, indent: str) -> list[str]:
+    """Read a self-delimiting payload: scan its length, then that many bytes."""
+    return [
+        f"{indent}let {ident} = {{",
+        f"{indent}    let mut raw = vec![0u8; buffer.readable_bytes() as usize];",
+        f"{indent}    buffer.copy_to(buffer.read_index(), &mut raw);",
+        f"{indent}    let len = crate::frames::{walker}(&raw) as i32;",
+        f"{indent}    if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len)) }}",
+        f"{indent}}};",
+    ]
+
+
+def _expr_idents(expr) -> list[str]:
+    """Every identifier an expression reads, innermost first."""
+    if expr is None:
+        return []
+    found: list[str] = []
+    if expr.kind == "ident":
+        found.append(expr.name)
+    if expr.left is not None:
+        found.extend(_expr_idents(expr.left))
+    if expr.right is not None:
+        found.extend(_expr_idents(expr.right))
+    for a in expr.args or ():
+        found.extend(_expr_idents(a))
+    return found
+
+
+def _scope_types(
+    f: "PacketShape", top_fields: list["PacketShape"] | None
+) -> dict[str, str]:
+    """Element scope type map extended with the enclosing packet's fields.
+
+    An element guard can read a packet field (`player_info_update`'s `actions`),
+    whose Rust type decides how the operand widens.
+    """
+    types = dict(getattr(f, "elem_types", {}))
+    for outer in top_fields or []:
+        base = f"Vec<{outer.rtype}>" if outer.repeat_mode is not None else outer.rtype
+        mapped = f"Option<{base}>" if outer.guard is not None else base
+        types.setdefault(outer.ident, mapped)
+    return types
+
+
 def _elem_writes(
     f: "PacketShape",
     resolved: ResolvedSchema,
@@ -268,26 +364,60 @@ def _elem_writes(
     top_fields: list["PacketShape"] | None = None,
 ) -> list[str]:
     """Write each element field from a bound `var`."""
-    out = []
+    types = _scope_types(f, top_fields)
+    out = [
+        f"            let {name} = "
+        + _strip_outer_parens(_rust_operand(expr, _scope_types(f, top_fields), "read"))
+        + ";"
+        for name, expr in getattr(f, "elem_computed", [])
+    ]
     for e in f.element:
         if e.repeat_mode is not None:
-            out.append(
-                _repeat_write(
-                    e,
-                    resolved,
-                    indent="            ",
-                    var=var,
-                    nested=True,
-                    top_fields=top_fields,
-                )
+            inner = _repeat_write(
+                e,
+                resolved,
+                indent="                ",
+                var=var,
+                nested=True,
+                top_fields=top_fields,
+                iterable="items" if e.guard is not None else None,
             )
+            if e.guard is not None:
+                cond = _rust_cond(e.guard, types, "read")
+                out.append(
+                    "            if "
+                    + cond
+                    + " {\n                if let Some(items) = &"
+                    + e.ident
+                    + " {\n"
+                    + inner
+                    + "\n                }\n            }"
+                )
+            else:
+                out.append(inner)
             continue
-        if _elem_needs_prefix(e, resolved):
-            out.extend(_prefix_write(e.ident, "            "))
-            continue
-        frame = _frame_expr(e, resolved) or e.wire
-        # The element's fields are bound as locals by `_destructure`.
-        out.append(f"            buffer.write({frame}, {e.ident}.clone());")
+        mode = _elem_frame_mode(e, resolved)
+        # A guarded slot is an Option, so its write unwraps into `v`.
+        write_var = "v" if e.guard is not None else e.ident
+        if mode == "prefix":
+            body = _prefix_write(write_var, "                ")
+        elif mode != "plain":
+            body = [f"                buffer.write(RAW_BYTES, {write_var}.clone());"]
+        else:
+            frame = _frame_expr(e, resolved) or e.wire
+            # The element's fields are bound as locals by `_destructure`.
+            body = [f"                buffer.write({frame}, {write_var}.clone());"]
+        if e.guard is not None:
+            cond = _rust_cond(e.guard, types, "read")
+            out.append(
+                "            if " + cond + " {\n"
+                f"                if let Some(v) = &{e.ident} {{\n"
+                + "".join(f"    {line}\n" for line in body)
+                + "                }\n"
+                + "            }"
+            )
+        else:
+            out.extend(body)
     return out
 
 
@@ -298,30 +428,132 @@ def _elem_reads(
     top_fields: list["PacketShape"] | None = None,
 ) -> list[str]:
     """Read each element field as a local, ready to build the element."""
-    out = []
+    out: list[str] = []
+    # A computed local derives from fields, so it binds after the last field it
+    # reads (guards on later fields read it in turn).
+    computed = [
+        (name, expr)
+        for name, expr in getattr(f, "elem_computed", [])
+    ]
+    bound: set[str] = set()
+    types = _scope_types(f, top_fields)
+
+    def emit_computed() -> None:
+        for name, expr in list(computed):
+            if set(_expr_idents(expr)) <= bound:
+                out.append(
+                    "            let "
+                    + name
+                    + " = "
+                    + _strip_outer_parens(_rust_operand(expr, types, "read"))
+                    + ";"
+                )
+                computed.remove((name, expr))
+
     for e in f.element:
         if e.repeat_mode is not None:
-            out.append(
-                _repeat_read(
-                    e,
-                    resolved,
-                    indent="            ",
-                    var=var,
-                    nested=True,
-                    top_fields=top_fields,
-                )
+            inner = _repeat_read(
+                e,
+                resolved,
+                indent="                ",
+                var=var,
+                nested=True,
+                top_fields=top_fields,
+                bind=e.guard is None,
+                outer_scope=f.element,
             )
+            if e.guard is not None:
+                cond = _rust_cond(e.guard, types, "read")
+                out.append(
+                    "            let "
+                    + e.ident
+                    + ": "
+                    + _elem_part(e)
+                    + " = if "
+                    + cond
+                    + " {\n                let mut "
+                    + e.ident
+                    + ": Vec<"
+                    + e.rtype
+                    + "> = Vec::new();\n"
+                    + inner
+                    + "\n                Some("
+                    + e.ident
+                    + ")\n            } else { None };"
+                )
+            else:
+                out.append(inner)
             continue
-        if _elem_needs_prefix(e, resolved):
-            out.extend(_prefix_read(e.ident, "            "))
-            continue
-        frame = _frame_expr(e, resolved) or e.wire
-        out.append(f"            let {e.ident} = buffer.read({frame});")
+        mode = _elem_frame_mode(e, resolved)
+        if mode == "prefix":
+            body = _prefix_read(e.ident, "                ")
+        elif mode != "plain":
+            body = _scan_read(e.ident, mode, "                ")
+        else:
+            frame = _frame_expr(e, resolved) or e.wire
+            body = [f"                let {e.ident} = buffer.read({frame});"]
+        if e.guard is not None:
+            cond = _rust_cond(e.guard, types, "read")
+            out.append(
+                "            let "
+                + e.ident
+                + " = if "
+                + cond
+                + " {\n"
+                + "\n".join(body)
+                + "\n                Some("
+                + e.ident
+                + ")\n            } else { None };"
+            )
+        else:
+            out.extend(body)
+        bound.add(e.ident)
+        emit_computed()
+    for name, expr in computed:
+        out.append(
+            "            let "
+            + name
+            + " = "
+            + _strip_outer_parens(_rust_operand(expr, types, "read"))
+            + ";"
+        )
     return out
 
 
 def _elem_names(f: "PacketShape") -> list[str]:
     return [e.ident for e in f.element]
+
+
+def _outer_guard_refs(f: "PacketShape") -> list[str]:
+    """Packet-scope names an element's guards read, bound before the loop.
+
+    A guard inside a repeat element can read a field of the enclosing packet
+    (`player_info_update`'s `actions` bitmask). The rendered guard uses the bare
+    name, so the loop needs a local for it.
+    """
+    local = {e.ident for e in f.element} | {
+        name for name, _ in getattr(f, "elem_computed", [])
+    }
+    refs: set[str] = set()
+
+    def walk(elements: list["PacketShape"]) -> None:
+        for e in elements:
+            if e.guard is not None:
+                refs.update(_expr_idents(e.guard))
+            local.add(e.ident)
+            if e.repeat_mode is not None:
+                walk(e.element)
+            local.update(name for name, _ in getattr(e, "elem_computed", []))
+
+    walk(f.element)
+    return sorted(refs - local)
+
+
+def _outer_bindings(f: "PacketShape", indent: str) -> list[str]:
+    return [
+        f"{indent}let {name} = value.{name}.clone();"
+        for name in _outer_guard_refs(f)
+    ]
 
 
 def _repeat_write(
@@ -332,15 +564,22 @@ def _repeat_write(
     nested: bool = False,
     top_fields: list["PacketShape"] | None = None,
     optional_vec: bool = False,
+    iterable: str | None = None,
 ) -> str:
     if f.repeat_mode == "count":
         # The count is a plain field of this packet and is already written.
         body = "\n".join(_elem_writes(f, resolved, "item", top_fields))
         if nested:
-            loop_head = f"{indent}for {var}_item in &{f.ident}.clone() {{\n"
+            loop_head = (
+                "".join(f"{line}\n" for line in _outer_bindings(f, "") if not nested)
+                + f"{indent}for {var}_item in "
+                + (iterable or f"&{f.ident}.clone()")
+                + " {\n"
+            )
         elif optional_vec:
             loop_head = (
-                f"{indent}if let Some(items) = &{var}.{f.ident} {{\n"
+                "".join(f"{line}\n" for line in _outer_bindings(f, indent) if not nested)
+                + f"{indent}if let Some(items) = &{var}.{f.ident} {{\n"
                 f"{indent}    for {var}_item in items {{\n"
             )
             body = body.replace(indent, indent + "    ", 1)
@@ -352,7 +591,10 @@ def _repeat_write(
                 f"{indent}}}"
             )
         else:
-            loop_head = f"{indent}for {var}_item in &{var}.{f.ident} {{\n"
+            loop_head = (
+                "".join(f"{line}\n" for line in _outer_bindings(f, indent) if not nested)
+                + f"{indent}for {var}_item in &{var}.{f.ident} {{\n"
+            )
         return (
             f"{loop_head}"
             f"{_destructure(f, var)}\n"
@@ -392,6 +634,8 @@ def _repeat_read(
     var: str = "value",
     nested: bool = False,
     top_fields: list["PacketShape"] | None = None,
+    bind: bool = True,
+    outer_scope: list["PacketShape"] | None = None,
 ) -> str:
     reads = "\n".join(_elem_reads(f, resolved, var, top_fields))
     if f.repeat_mode == "count":
@@ -399,14 +643,20 @@ def _repeat_read(
         # optional, in which case the guard already established it is present.
         count = f.count or _ident(f.ident) + "_count"
         # An optional count is unwrapped; the guard already established presence.
-        count = _unwrap_count(count, f.element if nested else top_fields)
-        return (
-            f"{indent}let mut {f.ident}: Vec<{f.rtype}> = Vec::new();\n"
+        scope = list(f.element if nested else top_fields or [])
+        scope += list(outer_scope or [])
+        count = _unwrap_count(count, scope)
+        loop = (
             f"{indent}for _ in 0..{count} {{\n"
             f"{reads}\n"
             f"{indent}    {f.ident}.push({_elem_struct(f)});\n"
             f"{indent}}}"
         )
+        if not bind:
+            return loop
+        # The packet's own fields are locals in the read scope, so an element
+        # guard reading one needs no binding.
+        return f"{indent}let mut {f.ident}: Vec<{f.rtype}> = Vec::new();\n" + loop
     return (
         f"{indent}let mut {f.ident} = Vec::new();\n"
         f"{indent}while buffer.readable_bytes() > 0 {{\n"
@@ -541,6 +791,10 @@ class PacketShape:
         self.repeat_mode = repeat_mode
         self.count = count
         self.element = element or []
+        # Set by `_repeat_shape`: the element scope's name -> Rust type map, and
+        # its computed locals (a guard can read a computed discriminator).
+        self.elem_types: dict[str, str] = {}
+        self.elem_computed: list = []
         # Dotted path of enclosing field names this field was flattened out of.
         # The reference value nests those encodings under the field name, so a
         # flattened field reads its value along this path, not at top level.
@@ -562,7 +816,16 @@ def _repeat_shape(
     element: list[PacketShape] = []
     elem_types: dict[str, str] = {}
     if isinstance(wf.type_ref, ast.BlockType):
-        _flatten(wf.type_ref.items, element, resolved, bind, None, elem_types)
+        _flatten(
+            wf.type_ref.items,
+            element,
+            resolved,
+            bind,
+            None,
+            elem_types,
+            parent,
+            expand_payloads=False,
+        )
     elif isinstance(wf.type_ref, TypeRef):
         # An opaque, registry-keyed element (a repeated Slot, say) has no plain
         # wire type; carry its bytes so the element is written at all. Dropping
@@ -573,7 +836,12 @@ def _repeat_shape(
                 "_item", wire, rtype, wire == "RAW_BYTES", wf.type_ref, bind
             )
         )
-    return PacketShape(
+    computed = [
+        (item.computed_name, item.computed_expr)
+        for item in (wf.type_ref.items if isinstance(wf.type_ref, ast.BlockType) else ())
+        if item.kind == "computed"
+    ]
+    shape = PacketShape(
         wf.name,
         "REPEAT",
         _elem_rtype(element),
@@ -586,19 +854,26 @@ def _repeat_shape(
         guard=guard,
         parent=parent,
     )
+    # The element scope's own name -> Rust type map, for guards that read a
+    # sibling subfield of the same element.
+    shape.elem_types = elem_types
+    shape.elem_computed = computed
+    return shape
 
 
 def _elem_rtype(element: list["PacketShape"]) -> str:
     """The Rust element type: the one field's type, or a tuple for a record."""
     if len(element) == 1 and element[0].repeat_mode is None:
-        return element[0].rtype
+        return _elem_part(element[0])
     if not element:
         return "()"
-    parts = []
-    for e in element:
-        base = f"Vec<{e.rtype}>" if e.repeat_mode is not None else e.rtype
-        parts.append(base)
-    return "(" + ", ".join(parts) + ")"
+    return "(" + ", ".join(_elem_part(e) for e in element) + ")"
+
+
+def _elem_part(e: "PacketShape") -> str:
+    """One tuple slot's type: a guarded subfield is optional, like a packet field."""
+    base = f"Vec<{e.rtype}>" if e.repeat_mode is not None else e.rtype
+    return f"Option<{base}>" if e.guard is not None else base
 
 
 def _count_expr(expr) -> str | None:
@@ -668,6 +943,10 @@ def _rust_field_access(name: str, field_types: dict[str, str], mode: str) -> str
     inner, optional = _field_rust_type(name, field_types)
     access = f"{prefix}{ident}"
     if not optional:
+        # A mask literal over a narrow wire type must fit the type, so the
+        # operand widens: `actions & 128` over a `u8` is `(actions as i32) & 128`.
+        if inner in ("i8", "u8", "i16", "u16"):
+            return f"({access} as i32)"
         return access
     if inner == "bool":
         return f"{access}.unwrap_or(false)"
@@ -881,6 +1160,7 @@ def _append_field(
     guard: ast.Expr | None,
     field_types: dict[str, str],
     parent: str = "",
+    expand_payloads: bool = True,
 ) -> None:
     if wf.repeat is not None:
         out.append(_repeat_shape(wf, resolved, bind, guard, field_types, parent))
@@ -916,9 +1196,15 @@ def _append_field(
         )
         field_types[wf.name] = f"Option<{rtype}>" if guard is not None else rtype
         return
+    framed = (
+        type_ref.name in OPAQUE
+        or SELF_DELIMITING.get(type_ref.name) is not None
+        or (resolved is not None and _opaque_len(type_ref, resolved, bind) is not None)
+    )
     if (
-        type_ref.name not in WIRE_TYPES
-        and type_ref.name not in OPAQUE
+        expand_payloads
+        and not framed
+        and type_ref.name not in WIRE_TYPES
         and _expand_encoding(
             type_ref,
             resolved,
@@ -1018,23 +1304,49 @@ def _flatten(
     parent_guard: ast.Expr | None = None,
     field_types: dict[str, str] | None = None,
     parent: str = "",
+    expand_payloads: bool = True,
 ) -> None:
-    """Flatten a packet body into wire-order fields with conditional guards."""
+    """Flatten a packet body into wire-order fields with conditional guards.
+
+    `expand_payloads` is False inside a repeat element, where a payload
+    encoding stays one framed field: flattening two Slots in one element would
+    collide their field names and merge their guards.
+    """
     field_types = field_types if field_types is not None else {}
     for item in items:
         if item.kind == "group":
             guard = _and_guard(parent_guard, item.group_if)
-            _flatten(item.group_items, out, resolved, bind, guard, field_types, parent)
+            _flatten(
+                item.group_items,
+                out,
+                resolved,
+                bind,
+                guard,
+                field_types,
+                parent,
+                expand_payloads,
+            )
             continue
         if item.kind == "spread" and resolved is not None:
             enc = resolved.encodings.get(item.spread_name)
             if enc is not None and isinstance(enc.body, ast.BlockType):
-                _flatten(enc.body.items, out, resolved, bind, parent_guard, field_types, parent)
+                _flatten(
+                    enc.body.items,
+                    out,
+                    resolved,
+                    bind,
+                    parent_guard,
+                    field_types,
+                    parent,
+                    expand_payloads,
+                )
             continue
         if item.kind == "field" and item.wire is not None:
             wf = item.wire
             guard = _and_guard(parent_guard, wf.if_expr)
-            _append_field(out, wf, resolved, bind, guard, field_types, parent)
+            _append_field(
+                out, wf, resolved, bind, guard, field_types, parent, expand_payloads
+            )
         elif item.kind == "computed":
             continue
 
@@ -1139,12 +1451,17 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
     def _payload_mode(f: PacketShape, index: int) -> str:
         """How an unframed payload field is carried on the wire.
 
-        A `rest` field and an opaque payload with no declared length are both
-        read-to-end-of-buffer on the wire, which is only correct for the last
-        field; anything before it is length-prefixed so it is self-delimiting.
-        The reference concatenates, so a prefixed payload keeps the
-        consistency check but no byte-for-byte pin.
+        `scan` is a self-delimiting payload (NBT, Slot, an id set): it is
+        written raw and read by scanning its length, exactly like the
+        reference. Anything else unframed reads to end of buffer, which is
+        only correct for the last field; a payload before it is
+        length-prefixed, which the reference's concatenated payloads are not,
+        so it keeps the consistency check but no byte-for-byte pin.
         """
+        if _frame_walker(f):
+            return "scan"
+        if _len_field(f):
+            return "len_field"
         unframed = (f.ref is not None and f.ref.name == "rest") or (
             f.opaque and _opaque_len(f.ref, resolved, f.params) is None
         )
@@ -1237,6 +1554,39 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
                 )
             read_types[f.ident] = f"Option<{f.rtype}>" if f.guard else f.rtype
             continue
+        length_field = _len_field(f)
+        if length_field:
+            body = (
+                f"            let {f.ident} = {{\n"
+                f"                let n = {_ident(length_field)} as usize;\n"
+                f"                if n == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(n as i32)) }}\n"
+                f"            }};"
+            )
+            if f.guard is not None:
+                cond = _rust_cond(f.guard, read_types, "read")
+                reads.append(
+                    f"        let {f.ident} = if {cond} {{\n{body}\n"
+                    f"            Some({f.ident})\n        }} else {{ None }};"
+                )
+                read_types[f.ident] = f"Option<{f.rtype}>"
+            else:
+                reads.append(body)
+                read_types[f.ident] = f.rtype
+            continue
+        walker = _frame_walker(f)
+        if walker and _payload_mode(f, i) == "scan":
+            if f.guard is not None:
+                cond = _rust_cond(f.guard, read_types, "read")
+                inner = "\n".join(_scan_read(f.ident, walker, "            "))
+                reads.append(
+                    f"        let {f.ident} = if {cond} {{\n{inner}\n"
+                    f"            Some({f.ident})\n        }} else {{ None }};"
+                )
+                read_types[f.ident] = f"Option<{f.rtype}>"
+            else:
+                reads.extend(_scan_read(f.ident, walker, "        "))
+                read_types[f.ident] = f.rtype
+            continue
         frame = _frame_expr(f, resolved) or f.wire
         if f.guard is not None:
             cond = _rust_cond(f.guard, read_types, "read")
@@ -1279,7 +1629,7 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
     collected, rtypes = collect(fields)
     # Import exactly the type constants the generated body references; a
     # heuristic over field shapes over-imports and trips `unused_imports`.
-    body_text = "\n".join(writes) + "\n" + reads
+    body_text = writes + "\n" + reads
     used_wires = sorted(
         w
         for w in (collected | {"VAR_INT", "RAW_BYTES", "FIXED_BYTES"})
@@ -1335,8 +1685,21 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
             py_v: object = []
         elif f.opaque or frame:
             declared = _opaque_len(f.ref, resolved, f.params)
-            v = f"vec![0u8; {declared}]" if declared else "Vec::new()"
-            py_v = b"\x00" * int(declared) if declared else b""
+            self_delim = (
+                SELF_DELIMITING_DEFAULT.get(f.ref.name)
+                if f.ref is not None and _frame_walker(f)
+                else None
+            )
+            if declared:
+                v = f"vec![0u8; {declared}]"
+                py_v = b"\x00" * int(declared)
+            elif self_delim is not None:
+                lit = _rust_bytes(self_delim)
+                v = lit
+                py_v = self_delim
+            else:
+                v = "Vec::new()"
+                py_v = b""
         else:
             v = _default_value(f.rtype)
             py_v = 0 if f.rtype in ("i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64") else (
@@ -1506,28 +1869,37 @@ _PRIM_RTYPES = {
 
 
 def _rust_element(
-    e: "PacketShape", value: object, resolved: ResolvedSchema
+    e: "PacketShape",
+    value: object,
+    resolved: ResolvedSchema,
+    env: dict | None = None,
 ) -> str | None:
     """A repeat element's literal: the element type is never an Option."""
     if e.guard is not None and value is None:
         return None
-    return _rust_inner(e, value, resolved)
+    return _rust_inner(e, value, resolved, env)
 
 
 def _rust_literal(
-    f: "PacketShape", value: object, resolved: ResolvedSchema
+    f: "PacketShape",
+    value: object,
+    resolved: ResolvedSchema,
+    env: dict | None = None,
 ) -> str | None:
     """Rust source for one field value, or None when it cannot be rendered."""
     if f.guard is not None and value is None:
         return "None"
-    lit = _rust_inner(f, value, resolved)
+    lit = _rust_inner(f, value, resolved, env)
     if lit is None:
         return None
     return f"Some({lit})" if f.guard is not None else lit
 
 
 def _rust_inner(
-    f: "PacketShape", value: object, resolved: ResolvedSchema
+    f: "PacketShape",
+    value: object,
+    resolved: ResolvedSchema,
+    env: dict | None = None,
 ) -> str | None:
     """The `T` in `Option<T>` / the bare value: no optionality wrapper."""
     if f.repeat_mode is not None:
@@ -1538,16 +1910,12 @@ def _rust_inner(
         parts = []
         for item in value:
             if len(f.element) == 1 and f.element[0].ident == "_item":
-                lit = _rust_element(f.element[0], item, resolved)
+                lit = _rust_element(f.element[0], item, resolved, env)
             elif isinstance(item, dict):
                 lits = []
                 for e in f.element:
                     ev = _py_field_value(e, item)
-                    # A tuple slot is never optional, so a guarded element field
-                    # must carry its value or the packet has no pinned vector.
-                    if e.guard is not None and ev is None:
-                        return None
-                    el = _rust_inner(e, ev, resolved)
+                    el = _rust_literal(e, ev, resolved)
                     if el is None:
                         return None
                     lits.append(el)
@@ -1561,14 +1929,21 @@ def _rust_inner(
 
     frame = _frame_expr(f, resolved)
     if f.opaque or frame or f.rtype == "Vec<u8>":
-        if isinstance(value, (bytes, bytearray)):
+        if f.ref is not None:
+            # Through the interpreter: a `bytes(<ident>)` frame is zero-padded to
+            # the length the sibling field declares, which a raw value cannot be.
+            data = _encode_bare(f.ref, value, resolved, {**(env or {}), **f.params})
+            if data is None:
+                if isinstance(value, (bytes, bytearray)):
+                    data = bytes(value)
+                elif isinstance(value, str):
+                    data = value.encode("utf-8")
+                else:
+                    return None
+        elif isinstance(value, (bytes, bytearray)):
             data = bytes(value)
         elif isinstance(value, str):
             data = value.encode("utf-8")
-        elif f.ref is not None:
-            data = _encode_bare(f.ref, value, resolved, f.params)
-            if data is None:
-                return None
         else:
             return None
         # A declared frame is exactly its length: the interpreter zero-pads a
@@ -1635,6 +2010,10 @@ def _parity_args(
     fields, field_types = _packet_fields(pkt, resolved)
 
     def _payload_mode(f, index):
+        if _frame_walker(f):
+            return "scan"
+        if _len_field(f):
+            return "len_field"
         unframed = (f.ref is not None and f.ref.name == "rest") or (
             f.opaque and _opaque_len(f.ref, resolved, f.params) is None
         )
@@ -1643,10 +2022,12 @@ def _parity_args(
         return "to_end" if index == len(fields) - 1 else "prefixed"
 
     try:
-        # This emitter frames a payload two ways the reference does not: an
-        # unframed opaque repeat element and a non-final unframed payload field
-        # are both length-prefixed (the only self-delimiting option available),
-        # so those packets keep the consistency check but no byte-for-byte pin.
+        # A payload this emitter must length-prefix (an unframed opaque repeat
+        # element, a non-final unframed payload) diverges from the reference's
+        # concatenated payloads, so those packets keep the consistency check
+        # but no byte-for-byte pin. Self-delimiting payloads are written raw
+        # and read by scanning their length, exactly like the reference, so
+        # they still pin.
         for i, f in enumerate(fields):
             if f.repeat_mode is not None and any(
                 _elem_needs_prefix(e, resolved) for e in f.element
@@ -1658,7 +2039,7 @@ def _parity_args(
         expected = encode_packet(resolved, pkt.name, py)
         lits = []
         for f in fields:
-            lit = _rust_literal(f, _py_field_value(f, py), resolved)
+            lit = _rust_literal(f, _py_field_value(f, py), resolved, py)
             if lit is None:
                 return None
             lits.append(lit)
@@ -1930,6 +2311,175 @@ pub fn all() -> Vec<(&'static str, Serializer)> {
 }
 '''
 
+# Self-delimiting payload frames. A registry-keyed payload (NBT, Slot, an id
+# set) has no length prefix on the wire, so a reader must scan the structure to
+# know where it ends. These walkers measure one payload at the front of a byte
+# slice; the generated serializers write such a payload as raw bytes and read
+# back exactly the scanned length, which is what the reference encoder does.
+_FRAMES_RS = '''//! Generated by `bps emit rust`: self-delimiting payload scanners.
+
+/// Bytes of one non-zigzag LEB128 VarInt at the front of `bytes`.
+fn varint_len(bytes: &[u8]) -> Option<usize> {
+    for (i, byte) in bytes.iter().enumerate().take(5) {
+        if byte & 0x80 == 0 {
+            return Some(i + 1);
+        }
+    }
+    None
+}
+
+/// Value of one VarInt, for the payloads whose shape depends on it.
+fn varint_value(bytes: &[u8]) -> Option<i32> {
+    let mut result: i32 = 0;
+    for (i, byte) in bytes.iter().enumerate().take(5) {
+        result |= i32::from(byte & 0x7F) << (7 * i);
+        if byte & 0x80 == 0 {
+            return Some(result);
+        }
+    }
+    None
+}
+
+fn skip_u16(bytes: &[u8], pos: &mut usize) -> Option<()> {
+    let lo = *bytes.get(*pos)? as usize;
+    let hi = *bytes.get(*pos + 1)? as usize;
+    *pos += 2 + ((hi << 8) | lo);
+    Some(())
+}
+
+fn skip_i32(bytes: &[u8], pos: &mut usize) -> Option<i32> {
+    let value = i32::from_be_bytes([
+        *bytes.get(*pos)?,
+        *bytes.get(*pos + 1)?,
+        *bytes.get(*pos + 2)?,
+        *bytes.get(*pos + 3)?,
+    ]);
+    *pos += 4;
+    Some(value)
+}
+
+/// One NBT payload body, addressed by its tag id (compound entries, list
+/// items, ...), the shape Java's `readPayload` switches on.
+fn skip_nbt_body(tag: u8, bytes: &[u8], pos: &mut usize, depth: u32) -> Option<()> {
+    if depth > 512 {
+        return None;
+    }
+    match tag {
+        0 => {}
+        1 => *pos += 1,
+        2 => *pos += 2,
+        3 | 5 => *pos += 4,
+        4 | 6 => *pos += 8,
+        7 => *pos += usize::try_from(skip_i32(bytes, pos)?).ok()?,
+        8 => skip_u16(bytes, pos)?,
+        9 => {
+            let element = *bytes.get(*pos)?;
+            *pos += 1;
+            for _ in 0..skip_i32(bytes, pos)? {
+                skip_nbt_body(element, bytes, pos, depth + 1)?;
+            }
+        }
+        10 => loop {
+            let entry_type = *bytes.get(*pos)?;
+            *pos += 1;
+            if entry_type == 0 {
+                break;
+            }
+            skip_u16(bytes, pos)?;
+            skip_nbt_body(entry_type, bytes, pos, depth + 1)?;
+        },
+        11 => *pos += 4 * usize::try_from(skip_i32(bytes, pos)?).ok()?,
+        12 => *pos += 8 * usize::try_from(skip_i32(bytes, pos)?).ok()?,
+        _ => return None,
+    }
+    (*pos <= bytes.len()).then_some(())
+}
+
+/// Length of one tag-id-prefixed NBT payload (`text_component`).
+#[must_use]
+pub fn nbt_tag_len(bytes: &[u8]) -> usize {
+    let tag = *bytes.first().unwrap_or(&0);
+    let mut pos = 1usize;
+    if skip_nbt_body(tag, bytes, &mut pos, 0).is_none() {
+        return bytes.len();
+    }
+    pos.min(bytes.len())
+}
+
+/// Length of one nameless NBT compound (`nbt`): entries until TAG_END.
+#[must_use]
+pub fn nbt_compound_len(bytes: &[u8]) -> usize {
+    let mut pos = 0usize;
+    loop {
+        let entry_type = *bytes.get(pos).unwrap_or(&0);
+        pos += 1;
+        if entry_type == 0 {
+            break;
+        }
+        if skip_u16(bytes, &mut pos).is_none() || skip_nbt_body(entry_type, bytes, &mut pos, 0).is_none() {
+            return bytes.len();
+        }
+    }
+    pos.min(bytes.len())
+}
+
+/// Length of one Slot payload.
+#[must_use]
+pub fn slot_len(bytes: &[u8]) -> usize {
+    let mut pos = varint_len(bytes).unwrap_or(bytes.len());
+    let count = varint_value(bytes).unwrap_or(0);
+    if count > 0 {
+        for _ in 0..3 {
+            let n = varint_len(bytes.get(pos..).unwrap_or(&[])).unwrap_or(0);
+            pos += n;
+        }
+    }
+    pos.min(bytes.len())
+}
+
+/// Length of one Hashed Slot payload.
+#[must_use]
+pub fn hashed_slot_len(bytes: &[u8]) -> usize {
+    let mut pos = 1usize;
+    if bytes.first().copied().unwrap_or(0) != 0 {
+        for _ in 0..3 {
+            let n = varint_len(bytes.get(pos..).unwrap_or(&[])).unwrap_or(0);
+            pos += n;
+        }
+    }
+    pos.min(bytes.len())
+}
+
+/// Length of one registry id or inline payload: the id VarInt, plus the
+/// inline body (which reads to end of buffer) when the id is 0.
+#[must_use]
+pub fn id_or_payload_len(bytes: &[u8]) -> usize {
+    let id_len = varint_len(bytes).unwrap_or(bytes.len());
+    if varint_value(bytes).unwrap_or(1) == 0 {
+        return bytes.len();
+    }
+    id_len.min(bytes.len())
+}
+
+/// Length of one registry id set payload.
+#[must_use]
+pub fn id_set_len(bytes: &[u8]) -> usize {
+    let mut pos = varint_len(bytes).unwrap_or(bytes.len());
+    let tag_type = varint_value(bytes).unwrap_or(0);
+    if tag_type == 0 {
+        if skip_u16(bytes, &mut pos).is_none() {
+            return bytes.len();
+        }
+    } else {
+        for _ in 0..tag_type.saturating_sub(1) {
+            let n = varint_len(bytes.get(pos..).unwrap_or(&[])).unwrap_or(0);
+            pos += n;
+        }
+    }
+    pos.min(bytes.len())
+}
+'''
+
 
 def _parser_methods(by_reg: dict[str, list], group: str) -> str:
     """`PacketParser` methods for one side (`client` or `server`)."""
@@ -2053,12 +2603,16 @@ def emit_rstom(
 
     (src / "lib.rs").write_text(
         "//! Generated by `bps emit rust`: packet payloads, `ported`, and `packet_vanilla`.\n\n"
+        "pub mod frames;\n"
         "pub mod packet_vanilla;\n"
         "pub mod packets;\n"
         "pub mod ported;\n",
         encoding="utf-8",
     )
     written.append(src / "lib.rs")
+    frames_path = src / "frames.rs"
+    frames_path.write_text(_FRAMES_RS, encoding="utf-8")
+    written.append(frames_path)
 
     (out_dir / "Cargo.toml").write_text(
         '[package]\nname = "bps_rstom"\nversion = "0.1.0"\nedition = "2024"\n\n'
