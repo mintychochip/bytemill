@@ -9,13 +9,32 @@ from bps.analyze import analyze
 from bps.emit_json import schema_to_json
 from bps.emit_rust import emit_rust
 from bps.emit_rstom import emit_rstom
-from bps.errors import BpsError
+from bps.errors import BpsError, EmitError
 from bps.interp.engine import decode_frame_payload, decode_packet, encode_packet
 from bps.load import load_schema
+from bps.minestom import ClassTable
+
+# Where `packets_gen`'s schema is in an rstom workspace, relative to the workspace.
+PACKETS_GEN_SCHEMA = Path("tools") / "packets_gen" / "schema" / "packets.json"
 
 
 def _load_schema(paths: list[str]):
     return analyze(load_schema(paths))
+
+
+def _class_table(given: str | None, out: Path) -> ClassTable:
+    """rstom's class table: the one named, or the one of the workspace `out` is a crate of."""
+    if given is not None:
+        path = Path(given)
+    else:
+        path = out.resolve().parent.parent / PACKETS_GEN_SCHEMA
+    if not path.is_file():
+        raise EmitError(
+            f"emit rstom needs rstom's packets_gen schema, which names each packet's Minestom "
+            f"class: {path} is not a file (pass --packets-json; by default it is "
+            f"<out>/../../{PACKETS_GEN_SCHEMA.as_posix()})"
+        )
+    return ClassTable.load(path)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,6 +66,11 @@ def main(argv: list[str] | None = None) -> int:
     emit_p.add_argument("target", choices=["rust", "rstom"])
     emit_p.add_argument("schemas", nargs="+")
     emit_p.add_argument("--out", required=True)
+    emit_p.add_argument(
+        "--packets-json",
+        help="rstom's packets_gen schema (emit rstom), default: the one of the rstom "
+        "workspace the crate is written into",
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -93,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.target == "rust":
                 emit_rust(resolved, Path(args.out))
             else:
-                emit_rstom(resolved, Path(args.out))
+                emit_rstom(resolved, Path(args.out), _class_table(args.packets_json, Path(args.out)))
             print(f"emitted {args.target} crate to {args.out}")
             return 0
     except BpsError as e:

@@ -100,13 +100,13 @@ file that declares packets.
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 75 tests, includes cargo differential
+python -m unittest discover -s tests -t . -v     # 92 tests, includes the cargo build of the rstom crate
 ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file
 python -m bps.cli check $ROOT                    # parse + resolve + check
 python -m bps.cli routes $ROOT                   # routing table (261 routes)
 python -m bps.cli dump-json $ROOT                # schema.json
 python -m bps.cli emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
-python -m bps.cli emit rstom $ROOT --out ../rstom/crates/bps_rstom  # rstom `PacketSerializer` crate
+python -m bps.cli emit rstom $ROOT --out ../rstom/crates/bps_rstom  # drop-in for `rstom-packets`
 python scripts/java_probe_samples.py             # packets whose layout disagrees with real Minestom bytes
 ```
 
@@ -134,11 +134,29 @@ Slot; `src/packets.rs` one decoder per packet; `src/lib.rs` dispatch by state ×
 id). `tests/golden.rs` carries the same vectors as the Python side, so Python and Rust must
 agree.
 
-`bpsc emit rstom` targets the `rstom` workspace crate shape. The output is rustfmt-canonical,
-and each emit drops files the current schema no longer declares, so the generated tree
-always matches its `lib.rs`. Every packet's `roundtrip_*.rs` pins the Rust encoder against
-the Python interpreter's bytes for the same synthetic value (`bps/synth.py`), and
-`tests/test_emit_rstom.py` fails if any packet stops pinning.
+`bpsc emit rstom` writes a drop-in for rstom's `rstom-packets` crate: the same module tree
+(`client/` is what the client sends, `server/` what the server sends; below each, the
+Minestom packages `common`, `configuration`, `handshake`, `login`, `play`, `status`), a
+struct for each Minestom class under its Minestom name and `CLASS_NAME`, the ten
+`packet_vanilla::*_registry` tables, `ported::all()`, and the same re-exports at the crate
+root. The class of a route is the class at that id in rstom's
+`tools/packets_gen/schema/packets.json`, which the emit finds in the rstom workspace it
+writes into (`--packets-json` names another); `tests/test_minestom.py` checks that mapping
+against the id tables recorded from Minestom itself.
+
+What is not drop-in: a struct's fields are the schema's wire fields, not the Java record's,
+so constructors differ (the handshake `intent` is an `i32`, not an enum) and the shared
+hand-written types (`ChunkData`, `component`, ...) do not exist. A packet that travels both
+ways is two structs (`ClientKeepAlivePacket`, `KeepAlivePacket`). Minestom keeps two wire
+forms on `ShowDialogPacket`; BPS has a packet for each, so the configuration form is one
+extra module, `server/configuration/show_dialog_packet`.
+
+The output is rustfmt-canonical, and each emit drops the generated files the current schema
+no longer declares (a file without the emitter marker is left alone), so the tree always
+matches its `lib.rs`. Every struct's `roundtrip_*.rs` pins the Rust encoder against the
+Python interpreter's bytes for the same synthetic value (`bps/synth.py`), and
+`tests/test_emit_rstom.py` fails if any packet stops pinning. `tests/registry_tables.rs`
+builds all ten id tables and checks their class names and order.
 
 A payload with no length prefix (a recipe display, a particle, an advancement) is carried
 as raw bytes, so a reader has to scan the structure to find its end. `src/frames.rs` holds

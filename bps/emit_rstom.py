@@ -1,18 +1,21 @@
 """Rust emitter for the `rstom-packets` crate shape (`../rstom`).
 
-A resolved BPS schema is compiled into a crate whose payloads implement the same
-contract `tools/packets_gen` emits:
+A resolved BPS schema is compiled into a crate with `rstom-packets`' module tree
+(`client/` and `server/`, each split by Minestom package) whose payloads implement
+the same contract `tools/packets_gen` emits:
 
-* `packet NAME { field: type }` -> `struct NAME { pub field: Rust }`
+* `packet NAME { field: type }` -> `struct <Minestom class> { pub field: Rust }`
   plus `<Name>Serializer` implementing `PacketSerializer` over `NetworkBuffer`
-  and `impl Packet for NAME { const CLASS_NAME }`.
+  and `impl Packet for <class> { const CLASS_NAME }`. The class is the one rstom
+  registers at the packet's route (`bps/minestom.py`).
 * Wire-type mapping matches `NetworkBuffer`'s type constants.
 * `route state.direction id => packet` -> the positional id tables under
   `packet_vanilla/`, one module per (side, state).
 * The interpreter and this emitter share the grammar, so a schema that
   round-trips in Python emits a serializer that round-trips in Rust.
-* Each packet's `roundtrip_*.rs` pins the Rust encoder against the Python
-  interpreter's bytes for the same synthetic value (`bps/synth.py`).
+* Each struct's `roundtrip_*.rs` pins the Rust encoder against the Python
+  interpreter's bytes for the same synthetic value (`bps/synth.py`);
+  `registry_tables.rs` checks the id tables.
 
 Registry-keyed payloads (`slot`, `nbt`, `particle_data`) are
 carried as the opaque byte frames the schema declares, which keeps the crate
@@ -32,6 +35,7 @@ from bps.analyze import reject_unlowered_scalars
 from bps.ast import BlockItem, PacketDecl, ResolvedSchema, RouteDecl, TypeRef
 from bps.errors import EmitError
 from bps.interp.engine import encode_packet
+from bps.minestom import PACKAGE_PREFIX, ClassTable, Unit, build_units, package_of
 from bps.synth import synthesize_packet
 
 # BPS type -> (NetworkBuffer type constant, Rust type). Mirrors the constants the
@@ -75,9 +79,6 @@ OPAQUE = frozenset(
         "meta_entry",
     }
 )
-
-# Serverbound packets whose official name collides with a clientbound one.
-_SUFFIX = {"_serverbound"}
 
 
 def _pascal(s: str) -> str:
@@ -1471,23 +1472,12 @@ def _flatten(
             continue
 
 
-def _struct_name(pkt: PacketDecl) -> str:
-    base = _pascal(pkt.name)
-    return base if base.endswith("Packet") else base + "Packet"
-
-
-def _packet_group(direction: str) -> str:
-    """`client` = serverbound (received from client), `server` = clientbound."""
-    return "client" if direction == "serverbound" else "server"
-
-
 def _connection_side_rust(direction: str) -> str:
     return "ConnectionSide::Client" if direction == "serverbound" else "ConnectionSide::Server"
 
 
 def _connection_state_rust(state: str) -> str:
     return {
-        "handshaking": "ConnectionState::Handshake",
         "handshake": "ConnectionState::Handshake",
         "status": "ConnectionState::Status",
         "login": "ConnectionState::Login",
@@ -1496,46 +1486,21 @@ def _connection_state_rust(state: str) -> str:
     }.get(state, f"ConnectionState::{_pascal(state)}")
 
 
-def _java_class_name(pkt: PacketDecl, group: str, state: str) -> str:
-    return f"net.minestom.server.network.packet.{group}.{state}.{_struct_name(pkt)}"
-
-
-def _primary_route(
-    pkt_name: str, resolved: ResolvedSchema
-) -> tuple[str, str, str]:
-    routes = [(r, p) for r, p in resolved.routes if p.name == pkt_name]
-    if not routes:
-        return "client", "play", "serverbound"
-    routes.sort(key=lambda e: (e[0].state, e[0].direction, e[0].packet_id))
-    r = routes[0][0]
-    return _packet_group(r.direction), r.state, r.direction
-
-
 def _contiguous_registry_entries(
-    entries: list[tuple[RouteDecl, PacketDecl]],
-) -> list[tuple[RouteDecl, PacketDecl]]:
+    entries: list[tuple[RouteDecl, Unit]],
+) -> list[tuple[RouteDecl, Unit]]:
     """Keep routes whose ids are 0..n-1; `PacketRegistry` is positional.
 
     Wiki routes such as `legacy_server_list_ping` at `0xfe` are omitted here
     (same as `packets_gen` handshaking table).
     """
     entries.sort(key=lambda e: e[0].packet_id)
-    out: list[tuple[RouteDecl, PacketDecl]] = []
-    for i, (route, pkt) in enumerate(entries):
+    out: list[tuple[RouteDecl, Unit]] = []
+    for i, (route, unit) in enumerate(entries):
         if route.packet_id != i:
             break
-        out.append((route, pkt))
+        out.append((route, unit))
     return out
-
-
-def _routes_by_registry(
-    resolved: ResolvedSchema,
-) -> dict[str, list[tuple[RouteDecl, PacketDecl]]]:
-    out: dict[str, list[tuple[RouteDecl, PacketDecl]]] = {}
-    for route, pkt in resolved.routes:
-        key = f"{_packet_group(route.direction)}_{route.state}"
-        out.setdefault(key, []).append((route, pkt))
-    return {key: _contiguous_registry_entries(entries) for key, entries in out.items()}
 
 
 def _packet_fields(
@@ -1557,10 +1522,11 @@ def _packet_fields(
     return fields, field_types
 
 
-def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
+def _emit_packet(unit: Unit, resolved: ResolvedSchema) -> str:
+    pkt = unit.pkt
     fields, field_types = _packet_fields(pkt, resolved)
-    name = _struct_name(pkt)
-    ser = name[: -len("Packet")] + "Serializer"
+    name = unit.cls.name
+    ser = name.removesuffix("Packet") + "Serializer"
 
     struct_lines = []
     for f in fields:
@@ -1853,9 +1819,9 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
     if "CoordVec" in rtypes:
         imports += "use rstom::coordinate::Vec as CoordVec;\n"
 
-    group, state, _direction = _primary_route(pkt.name, resolved)
-    java_class = _java_class_name(pkt, group, state)
-    if group == "client":
+    java_class = unit.cls.java
+    routes = ", ".join(f"{r.state}.{r.direction} {r.packet_id:#04x}" for r in unit.routes)
+    if unit.cls.group == "client":
         marker_import = (
             "use rstom::network::packet::client::client_packet::"
             "{ClientPacket, ClientPacketGroup};\n"
@@ -1876,7 +1842,8 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
 
     return f'''//! Generated by `bps emit rust` from a resolved BPS schema.
 //!
-//! Wire layout transcribed from `schemas/minecraft_26_3*.bps`.
+//! Wire layout transcribed from `schemas/minecraft_26_3*.bps`: BPS packet
+//! `{pkt.name}`, routed {routes}.
 
 use std::sync::Arc;
 
@@ -1884,14 +1851,14 @@ use std::sync::Arc;
 use rstom::network::packet::packet::Packet;
 use rstom::network::packet::serializer::{{PacketSerializer, PacketValue, downcast}};
 
-/// Java: the record's own canonical constructor signature.
+/// The wire fields of BPS packet `{pkt.name}`, in wire order.
 {derive}
 pub struct {name} {{
 {field_decls}
 }}
 
 {default_impl}impl {name} {{
-    /// The record's canonical constructor.
+    /// Takes the wire fields in order.
     #[must_use]
     pub fn new(
         {ctor}
@@ -1912,7 +1879,7 @@ impl Packet for {name} {{
     const CLASS_NAME: &'static str = "{java_class}";
 }}
 {marker_impl}
-/// Java: the hand-written `SERIALIZER` of `{name}`.
+/// The serializer of `{name}`, generated from the BPS schema.
 pub struct {ser};
 
 impl PacketSerializer for {ser} {{
@@ -2166,12 +2133,12 @@ def _parity_args(
     return lits, expected
 
 
-def _emit_roundtrip_test(
-    stem: str, name: str, ser: str, pkt: PacketDecl, resolved: ResolvedSchema
-) -> str:
-    """One test per packet, matching rstom's `*.tests.rs` contract."""
-    fields, _types = _packet_fields(pkt, resolved)
-    parity = _parity_args(pkt, fields, resolved)
+def _emit_roundtrip_test(unit: Unit, resolved: ResolvedSchema) -> str:
+    """One test per struct, matching rstom's `*.tests.rs` contract."""
+    cls = unit.cls
+    name = cls.name
+    fields, _types = _packet_fields(unit.pkt, resolved)
+    parity = _parity_args(unit.pkt, fields, resolved)
     if parity:
         literals, pin_bytes = parity
         ctor = f"{name}::new({', '.join(literals)})"
@@ -2199,7 +2166,7 @@ def _emit_roundtrip_test(
         use_block = ""
     return f'''//! Generated by `bps emit rust`: round-trip for `{name}`.
 
-use bps_rstom::packets::{stem}::{name};
+use bps_rstom::{cls.group}::{cls.package}::{cls.stem}::{name};
 
 use rstom::network::buffer::NetworkBuffer;
 use rstom::network::packet::serializer::PacketValue;
@@ -2220,58 +2187,64 @@ fn round_trips() {{
 '''
 
 
-def _emit_packets_list(resolved: ResolvedSchema) -> str:
-    imports = []
-    lines = []
-    for pkt in sorted(resolved.packets.values(), key=lambda p: p.name):
-        stem = _snake(pkt.name)
-        name = _struct_name(pkt)
-        imports.append(f"use super::{stem}::{name};")
-        lines.append(f"        ({name}::CLASS_NAME, {name}::serializer()),")
-    body = "\n".join(lines) or "        // no packets"
-    imp = "\n".join(imports)
-    return f'''//! Generated by `bps emit rust`: serializer registry for `ported::all()`.
+def _emit_package_mod(group: str, package: str, units: list[Unit]) -> str:
+    """A package's `mod.rs`: its modules, and the serializers it contributes to `ported`."""
+    classes = [u.cls for u in units]
+    mods = "\n".join(f"pub mod {c.stem};" for c in classes)
+    rows = "\n".join(
+        f"        ({c.stem}::{c.name}::CLASS_NAME, {c.stem}::{c.name}::serializer())," for c in classes
+    )
+    return f'''//! Generated by `bps emit rust`: port of `{PACKAGE_PREFIX}.{group}.{package}`.
 
-use rstom::network::packet::packet::Packet;
-use rstom::network::packet::serializer::Serializer;
+{mods}
 
-{imp}
-
+/// The serializers of this package, keyed by Java class name (consumed by
+/// [`crate::ported`]).
 #[must_use]
-pub fn list() -> Vec<(&'static str, Serializer)> {{
+pub fn list() -> Vec<(&'static str, rstom::network::packet::serializer::Serializer)> {{
+    use rstom::network::packet::packet::Packet as _;
     vec![
-{body}
+{rows}
     ]
 }}
 '''
 
 
-def _emit_registry_fn(
-    key: str, entries: list[tuple[RouteDecl, PacketDecl]], resolved: ResolvedSchema
-) -> str:
+def _emit_group_mod(group: str, packages: list[str]) -> str:
+    sender = "the client sends (serverbound)" if group == "client" else "the server sends (clientbound)"
+    mods = "\n".join(f"pub mod {p};" for p in packages)
+    return f"//! Generated by `bps emit rust`: the packets {sender}, by connection state.\n\n{mods}\n"
+
+
+def _registry_entries(units: list[Unit]) -> dict[str, list[tuple[RouteDecl, Unit]]]:
+    """The ten id tables, keyed `client_play`: each state's routes by id.
+
+    A table may be empty (the server never sends a handshake packet).
+    """
+    out: dict[str, list[tuple[RouteDecl, Unit]]] = {
+        f"{group}_{state}": [] for group in _GROUPS for state in _STATES
+    }
+    for unit in units:
+        for route in unit.routes:
+            out[f"{unit.cls.group}_{package_of(route.state)}"].append((route, unit))
+    return {key: _contiguous_registry_entries(entries) for key, entries in out.items()}
+
+
+def _emit_registry_fn(key: str, entries: list[tuple[RouteDecl, Unit]]) -> str:
     """`key` is e.g. `client_play` (group_state)."""
     group, state = key.split("_", 1)
-    direction = "serverbound" if group == "client" else "clientbound"
     fn = f"{group}_{state}_registry"
     static_name = f"{group.upper()}_{state.upper()}"
     conn_state = _connection_state_rust(state)
-    conn_side = _connection_side_rust(direction)
+    conn_side = _connection_side_rust("serverbound" if group == "client" else "clientbound")
     uses = sorted(
-        {
-            f"use crate::packets::{_snake(pkt.name)}::{_struct_name(pkt)};"
-            for _, pkt in entries
-        }
+        {f"use crate::{u.cls.group}::{u.cls.package}::{u.cls.stem}::{u.cls.name};" for _, u in entries}
     )
-    use_block = "\n".join(uses)
-    entry_lines = []
-    for _, pkt in entries:
-        name = _struct_name(pkt)
-        g, st, _ = _primary_route(pkt.name, resolved)
-        java = _java_class_name(pkt, g, st)
-        entry_lines.append(
-            f'                PacketEntry::ported::<{name}>("{java}", {name}::serializer()),'
-        )
-    entries_body = "\n".join(entry_lines)
+    entry_import = "use rstom::network::packet::serializer::PacketEntry;\n" if entries else ""
+    entry_lines = "\n".join(
+        f'                PacketEntry::ported::<{u.cls.name}>("{u.cls.java}", {u.cls.name}::serializer()),'
+        for _, u in entries
+    )
     return f'''//! Generated by `bps emit rust`: `{fn}`.
 
 use std::sync::OnceLock;
@@ -2279,9 +2252,8 @@ use std::sync::OnceLock;
 use super::resolved_registry;
 use rstom::network::connection_state::ConnectionState;
 use rstom::network::packet::packet_registry::{{ConnectionSide, PacketRegistry}};
-use rstom::network::packet::serializer::PacketEntry;
-
-{use_block}
+{entry_import}
+{chr(10).join(uses)}
 
 static {static_name}: OnceLock<PacketRegistry> = OnceLock::new();
 
@@ -2292,10 +2264,57 @@ pub fn {fn}() -> &'static PacketRegistry {{
             {conn_state},
             {conn_side},
             vec![
-{entries_body}
+{entry_lines}
             ],
         )
     }})
+}}
+'''
+
+
+def _emit_registry_tables_test(by_reg: dict[str, list[tuple[RouteDecl, Unit]]]) -> str:
+    """Every id table lists the classes Minestom registers there, in id order.
+
+    Building each registry also runs `PacketEntry::ported`'s class-name check,
+    which no other test reaches.
+    """
+    rows = []
+    arms = []
+    for side in ("client", "server"):
+        for state in _STATES:
+            names = ", ".join(f'"{u.cls.name}"' for _, u in by_reg[f"{side}_{state}"])
+            rows.append(f'    ("{side.upper()}", "{state.upper()}", &[{names}]),')
+            arms.append(
+                f'        ("{side.upper()}", "{state.upper()}") => '
+                f"packet_vanilla::{side}_{state}_registry(),"
+            )
+    return f'''//! Generated by `bps emit rust`: each id table lists the classes Minestom registers, in id order.
+
+use bps_rstom::PacketRegistry;
+use bps_rstom::packet_vanilla;
+
+/// `(side, state, simple class names in id order)`.
+const TABLES: &[(&str, &str, &[&str])] = &[
+{chr(10).join(rows)}
+];
+
+fn registry_for(side: &str, state: &str) -> &'static PacketRegistry {{
+    match (side, state) {{
+{chr(10).join(arms)}
+        (side, state) => panic!("unknown registry: {{side}} {{state}}"),
+    }}
+}}
+
+#[test]
+fn registry_tables_list_the_classes_in_id_order() {{
+    assert_eq!(TABLES.len(), 10);
+    for (side, state, want) in TABLES {{
+        let got: Vec<&str> = registry_for(side, state)
+            .iter()
+            .map(|info| info.simple_class_name())
+            .collect();
+        assert_eq!(&got, want, "{{side}}/{{state}}: packet order or membership drifted");
+    }}
 }}
 '''
 
@@ -2306,14 +2325,7 @@ use rstom::network::packet::packet_parser::PacketParser;
 use rstom::network::packet::packet_registry::{ConnectionSide, PacketRegistry};
 use rstom::network::packet::serializer::{PacketEntry, PacketValue};
 
-use crate::packets::{
-    configuration_acknowledged::ConfigurationAcknowledgedPacket,
-    finish_configuration::FinishConfigurationPacket,
-    handshake::HandshakePacket,
-    login_acknowledged::LoginAcknowledgedPacket,
-    login_finished::LoginFinishedPacket,
-    start_configuration::StartConfigurationPacket,
-};
+@TRANSITION_USES@
 
 pub(crate) fn resolved_registry(
     state: ConnectionState,
@@ -2336,19 +2348,19 @@ pub fn next_client_state(
     packet: &PacketValue,
     current_state: ConnectionState,
 ) -> Result<ConnectionState, PacketError> {
-    if let Some(handshake) = packet.downcast_ref::<HandshakePacket>() {
+    if let Some(handshake) = packet.downcast_ref::<ClientHandshakePacket>() {
         return Ok(match handshake.intent {
             1 => ConnectionState::Status,
             2 | 3 => ConnectionState::Login,
             _ => current_state,
         });
     }
-    if packet.downcast_ref::<LoginAcknowledgedPacket>().is_some()
-        || packet.downcast_ref::<ConfigurationAcknowledgedPacket>().is_some()
+    if packet.downcast_ref::<ClientLoginAcknowledgedPacket>().is_some()
+        || packet.downcast_ref::<ClientConfigurationAckPacket>().is_some()
     {
         return Ok(ConnectionState::Configuration);
     }
-    if packet.downcast_ref::<FinishConfigurationPacket>().is_some() {
+    if packet.downcast_ref::<ClientFinishConfigurationPacket>().is_some() {
         return Ok(ConnectionState::Play);
     }
     Ok(current_state)
@@ -2364,7 +2376,7 @@ pub fn next_server_state(
             "No server Handshake packet exists".to_string(),
         ));
     }
-    if packet.downcast_ref::<LoginFinishedPacket>().is_some()
+    if packet.downcast_ref::<LoginSuccessPacket>().is_some()
         || packet.downcast_ref::<StartConfigurationPacket>().is_some()
     {
         return Ok(ConnectionState::Configuration);
@@ -2419,14 +2431,19 @@ pub static CLIENT_PACKET_PARSER: ClientPacketParser = ClientPacketParser;
 pub static SERVER_PACKET_PARSER: ServerPacketParser = ServerPacketParser;
 '''
 
-_PORTED_RS = '''//! Generated by `bps emit rust`: ported serializer table.
+def _ported_rs(packages: list[tuple[str, str]]) -> str:
+    extends = "\n".join(f"    ported.extend(crate::{g}::{p}::list());" for g, p in packages)
+    return f'''//! Generated by `bps emit rust`: ported serializer table.
 
 use rstom::network::packet::serializer::Serializer;
 
+/// Every ported packet serializer, keyed by its Java class name.
 #[must_use]
-pub fn all() -> Vec<(&'static str, Serializer)> {
-    crate::packets::list::list()
-}
+pub fn all() -> Vec<(&'static str, Serializer)> {{
+    let mut ported = Vec::new();
+{extends}
+    ported
+}}
 '''
 
 # Self-delimiting payload frames. A registry-keyed payload (NBT, Slot, an id
@@ -2540,42 +2557,70 @@ pub fn slot_len(bytes: &[u8]) -> usize {
 '''
 
 
-def _parser_methods(by_reg: dict[str, list], group: str) -> str:
+_STATES = ("handshake", "status", "login", "configuration", "play")
+_GROUPS = ("client", "server")
+
+# The connection state machine matches on these Minestom classes, so a schema
+# that routes none of them cannot be emitted.
+_TRANSITIONS = (
+    "ClientHandshakePacket",
+    "ClientLoginAcknowledgedPacket",
+    "ClientConfigurationAckPacket",
+    "ClientFinishConfigurationPacket",
+    "FinishConfigurationPacket",
+    "LoginSuccessPacket",
+    "StartConfigurationPacket",
+)
+
+_LIB_RS = '''//! Generated by `bps emit rust`: packet payloads, `ported`, and `packet_vanilla`.
+//!
+//! The module tree, class names and registry functions of `rstom-packets`, with
+//! each payload's wire layout generated from the BPS schema instead of ported
+//! by hand. A packet's fields are the schema's, not the Java record's.
+
+pub mod client;
+pub mod frames;
+pub mod packet_vanilla;
+pub mod ported;
+pub mod server;
+
+pub use rstom::network::packet::{
+    packet::Packet,
+    packet_error::PacketError,
+    packet_registry::{ConnectionSide, PacketInfo, PacketRegistry},
+    serializer::{PacketEntry, PacketSerializer, PacketValue, Serializer, downcast},
+};
+'''
+
+
+def _parser_methods(group: str) -> str:
     """`PacketParser` methods for one side (`client` or `server`)."""
-    state_to_key = {
-        "handshake": f"{group}_handshaking",
-        "status": f"{group}_status",
-        "login": f"{group}_login",
-        "configuration": f"{group}_configuration",
-        "play": f"{group}_play",
-    }
-    lines: list[str] = []
-    for method, key in state_to_key.items():
-        if key not in by_reg:
-            lines.append(
-                f"    fn {method}(&self) -> &PacketRegistry {{\n"
-                f"        panic!(\"no registry for {key}\")\n"
-                f"    }}"
-            )
-        else:
-            lines.append(
-                f"    fn {method}(&self) -> &PacketRegistry {{\n"
-                f"        {key}_registry()\n"
-                f"    }}"
-            )
-    return "\n\n".join(lines)
-
-
-def _vanilla_mod_rs(by_reg: dict[str, list]) -> str:
-    reexport = "\n".join(
-        f"mod {k};\npub use {k}::{k}_registry;" for k in sorted(by_reg)
+    return "\n\n".join(
+        f"    fn {state}(&self) -> &PacketRegistry {{\n"
+        f"        {group}_{state}_registry()\n"
+        f"    }}"
+        for state in _STATES
     )
-    client_parser = _parser_methods(by_reg, "client")
-    server_parser = _parser_methods(by_reg, "server")
-    tail = _VANILLA_BODY.split("impl PacketParser for ClientPacketParser {", 1)[0]
+
+
+def _transition_uses(units: list[Unit]) -> str:
+    classes = {u.cls.name: u.cls for u in units}
+    uses = []
+    for name in _TRANSITIONS:
+        if name not in classes:
+            raise EmitError(f"the connection state machine needs {name}, which no route provides")
+        cls = classes[name]
+        uses.append(f"use crate::{cls.group}::{cls.package}::{cls.stem}::{cls.name};")
+    return "\n".join(sorted(uses))
+
+
+def _vanilla_mod_rs(registries: list[str], units: list[Unit]) -> str:
+    reexport = "\n".join(f"mod {k};\npub use {k}::{k}_registry;" for k in registries)
+    head = _VANILLA_BODY.split("impl PacketParser for ClientPacketParser {", 1)[0]
+    head = head.replace("@TRANSITION_USES@", _transition_uses(units))
     parsers = (
-        f"impl PacketParser for ClientPacketParser {{\n{client_parser}\n}}\n\n"
-        f"impl PacketParser for ServerPacketParser {{\n{server_parser}\n}}\n\n"
+        f"impl PacketParser for ClientPacketParser {{\n{_parser_methods('client')}\n}}\n\n"
+        f"impl PacketParser for ServerPacketParser {{\n{_parser_methods('server')}\n}}\n\n"
         "pub static CLIENT_PACKET_PARSER: ClientPacketParser = ClientPacketParser;\n"
         "pub static SERVER_PACKET_PARSER: ServerPacketParser = ServerPacketParser;\n"
     )
@@ -2583,116 +2628,90 @@ def _vanilla_mod_rs(by_reg: dict[str, list]) -> str:
         "//! Generated by `bps emit rust`: `PacketVanilla` id tables and parsers.\n\n"
         + reexport
         + "\n\n"
-        + tail
+        + head
         + parsers
     )
 
 
-def _emit_packet_vanilla(resolved: ResolvedSchema, vanilla_dir: Path) -> list[Path]:
-    written: list[Path] = []
-    by_reg = _routes_by_registry(resolved)
-    vanilla_dir.mkdir(parents=True, exist_ok=True)
-    for key, entries in sorted(by_reg.items()):
-        body = _emit_registry_fn(key, entries, resolved)
-        (vanilla_dir / f"{key}.rs").write_text(body, encoding="utf-8")
-        written.append(vanilla_dir / f"{key}.rs")
-    (vanilla_dir / "mod.rs").write_text(_vanilla_mod_rs(by_reg), encoding="utf-8")
-    written.append(vanilla_dir / "mod.rs")
-    return written
+def _is_generated(path: Path) -> bool:
+    """Whether the file's first line cites the emitter, which is what marks it generated."""
+    with path.open(encoding="utf-8") as f:
+        return "`bps emit rust`" in f.readline()
+
+
+def _drop_stale(out_dir: Path, written: set[Path]) -> None:
+    """The crate is generated: drop generated files an earlier emit left behind.
+
+    A file with no emitter marker is somebody's own and stays. Directories the
+    sweep empties go too, so the tree matches `lib.rs`.
+    """
+    for root in (out_dir / "src", out_dir / "tests"):
+        for path in root.rglob("*.rs"):
+            if path not in written and _is_generated(path):
+                path.unlink()
+    for directory in sorted((d for d in (out_dir / "src").rglob("*") if d.is_dir()), reverse=True):
+        if not any(directory.iterdir()):
+            directory.rmdir()
 
 
 def emit_rstom(
     resolved: ResolvedSchema,
     out_dir: Path,
+    classes: ClassTable,
     rstom_path: str = "../rstom",
 ) -> list[Path]:
     """Emit an rstom-compatible packet crate. Returns the emitted files.
+
+    The crate has `rstom-packets`' module tree: a struct for each Minestom class,
+    in `client/` (what the client sends) or `server/`, under the class's package.
+    `classes` is rstom's `packets_gen` schema, which names each route's class.
 
     `rstom_path` is the `path` dependency written into the crate's manifest;
     the deployment target (`../rstom/crates/bps_rstom`) resolves its sibling
     crate relatively, while a scratch emit can point at an absolute path.
     """
     reject_unlowered_scalars(resolved, {*WIRE_TYPES, *OPAQUE, *SELF_DELIMITING}, "rstom")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    units = build_units(resolved, classes)
     src = out_dir / "src"
     written: list[Path] = []
 
-    mod_lines = []
-    for pkt in sorted(resolved.packets.values(), key=lambda p: p.name):
-        stem = _snake(pkt.name)
-        (src / "packets").mkdir(parents=True, exist_ok=True)
-        body = _emit_packet(pkt, resolved)
-        (src / "packets" / f"{stem}.rs").write_text(body, encoding="utf-8")
-        mod_lines.append(f"pub mod {stem};")
-        written.append(src / "packets" / f"{stem}.rs")
+    def write(path: Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        written.append(path)
 
-    list_path = src / "packets" / "list.rs"
-    list_path.write_text(_emit_packets_list(resolved), encoding="utf-8")
-    written.append(list_path)
-    mod_lines.append("pub mod list;")
-
-    (src / "packets" / "mod.rs").write_text(
-        "//! Generated by `bps emit rust`: one module per declared packet.\n\n"
-        + "\n".join(mod_lines)
-        + "\n",
-        encoding="utf-8",
-    )
-    written.append(src / "packets" / "mod.rs")
-
-    for old in src.glob("packet_*.rs"):
-        old.unlink(missing_ok=True)
-
-    ported_path = src / "ported.rs"
-    ported_path.write_text(_PORTED_RS, encoding="utf-8")
-    written.append(ported_path)
-
-    vanilla_written = _emit_packet_vanilla(resolved, src / "packet_vanilla")
-    written.extend(vanilla_written)
-
-    tests = out_dir / "tests"
-    tests.mkdir(parents=True, exist_ok=True)
-    for pkt in sorted(resolved.packets.values(), key=lambda p: p.name):
-        name = _struct_name(pkt)
-        stem = _snake(pkt.name)
-        ser = name[: -len("Packet")] + "Serializer"
-        (tests / f"roundtrip_{stem}.rs").write_text(
-            _emit_roundtrip_test(stem, name, ser, pkt, resolved),
-            encoding="utf-8",
+    packages: dict[tuple[str, str], list[Unit]] = {}
+    for unit in units:
+        cls = unit.cls
+        packages.setdefault((cls.group, cls.package), []).append(unit)
+        write(src / cls.group / cls.package / f"{cls.stem}.rs", _emit_packet(unit, resolved))
+        write(
+            out_dir / "tests" / f"roundtrip_{cls.group}_{cls.package}_{cls.stem}.rs",
+            _emit_roundtrip_test(unit, resolved),
         )
-        written.append(tests / f"roundtrip_{stem}.rs")
+    for (group, package), members in packages.items():
+        write(src / group / package / "mod.rs", _emit_package_mod(group, package, members))
+    for group in _GROUPS:
+        write(src / f"{group}.rs", _emit_group_mod(group, sorted(p for g, p in packages if g == group)))
+    write(src / "ported.rs", _ported_rs(sorted(packages)))
 
-    (src / "lib.rs").write_text(
-        "//! Generated by `bps emit rust`: packet payloads, `ported`, and `packet_vanilla`.\n\n"
-        "pub mod frames;\n"
-        "pub mod packet_vanilla;\n"
-        "pub mod packets;\n"
-        "pub mod ported;\n",
-        encoding="utf-8",
-    )
-    written.append(src / "lib.rs")
-    frames_path = src / "frames.rs"
-    frames_path.write_text(_FRAMES_RS + _frames(resolved).walkers.source, encoding="utf-8")
-    written.append(frames_path)
+    by_reg = _registry_entries(units)
+    for key, entries in by_reg.items():
+        write(src / "packet_vanilla" / f"{key}.rs", _emit_registry_fn(key, entries))
+    write(src / "packet_vanilla" / "mod.rs", _vanilla_mod_rs(sorted(by_reg), units))
+    write(out_dir / "tests" / "registry_tables.rs", _emit_registry_tables_test(by_reg))
 
-    (out_dir / "Cargo.toml").write_text(
+    write(src / "lib.rs", _LIB_RS)
+    write(src / "frames.rs", _FRAMES_RS + _frames(resolved).walkers.source)
+    write(
+        out_dir / "Cargo.toml",
         '[package]\nname = "bps_rstom"\nversion = "0.1.0"\nedition = "2024"\n\n'
         "[dependencies]\n"
         f'rstom = {{ path = "{rstom_path}" }}\n\n'
         "[dev-dependencies]\n"
         f'rstom = {{ path = "{rstom_path}" }}\n',
-        encoding="utf-8",
     )
-    written.append(out_dir / "Cargo.toml")
-
-    # The crate is fully generated: drop files an earlier emit left behind that
-    # the current schema no longer declares, so the tree matches `lib.rs`.
-    for d, pattern in ((src / "packets", "*.rs"), (src / "packet_vanilla", "*.rs")):
-        for stale in d.glob(pattern):
-            if stale not in written:
-                stale.unlink()
-    for stale in tests.glob("roundtrip_*.rs"):
-        if stale not in written:
-            stale.unlink()
+    _drop_stale(out_dir, set(written))
 
     # Emitted code is stable but not canonical by construction (hand-rolled
     # string templates); rustfmt is the single source of truth for layout.

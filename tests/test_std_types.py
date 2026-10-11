@@ -15,7 +15,10 @@ from bps.emit_rstom import emit_rstom
 from bps.emit_rust import emit_rust
 from bps.errors import BpsError, DecodeError, ResolveError
 from bps.interp.engine import decode_packet, encode_packet
+from bps.load import load_schema
 from bps.parser import parse
+
+from tests.rstom_tables import PROBE_TABLE, probe_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -148,23 +151,27 @@ class EmitterScalarTest(unittest.TestCase):
     def test_rstom_emitter_rejects_unlowerable_scalar(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaisesRegex(BpsError, "u24be"):
-                emit_rstom(self._resolved(self.U24_PROBE), Path(td))
+                emit_rstom(self._resolved(self.U24_PROBE), Path(td), PROBE_TABLE)
 
     def test_a_scalar_reached_through_another_encoding_is_rejected(self) -> None:
         source = self.U24_PROBE.replace(
             "packet probe { x: u24be }",
             "encoding wrapper = { inner: u24be }\n    packet probe { w: wrapper }",
         )
-        for emit in (emit_rust, emit_rstom):
+        for emit, extra in ((emit_rust, ()), (emit_rstom, (PROBE_TABLE,))):
             with self.subTest(emitter=emit.__name__), tempfile.TemporaryDirectory() as td:
                 with self.assertRaisesRegex(BpsError, "u24be"):
-                    emit(self._resolved(source), Path(td))
+                    emit(self._resolved(source), Path(td), *extra)
 
     def test_rstom_keeps_std_scalar_default_arm_as_one_value(self) -> None:
-        source = "packet probe { kind: varint  value: match kind { 0 => i8, _ => varint } }"
+        source = probe_source(ROOT, "packet probe { kind: varint  value: match kind { 0 => i8, _ => varint } }")
         with tempfile.TemporaryDirectory() as td:
-            emit_rstom(self._resolved(source), Path(td))
-            text = (Path(td) / "src" / "packets" / "probe.rs").read_text(encoding="utf-8")
+            schema = Path(td) / "probe.bps"
+            schema.write_text(source, encoding="utf-8")
+            emit_rstom(analyze(load_schema([schema])), Path(td) / "crate", PROBE_TABLE)
+            text = (Path(td) / "crate" / "src" / "server" / "play" / "probe_packet.rs").read_text(
+                encoding="utf-8"
+            )
         self.assertNotIn("pub b0", text)
 
 
