@@ -100,7 +100,7 @@ file that declares packets.
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 92 tests, includes the cargo build of the rstom crate
+python -m unittest discover -s tests -t . -v     # 94 tests, includes the cargo build of the rstom crate
 ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file
 python -m bps.cli check $ROOT                    # parse + resolve + check
 python -m bps.cli routes $ROOT                   # routing table (261 routes)

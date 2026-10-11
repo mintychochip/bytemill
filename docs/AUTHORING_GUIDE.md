@@ -349,6 +349,11 @@ vanilla's wire format, follow vanilla and list the packet in `KNOWN_MISMATCHES` 
 `tests/test_java_ground_truth.py` with the reason. Packets without a recorded
 sample (96 of 232) are checked only against vanilla's source.
 
+The route table gets the same treatment: `tests/test_vanilla_routes.py` reads the
+packet order out of vanilla's `*Protocols.java` builder chains and requires the
+packet at every id to be the one vanilla registers there. The few names that differ
+(the wiki's `login_start` is vanilla's `hello`) are listed in `ALIASES` with the reason.
+
 ## 8. Adding a packet to an existing family
 
 1. Find the packet's section in the protocol's packet report and note the official
