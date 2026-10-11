@@ -387,14 +387,15 @@ packet update_advancements {
 // --- Entity metadata + equipment ---
 
 // Equipment: slot byte with the top bit marking "more entries follow", each
-// followed by a Slot. Slot payloads are registry-dependent, so each entry is
-// read as a raw frame.
+// followed by a Slot. Slot payloads stop at the v1 registry boundary
+// (component data beyond count/id/add/remove is not represented), so the
+// entry item is a v1 Slot frame.
 packet set_equipment {
     entity_id: varint
     entries_count: varint
     entries: {
         slot: u8
-        item: rest
+        item: slot
     }[] count = entries_count
 }
 
@@ -461,6 +462,10 @@ packet debug_event {
     payload:   rest
 }
 
+// The block-state properties are the one payload whose layout this schema
+// cannot transcribe: the value type is subscription-dependent and the wiki
+// documents no boundary, so it stays a `rest` marker. That is the only packet
+// without a pinned reference vector, and its test says so.
 packet debug_block_value {
     subscription_type: varint
     if subscription_type == 2 {

@@ -103,8 +103,8 @@ agree.
 and each emit drops files the current schema no longer declares, so the generated tree
 always matches its `lib.rs`. Every packet's `roundtrip_*.rs` pins the Rust encoder against
 the Python interpreter's bytes for the same synthetic value (`bps/synth.py`); the only
-exceptions are the two packets whose payload the v1 registry boundary stops at a bare `rest`
-marker, and they keep the encode/decode consistency check instead.
+exception is `debug_block_value`, whose block-state properties payload has no documented
+boundary and stays a bare `rest` marker, and it keeps the encode/decode consistency check.
 
 ## Docs
 
