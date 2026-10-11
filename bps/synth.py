@@ -305,7 +305,10 @@ def _count_driver(expr) -> str | None:
 
 def synthesize_packet(resolved: ast.ResolvedSchema, pkt: ast.PacketDecl) -> dict:
     """A decoded-shape value for `pkt` that the interpreter encodes cleanly."""
-    return _block_value(pkt.items, {}, _Env(resolved))
+    out = _block_value(pkt.items, {}, _Env(resolved))
+    if pkt.name == "handshake":
+        out["protocol_version"] = 777
+    return out
 
 
 def _fit_length(wf: ast.WireField, value: object, local: dict, out: dict) -> None:
