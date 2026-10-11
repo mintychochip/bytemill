@@ -13,9 +13,10 @@ contract `tools/packets_gen` emits:
   round-trips in Python emits a serializer that round-trips in Rust.
 * Each packet's `roundtrip_*.rs` pins the Rust encoder against the Python
   interpreter's bytes for the same synthetic value (`bps/synth.py`), except
-  where this emitter must frame a payload the reference does not (an unframed
-  opaque repeat element, a non-final `rest` field); those keep the
-  encode/decode consistency check and say so in the test.
+  the 24 packets that carry a registry-keyed payload or repeat element with no
+  declared length in a non-final position — this emitter must length-prefix
+  those to be self-delimiting, which the reference's concatenated payloads are
+  not — so those keep the encode/decode consistency check instead.
 
 Registry-keyed payloads (`slot`, `nbt`, `particle_data`, `id_or_payload`) are
 carried as the opaque byte frames the schema declares, which keeps the crate
@@ -203,6 +204,7 @@ def _expand_encoding(
     seen: set[str],
     guard: ast.Expr | None = None,
     field_types: dict[str, str] | None = None,
+    parent: str = "",
 ) -> bool:
     """Flatten a named encoding's own fields into the packet's field list.
 
@@ -225,7 +227,7 @@ def _expand_encoding(
         if i < len(enc.params):
             v = arg.value if arg.kind == "int" else 0
             bind[enc.params[i].name] = v
-    _flatten(enc.body.items, out, resolved, bind, guard, field_types or {})
+    _flatten(enc.body.items, out, resolved, bind, guard, field_types or {}, parent)
     return True
 
 
@@ -522,6 +524,7 @@ class PacketShape:
         count: str | None = None,
         element: list["PacketShape"] | None = None,
         guard: ast.Expr | None = None,
+        parent: str = "",
     ) -> None:
         self.ident = _ident(name)
         self.java = _java_name(name)
@@ -538,6 +541,10 @@ class PacketShape:
         self.repeat_mode = repeat_mode
         self.count = count
         self.element = element or []
+        # Dotted path of enclosing field names this field was flattened out of.
+        # The reference value nests those encodings under the field name, so a
+        # flattened field reads its value along this path, not at top level.
+        self.parent = parent
 
 
 def _repeat_shape(
@@ -546,6 +553,7 @@ def _repeat_shape(
     bind: dict[str, int] | None,
     guard: ast.Expr | None = None,
     field_types: dict[str, str] | None = None,
+    parent: str = "",
 ) -> "PacketShape":
     """A repeated field: a Vec whose elements are the flattened element type."""
     count = None
@@ -561,7 +569,9 @@ def _repeat_shape(
         # it here silently erased the field from the wire (`Vec<()>`).
         wire, rtype = _field_rust(wf.type_ref)
         element.append(
-            PacketShape("_item", wire, rtype, wire == "RAW_BYTES", wf.type_ref, bind)
+            PacketShape(
+                "_item", wire, rtype, wire == "RAW_BYTES", wf.type_ref, bind
+            )
         )
     return PacketShape(
         wf.name,
@@ -574,6 +584,7 @@ def _repeat_shape(
         count,
         element,
         guard=guard,
+        parent=parent,
     )
 
 
@@ -837,6 +848,31 @@ def _guard_holds_value(
     return 0
 
 
+
+def _merge_declared(
+    out: list["PacketShape"],
+    existing: "PacketShape",
+    guard: ast.Expr | None,
+    parent: str,
+) -> None:
+    """Reconcile a name declared twice in the same flattened scope.
+
+    A match arm and the packet's own body can both declare a field (a `trail`
+    particle's `x`/`y`/`z` and `level_particles`' coordinates). One struct
+    field serves both wire positions: it moves to the later declaration's
+    position and loses the guard, because the packet's own field is always
+    present. The arm's own position is then unrepresentable and simply not
+    written, which is what the reference does for every other particle.
+    """
+    if guard is None and not parent and existing.guard is not None:
+        out.remove(existing)
+        existing.guard = None
+        existing.parent = ""
+        out.append(existing)
+        return
+    existing.guard = _or_guard(existing.guard, guard)
+
+
 def _append_field(
     out: list[PacketShape],
     wf: ast.WireField,
@@ -844,34 +880,38 @@ def _append_field(
     bind: dict[str, int] | None,
     guard: ast.Expr | None,
     field_types: dict[str, str],
+    parent: str = "",
 ) -> None:
     if wf.repeat is not None:
-        out.append(_repeat_shape(wf, resolved, bind, guard, field_types))
+        out.append(_repeat_shape(wf, resolved, bind, guard, field_types, parent))
         return
     type_ref = wf.type_ref
     if isinstance(type_ref, ast.MatchType):
-        _flatten_match(type_ref, out, resolved, bind, guard, field_types)
+        _flatten_match(type_ref, out, resolved, bind, guard, field_types, parent)
         return
     if isinstance(type_ref, ast.BlockType):
-        _flatten(type_ref.items, out, resolved, bind, guard, field_types)
+        _flatten(type_ref.items, out, resolved, bind, guard, field_types, parent)
         return
     if not isinstance(type_ref, TypeRef):
         return
     if type_ref.name == "text_component":
-        wire, rtype = ("BYTE", "i8")
+        # An NBT text component, not a single byte: carry its encoded payload
+        # like every other registry-keyed payload (`nbt`, `slot`).
+        wire, rtype = "RAW_BYTES", "Vec<u8>"
         existing = next((f for f in out if f.ident == _ident(wf.name)), None)
         if existing is not None:
-            existing.guard = _or_guard(existing.guard, guard)
+            _merge_declared(out, existing, guard, parent)
             return
         out.append(
             PacketShape(
                 wf.name,
                 wire,
                 rtype,
-                False,
+                True,
                 type_ref,
                 bind,
                 guard=guard,
+                parent=parent,
             )
         )
         field_types[wf.name] = f"Option<{rtype}>" if guard is not None else rtype
@@ -879,13 +919,21 @@ def _append_field(
     if (
         type_ref.name not in WIRE_TYPES
         and type_ref.name not in OPAQUE
-        and _expand_encoding(type_ref, resolved, out, set(), guard, field_types)
+        and _expand_encoding(
+            type_ref,
+            resolved,
+            out,
+            set(),
+            guard,
+            field_types,
+            f"{parent}.{wf.name}" if parent else wf.name,
+        )
     ):
         return
     existing = next((f for f in out if f.ident == _ident(wf.name)), None)
     wire, rtype = _field_rust(type_ref)
     if existing is not None:
-        existing.guard = _or_guard(existing.guard, guard)
+        _merge_declared(out, existing, guard, parent)
         return
     out.append(
         PacketShape(
@@ -896,6 +944,7 @@ def _append_field(
             type_ref,
             bind,
             guard=guard,
+            parent=parent,
         )
     )
     field_types[wf.name] = f"Option<{rtype}>" if guard is not None else rtype
@@ -908,6 +957,7 @@ def _flatten_match(
     bind: dict[str, int] | None,
     parent_guard: ast.Expr | None,
     field_types: dict[str, str],
+    parent: str = "",
 ) -> None:
     tag = _match_tag_name(mt.tag_expr)
     explicit: list[int | str] = []
@@ -927,12 +977,12 @@ def _flatten_match(
         if arm.type_ref is None:
             continue
         if isinstance(arm.type_ref, ast.BlockType):
-            _flatten(arm.type_ref.items, out, resolved, bind, arm_guard, field_types)
+            _flatten(arm.type_ref.items, out, resolved, bind, arm_guard, field_types, parent)
         elif isinstance(arm.type_ref, TypeRef):
             if arm.type_ref.name in WIRE_TYPES or arm.type_ref.name in OPAQUE:
                 continue
             _expand_encoding(
-                arm.type_ref, resolved, out, set(), arm_guard, field_types
+                arm.type_ref, resolved, out, set(), arm_guard, field_types, parent
             )
     default = next((a for a in mt.arms if a.tag is None or a.tag == "_"), None)
     if default is None or default.type_ref is None:
@@ -967,23 +1017,24 @@ def _flatten(
     bind: dict[str, int] | None = None,
     parent_guard: ast.Expr | None = None,
     field_types: dict[str, str] | None = None,
+    parent: str = "",
 ) -> None:
     """Flatten a packet body into wire-order fields with conditional guards."""
     field_types = field_types if field_types is not None else {}
     for item in items:
         if item.kind == "group":
             guard = _and_guard(parent_guard, item.group_if)
-            _flatten(item.group_items, out, resolved, bind, guard, field_types)
+            _flatten(item.group_items, out, resolved, bind, guard, field_types, parent)
             continue
         if item.kind == "spread" and resolved is not None:
             enc = resolved.encodings.get(item.spread_name)
             if enc is not None and isinstance(enc.body, ast.BlockType):
-                _flatten(enc.body.items, out, resolved, bind, parent_guard, field_types)
+                _flatten(enc.body.items, out, resolved, bind, parent_guard, field_types, parent)
             continue
         if item.kind == "field" and item.wire is not None:
             wf = item.wire
             guard = _and_guard(parent_guard, wf.if_expr)
-            _append_field(out, wf, resolved, bind, guard, field_types)
+            _append_field(out, wf, resolved, bind, guard, field_types, parent)
         elif item.kind == "computed":
             continue
 
@@ -1085,10 +1136,21 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
     if struct_lines and struct_lines[-1].endswith(","):
         struct_lines[-1] = struct_lines[-1][:-1]
 
-    def _rest_mode(f: PacketShape, index: int) -> str:
-        if f.ref is not None and f.ref.name == "rest":
-            return "rest" if index == len(fields) - 1 else "prefixed"
-        return "plain"
+    def _payload_mode(f: PacketShape, index: int) -> str:
+        """How an unframed payload field is carried on the wire.
+
+        A `rest` field and an opaque payload with no declared length are both
+        read-to-end-of-buffer on the wire, which is only correct for the last
+        field; anything before it is length-prefixed so it is self-delimiting.
+        The reference concatenates, so a prefixed payload keeps the
+        consistency check but no byte-for-byte pin.
+        """
+        unframed = (f.ref is not None and f.ref.name == "rest") or (
+            f.opaque and _opaque_len(f.ref, resolved, f.params) is None
+        )
+        if not unframed:
+            return "plain"
+        return "to_end" if index == len(fields) - 1 else "prefixed"
 
     writes = []
     for i, f in enumerate(fields):
@@ -1105,7 +1167,7 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
                     _repeat_write(f, resolved, top_fields=fields, optional_vec=False)
                 )
             continue
-        if _rest_mode(f, i) == "prefixed":
+        if _payload_mode(f, i) == "prefixed":
             body = (
                 f"            let slice = value.{f.ident}.as_slice();\n"
                 f"            buffer.write(VAR_INT, slice.len() as i32);\n"
@@ -1159,7 +1221,7 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
                 reads.append(_repeat_read(f, resolved, top_fields=fields))
             read_types[f.ident] = f"Vec<{f.rtype}>"
             continue
-        if _rest_mode(f, i) == "prefixed":
+        if _payload_mode(f, i) == "prefixed":
             if f.guard is not None:
                 cond = _rust_cond(f.guard, read_types, "read")
                 reads.append(
@@ -1223,7 +1285,7 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
         for w in (collected | {"VAR_INT", "RAW_BYTES", "FIXED_BYTES"})
         if re.search(rf"\b{w}\b", body_text)
     )
-    if any(_rest_mode(f, i) == "prefixed" for i, f in enumerate(fields)):
+    if any(_payload_mode(f, i) == "prefixed" for i, f in enumerate(fields)):
         used_wires = sorted(set(used_wires) | {"VAR_INT"})
     imports = ""
     if used_wires:
@@ -1480,7 +1542,7 @@ def _rust_inner(
             elif isinstance(item, dict):
                 lits = []
                 for e in f.element:
-                    ev = item.get(e.ident, item.get(e.ident.rstrip("_")))
+                    ev = _py_field_value(e, item)
                     # A tuple slot is never optional, so a guarded element field
                     # must carry its value or the packet has no pinned vector.
                     if e.guard is not None and ev is None:
@@ -1544,6 +1606,14 @@ def _rust_inner(
 
 
 def _py_field_value(f: "PacketShape", value: dict) -> object:
+    """The reference value for a field, following its flattened parent path."""
+    if f.parent:
+        current: object = value
+        for key in f.parent.split("."):
+            if not isinstance(current, dict) or key not in current:
+                return None
+            current = current[key]
+        value = current if isinstance(current, dict) else {}
     for key in (f.ident, f.ident.rstrip("_")):
         if key in value:
             return value[key]
@@ -1562,17 +1632,27 @@ def _parity_args(
     value cannot be rendered; the caller then falls back to a default-value
     self-roundtrip rather than failing the emit.
     """
+    fields, field_types = _packet_fields(pkt, resolved)
+
+    def _payload_mode(f, index):
+        unframed = (f.ref is not None and f.ref.name == "rest") or (
+            f.opaque and _opaque_len(f.ref, resolved, f.params) is None
+        )
+        if not unframed:
+            return "plain"
+        return "to_end" if index == len(fields) - 1 else "prefixed"
+
     try:
         # This emitter frames a payload two ways the reference does not: an
-        # unframed opaque repeat element and a non-final `rest` field are both
-        # length-prefixed (the only self-delimiting option available), so those
-        # packets keep the consistency check but not a byte-for-byte pin.
+        # unframed opaque repeat element and a non-final unframed payload field
+        # are both length-prefixed (the only self-delimiting option available),
+        # so those packets keep the consistency check but no byte-for-byte pin.
         for i, f in enumerate(fields):
             if f.repeat_mode is not None and any(
                 _elem_needs_prefix(e, resolved) for e in f.element
             ):
                 return None
-            if f.ref is not None and f.ref.name == "rest" and i != len(fields) - 1:
+            if _payload_mode(f, i) == "prefixed":
                 return None
         py = synthesize_packet(resolved, pkt)
         expected = encode_packet(resolved, pkt.name, py)

@@ -121,7 +121,7 @@ class EmitRstomTest(unittest.TestCase):
             )
             self.assertGreaterEqual(
                 pinned,
-                180,
+                200,
                 msg=f"only {pinned} of {len(test_files)} packets pin reference bytes",
             )
 
