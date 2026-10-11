@@ -79,9 +79,11 @@ each shared name lives and which tool behaviors still depend on a std name.
 
 Each packet file imports `std/integers.bps`, `std/varint.bps` and `minecraft_core.bps`.
 
-**231 packets, 261 routes, 59 encodings, zero `body: rest` stubs.** Every packet carries its
-transcribed field layout; registry-keyed payloads (component data, recipe displays, chunk data)
-stop at a self-delimiting boundary via `id_or_payload`, `id_set`, `slot`, `particle_data`.
+**231 packets, 261 routes, 69 encodings, zero `body: rest` stubs.** Every packet carries its
+transcribed field layout. Registries vanilla enumerates (recipe and slot displays, particles,
+position sources, chat types, number formats) are modeled in full; open ones (data-component
+patches, command argument properties, chunk data) stop at a self-delimiting boundary via
+`id_or_payload`, `slot`, `item_stack_template`.
 
 Regenerate the route table:
 
@@ -98,13 +100,14 @@ file that declares packets.
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 62 tests, includes cargo differential
+python -m unittest discover -s tests -t . -v     # 75 tests, includes cargo differential
 ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file
 python -m bps.cli check $ROOT                    # parse + resolve + check
 python -m bps.cli routes $ROOT                   # routing table (261 routes)
 python -m bps.cli dump-json $ROOT                # schema.json
 python -m bps.cli emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
 python -m bps.cli emit rstom $ROOT --out ../rstom/crates/bps_rstom  # rstom `PacketSerializer` crate
+python scripts/java_probe_samples.py             # packets whose layout disagrees with real Minestom bytes
 ```
 
 Decode a handshake **frame** (hex):
@@ -137,6 +140,13 @@ always matches its `lib.rs`. Every packet's `roundtrip_*.rs` pins the Rust encod
 the Python interpreter's bytes for the same synthetic value (`bps/synth.py`); the only
 exception is `debug_block_value`, whose block-state properties payload has no documented
 boundary and stays a bare `rest` marker, and it keeps the encode/decode consistency check.
+
+A payload with no length prefix (a recipe display, a particle, an advancement) is carried
+as raw bytes, so a reader has to scan the structure to find its end. `src/frames.rs` holds
+those scanners: NBT and slots are hand-written, every other one is compiled from its own
+encoding (`bps/frames_gen.py`) and checked against the interpreter on random valid payloads
+(`tests/test_frames_gen.py`). The generated struct has one namespace per packet, so using
+the same encoding twice in one packet is an `EmitError`; give the fields distinct names.
 
 ## Docs
 

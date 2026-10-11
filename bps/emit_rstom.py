@@ -30,9 +30,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from bps import ast
+from bps import ast, frames_gen
 from bps.analyze import reject_unlowered_scalars
 from bps.ast import BlockItem, PacketDecl, ResolvedSchema, RouteDecl, TypeRef
+from bps.errors import EmitError
 from bps.interp.engine import encode_packet
 from bps.synth import synthesize_packet
 
@@ -228,51 +229,104 @@ def _expand_encoding(
 
 
 # Payload types whose on-wire frame is self-delimiting: a reader scans the
-# structure instead of consuming the buffer. Each maps to the scanner in
-# `frames.rs` that measures one payload.
+# structure instead of consuming the buffer. Each maps to the hand-written
+# scanner in `frames.rs` that measures one payload: NBT and slots, whose layouts
+# the schema does not describe field by field. Every other framed payload gets a
+# scanner compiled from its own encoding (see `_Frames`).
 SELF_DELIMITING: dict[str, str] = {
     "text_component": "nbt_tag_len",
-    "nbt": "nbt_compound_len",
+    "nbt": "nbt_tag_len",
     "slot": "slot_len",
     "hashed_slot": "hashed_slot_len",
-    "id_set": "id_set_len",
     "id_or_payload": "id_or_payload_len",
-    "slot_display": "id_or_payload_len",
-    "recipe_display": "id_or_payload_len",
 }
 
-# The smallest self-delimiting payload of each kind, used as a field's default:
-# an empty buffer has no payload to scan, and a zero-length frame is not a
-# valid instance of any of these types.
+# The smallest self-delimiting payload of each hand-scanned kind, used as a
+# field's default: an empty buffer has no payload to scan, and a zero-length
+# frame is not a valid instance of any of these types.
 SELF_DELIMITING_DEFAULT: dict[str, bytes] = {
-    # TAG_END: an NBT body with no content.
+    # TAG_End: a null tag, id 0 with no payload.
     "text_component": b"\x00",
     "nbt": b"\x00",
     # item_count = 0.
     "slot": b"\x00",
     # has_item = false.
     "hashed_slot": b"\x00",
-    # type = 0, then an empty name.
-    "id_set": b"\x00\x00\x00",
     # a registry id (1) with no inline body.
     "id_or_payload": b"\x01",
-    "slot_display": b"\x01",
-    "recipe_display": b"\x01",
 }
 
+# Encodings carried as one frame wherever they appear, never flattened into
+# packet fields: an id set is a tag name or a list of ids, a recipe display a
+# tagged union of displays.
+GENERATED_FRAMES = frozenset({"id_set", "ingredient", "recipe_display"})
 
-def _frame_walker(f: "PacketShape") -> str | None:
+
+class _Frames:
+    """The frame walkers one emit compiles from the schema's own encodings.
+
+    An encoding needs one when it is carried as a raw frame whose end only a
+    scan can find: a recursive encoding (it cannot be flattened into fields), one
+    of `GENERATED_FRAMES`, or one used inside a repeat element (elements are not
+    flattened either).
+    """
+
+    def __init__(self, resolved: ResolvedSchema) -> None:
+        lowered = {*WIRE_TYPES, *OPAQUE, *SELF_DELIMITING}
+        recursive = frames_gen.recursive_encodings(resolved)
+        self.framed = frozenset((GENERATED_FRAMES | recursive) & resolved.encodings.keys())
+        roots = sorted((frames_gen.element_encodings(resolved) | self.framed) - lowered)
+        self.walkers = frames_gen.generate(resolved, roots, SELF_DELIMITING)
+        broken = sorted(n for n in self.framed - lowered if n in self.walkers.unsupported)
+        if broken:
+            raise EmitError(
+                "no frame walker can be compiled for "
+                + ", ".join(f"{n} ({self.walkers.unsupported[n]})" for n in broken)
+            )
+        self.defaults: dict[str, bytes | None] = {}
+
+
+def _frames(resolved: ResolvedSchema) -> _Frames:
+    plan = getattr(resolved, "_bps_frames", None)
+    if plan is None:
+        plan = _Frames(resolved)
+        resolved._bps_frames = plan  # type: ignore[attr-defined]
+    return plan
+
+
+def _frame_walker(f: "PacketShape", resolved: ResolvedSchema | None) -> str | None:
     """The scanner for a self-delimiting payload field, if it is one."""
     if f.ref is None or not f.opaque:
         return None
-    return SELF_DELIMITING.get(f.ref.name)
+    hand = SELF_DELIMITING.get(f.ref.name)
+    if hand is not None or resolved is None:
+        return hand
+    return _frames(resolved).walkers.names.get(f.ref.name)
+
+
+def _frame_default(name: str, resolved: ResolvedSchema | None) -> bytes | None:
+    """The smallest valid payload of a self-delimiting kind, for a field's default."""
+    hand = SELF_DELIMITING_DEFAULT.get(name)
+    if hand is not None or resolved is None:
+        return hand
+    plan = _frames(resolved)
+    if name not in plan.walkers.names:
+        return None
+    if name not in plan.defaults:
+        from bps.synth import _Env, _value_for
+
+        ref = TypeRef(name)
+        plan.defaults[name] = _encode_bare(ref, _value_for(ref, {}, _Env(resolved)), resolved, {})
+    return plan.defaults[name]
 
 
 def _elem_frame_mode(e: "PacketShape", resolved: ResolvedSchema) -> str:
     """How one repeat element's payload is framed: prefixed or self-delimiting."""
-    walker = _frame_walker(e)
+    walker = _frame_walker(e, resolved)
     if walker:
         return walker
+    if _len_field(e):
+        return "len_field"
     if _opaque_len(e.ref, resolved, e.params) is None and (
         e.opaque or e.wire == "RAW_BYTES"
     ):
@@ -287,6 +341,16 @@ def _len_field(f: "PacketShape") -> str | None:
         return None
     arg = ref.args[0]
     return arg.name if arg.kind == "ident" else None
+
+
+def _len_value(f: "PacketShape", types: dict[str, str]) -> str:
+    """The Rust expression for the length a `bytes(<ident>)` payload reads.
+
+    A length prefix inside a conditional block is an `Option`; the payload shares
+    that block's condition, so it is present whenever the payload is read.
+    """
+    ident = _ident(_len_field(f) or "")
+    return f"{ident}.unwrap_or(0)" if types.get(ident, "").startswith("Option<") else ident
 
 
 def _elem_needs_prefix(e: "PacketShape", resolved: ResolvedSchema) -> bool:
@@ -313,6 +377,16 @@ def _prefix_read(ident: str, indent: str) -> list[str]:
         f"{indent}let {ident} = {{",
         f"{indent}    let len = buffer.read(VAR_INT) as usize;",
         f"{indent}    if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len as i32)) }}",
+        f"{indent}}};",
+    ]
+
+
+def _len_read(ident: str, length: str, indent: str) -> list[str]:
+    """Read a payload whose length an earlier field declared."""
+    return [
+        f"{indent}let {ident} = {{",
+        f"{indent}    let n = {length} as usize;",
+        f"{indent}    if n == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(n as i32)) }}",
         f"{indent}}};",
     ]
 
@@ -491,6 +565,8 @@ def _elem_reads(
         mode = _elem_frame_mode(e, resolved)
         if mode == "prefix":
             body = _prefix_read(e.ident, "                ")
+        elif mode == "len_field":
+            body = _len_read(e.ident, _len_value(e, types), "                ")
         elif mode != "plain":
             body = _scan_read(e.ident, mode, "                ")
         else:
@@ -1137,6 +1213,20 @@ def _guard_holds_value(
 
 
 
+def _declared_twice(ident: str, first: str, second: str) -> EmitError:
+    """The generated struct has one namespace per packet; a clash cannot be merged."""
+    if first == second:
+        return EmitError(
+            f"repeated field {ident!r} is declared more than once in one scope; "
+            "declare it once under a combined condition"
+        )
+    return EmitError(
+        f"field {ident!r} is declared by both {first or 'the packet'!r} and "
+        f"{second or 'the packet'!r}; the generated struct has one namespace per "
+        "packet, so give them distinct names"
+    )
+
+
 def _merge_declared(
     out: list["PacketShape"],
     existing: "PacketShape",
@@ -1152,6 +1242,8 @@ def _merge_declared(
     present. The arm's own position is then unrepresentable and simply not
     written, which is what the reference does for every other particle.
     """
+    if existing.parent and parent and existing.parent != parent:
+        raise _declared_twice(existing.ident, existing.parent, parent)
     if guard is None and not parent and existing.guard is not None:
         out.remove(existing)
         existing.guard = None
@@ -1172,7 +1264,11 @@ def _append_field(
     expand_payloads: bool = True,
 ) -> None:
     if wf.repeat is not None:
-        out.append(_repeat_shape(wf, resolved, bind, guard, field_types, parent))
+        shape = _repeat_shape(wf, resolved, bind, guard, field_types, parent)
+        clash = next((f for f in out if f.ident == shape.ident), None)
+        if clash is not None:
+            raise _declared_twice(clash.ident, clash.parent, parent)
+        out.append(shape)
         return
     type_ref = wf.type_ref
     if isinstance(type_ref, ast.MatchType):
@@ -1208,6 +1304,7 @@ def _append_field(
     framed = (
         type_ref.name in OPAQUE
         or SELF_DELIMITING.get(type_ref.name) is not None
+        or (resolved is not None and type_ref.name in _frames(resolved).framed)
         or (resolved is not None and _opaque_len(type_ref, resolved, bind) is not None)
     )
     if (
@@ -1447,7 +1544,10 @@ def _packet_fields(
     """The packet's flattened fields, plus the Rust type each name maps to."""
     fields: list[PacketShape] = []
     flatten_types: dict[str, str] = {}
-    _flatten(pkt.items, fields, resolved, None, None, flatten_types)
+    try:
+        _flatten(pkt.items, fields, resolved, None, None, flatten_types)
+    except EmitError as err:
+        raise EmitError(f"packet {pkt.name!r}: {err}") from None
     field_types: dict[str, str] = dict(flatten_types)
     for f in fields:
         base = f"Vec<{f.rtype}>" if f.repeat_mode is not None else f.rtype
@@ -1481,7 +1581,7 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
         length-prefixed, which the reference's concatenated payloads are not,
         so it keeps the consistency check but no byte-for-byte pin.
         """
-        if _frame_walker(f):
+        if _frame_walker(f, resolved):
             return "scan"
         if _len_field(f):
             return "len_field"
@@ -1579,12 +1679,7 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
             continue
         length_field = _len_field(f)
         if length_field:
-            body = (
-                f"            let {f.ident} = {{\n"
-                f"                let n = {_ident(length_field)} as usize;\n"
-                f"                if n == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(n as i32)) }}\n"
-                f"            }};"
-            )
+            body = "\n".join(_len_read(f.ident, _len_value(f, read_types), "            "))
             if f.guard is not None:
                 cond = _rust_cond(f.guard, read_types, "read")
                 reads.append(
@@ -1596,7 +1691,7 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
                 reads.append(body)
                 read_types[f.ident] = f.rtype
             continue
-        walker = _frame_walker(f)
+        walker = _frame_walker(f, resolved)
         if walker and _payload_mode(f, i) == "scan":
             if f.guard is not None:
                 cond = _rust_cond(f.guard, read_types, "read")
@@ -1709,8 +1804,8 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
         elif f.opaque or frame:
             declared = _opaque_len(f.ref, resolved, f.params)
             self_delim = (
-                SELF_DELIMITING_DEFAULT.get(f.ref.name)
-                if f.ref is not None and _frame_walker(f)
+                _frame_default(f.ref.name, resolved)
+                if f.ref is not None and _frame_walker(f, resolved)
                 else None
             )
             if declared:
@@ -2033,7 +2128,7 @@ def _parity_args(
     fields, field_types = _packet_fields(pkt, resolved)
 
     def _payload_mode(f, index):
-        if _frame_walker(f):
+        if _frame_walker(f, resolved):
             return "scan"
         if _len_field(f):
             return "len_field"
@@ -2418,30 +2513,13 @@ fn skip_nbt_body(tag: u8, bytes: &[u8], pos: &mut usize, depth: u32) -> Option<(
     (*pos <= bytes.len()).then_some(())
 }
 
-/// Length of one tag-id-prefixed NBT payload (`text_component`).
+/// Length of one tag-id-prefixed NBT payload (`nbt`, `text_component`).
 #[must_use]
 pub fn nbt_tag_len(bytes: &[u8]) -> usize {
     let tag = *bytes.first().unwrap_or(&0);
     let mut pos = 1usize;
     if skip_nbt_body(tag, bytes, &mut pos, 0).is_none() {
         return bytes.len();
-    }
-    pos.min(bytes.len())
-}
-
-/// Length of one nameless NBT compound (`nbt`): entries until TAG_END.
-#[must_use]
-pub fn nbt_compound_len(bytes: &[u8]) -> usize {
-    let mut pos = 0usize;
-    loop {
-        let entry_type = *bytes.get(pos).unwrap_or(&0);
-        pos += 1;
-        if entry_type == 0 {
-            break;
-        }
-        if skip_u16(bytes, &mut pos).is_none() || skip_nbt_body(entry_type, bytes, &mut pos, 0).is_none() {
-            return bytes.len();
-        }
     }
     pos.min(bytes.len())
 }
@@ -2482,24 +2560,6 @@ pub fn id_or_payload_len(bytes: &[u8]) -> usize {
         return bytes.len();
     }
     id_len.min(bytes.len())
-}
-
-/// Length of one registry id set payload.
-#[must_use]
-pub fn id_set_len(bytes: &[u8]) -> usize {
-    let mut pos = varint_len(bytes).unwrap_or(bytes.len());
-    let tag_type = varint_value(bytes).unwrap_or(0);
-    if tag_type == 0 {
-        if skip_u16(bytes, &mut pos).is_none() {
-            return bytes.len();
-        }
-    } else {
-        for _ in 0..tag_type.saturating_sub(1) {
-            let n = varint_len(bytes.get(pos..).unwrap_or(&[])).unwrap_or(0);
-            pos += n;
-        }
-    }
-    pos.min(bytes.len())
 }
 '''
 
@@ -2635,7 +2695,7 @@ def emit_rstom(
     )
     written.append(src / "lib.rs")
     frames_path = src / "frames.rs"
-    frames_path.write_text(_FRAMES_RS, encoding="utf-8")
+    frames_path.write_text(_FRAMES_RS + _frames(resolved).walkers.source, encoding="utf-8")
     written.append(frames_path)
 
     (out_dir / "Cargo.toml").write_text(

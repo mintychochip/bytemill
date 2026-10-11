@@ -8,7 +8,7 @@ import "minecraft_core.bps"
 // --- Login (clientbound) ---
 
 packet login_disconnect {
-    reason: text_component
+    reason: string(262144)
 }
 
 packet hello {
@@ -80,8 +80,8 @@ packet transfer {
 }
 
 packet resource_pack_pop {
-    has_uuid: varint
-    if has_uuid != 0 {
+    has_uuid: boolean
+    if has_uuid {
         uuid: uuid
     }
 }
@@ -91,8 +91,8 @@ packet resource_pack_push {
     url:      string(32767)
     hash:     string(40)
     forced:   boolean
-    has_prompt: varint
-    if has_prompt != 0 {
+    has_prompt: boolean
+    if has_prompt {
         prompt: text_component
     }
 }
@@ -123,8 +123,8 @@ packet client_information {
 
 packet cookie_response {
     key: identifier
-    has_payload: varint
-    if has_payload != 0 {
+    has_payload: boolean
+    if has_payload {
         length: varint
         payload: i8[] count = length
     }

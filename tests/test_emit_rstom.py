@@ -9,7 +9,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from bps.analyze import analyze
 from bps.emit_rstom import _routes_by_registry, emit_rstom
+from bps.errors import EmitError
+from bps.parser import parse
 
 from tests.test_varint import load_minecraft
 
@@ -124,6 +127,33 @@ class EmitRstomTest(unittest.TestCase):
                 229,
                 msg=f"only {pinned} of {len(test_files)} packets pin reference bytes",
             )
+
+    def test_an_encoding_reused_in_one_packet_is_rejected(self) -> None:
+        """The generated struct has one namespace per packet.
+
+        Two uses of an encoding put the same field names in it twice. Merging
+        them would drop the second use from the wire silently, so the emit must
+        refuse it and ask for distinct names.
+        """
+        std = "".join(
+            (ROOT / "schemas" / "std" / f"{name}.bps").read_text(encoding="utf-8")
+            for name in ("integers", "varint")
+        )
+        resolved = analyze(
+            parse(
+                std
+                + """
+                encoding pair = {
+                    n: varint
+                    items: varint[] count = n
+                }
+                packet probe { first: pair  second: pair }
+                """
+            )
+        )
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaisesRegex(EmitError, "'n'.*first.*second"):
+                emit_rstom(resolved, Path(td))
 
 
 if __name__ == "__main__":

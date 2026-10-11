@@ -59,8 +59,8 @@ packet chat {
     message: string(256)
     timestamp: i64be
     salt: i64be
-    signature_flag: varint
-    if signature_flag != 0 {
+    signature_flag: boolean
+    if signature_flag {
         signature: bytes(256)
     }
     message_count: varint
@@ -134,8 +134,8 @@ packet edit_book {
     slot: varint
     entries_count: varint
     entries:       string(1024)[] count = entries_count
-    title_flag: varint
-    if title_flag != 0 {
+    title_flag: boolean
+    if title_flag {
         title: string(32)
     }
 }
@@ -264,12 +264,12 @@ packet select_trade {
 }
 
 packet set_beacon {
-    primary_effect_flag: varint
-    if primary_effect_flag != 0 {
+    primary_effect_flag: boolean
+    if primary_effect_flag {
         primary_effect: varint
     }
-    secondary_effect_flag: varint
-    if secondary_effect_flag != 0 {
+    secondary_effect_flag: boolean
+    if secondary_effect_flag {
         secondary_effect: varint
     }
 }
@@ -360,8 +360,8 @@ packet teleport_to_entity {
 packet test_instance_block_action {
     position: position
     action:   varint
-    test_flag: varint
-    if test_flag != 0 {
+    test_flag: boolean
+    if test_flag {
         test: identifier
     }
     size_x:          varint
@@ -370,8 +370,8 @@ packet test_instance_block_action {
     rotation:        varint
     ignore_entities: boolean
     status:          varint
-    error_message_flag: varint
-    if error_message_flag != 0 {
+    error_message_flag: boolean
+    if error_message_flag {
         error_message: text_component
     }
 }

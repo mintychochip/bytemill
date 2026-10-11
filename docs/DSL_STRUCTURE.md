@@ -113,7 +113,7 @@ encoding nbt_payload = {
     value: match tag_type {
         9  => nbt_list_body
         10 => nbt_compound_body
-        _  => nbt_nothing
+        0  => nbt_nothing
     }
 }
 ```

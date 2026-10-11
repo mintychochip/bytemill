@@ -39,7 +39,7 @@ _PRIM: dict[str, object] = {
     "identifier": "minecraft:stone",
     "uuid": {"msb": 1, "lsb": 2},
     "position": {"raw": 0x4607632C15B4833F},
-    "nbt": {"entries": []},
+    "nbt": {"tag_type": 0, "value": {}},
     "text_component": {"tag_type": 0, "value": {}},
     "nbt_string": "abc",
     "slot": {"item_count": 0},
@@ -74,8 +74,16 @@ _PRIM: dict[str, object] = {
     },
     "particle_data": {"particle_type": 300, "value": {}},
     "id_or_payload": {"id": 1},
-    "slot_display": {"id": 1},
-    "recipe_display": {"id": 1},
+    # An empty slot display, and a stonecutter recipe display of three empty ones.
+    "slot_display": {"type": 0, "value": {}},
+    "recipe_display": {
+        "type": 3,
+        "value": {
+            "ingredient": {"type": 0, "value": {}},
+            "result": {"type": 0, "value": {}},
+            "crafting_station": {"type": 0, "value": {}},
+        },
+    },
     "id_or_nbt": {"id": 1},
     "id_set": {"type": 2, "ids": [300]},
     "block_state": {"block_state": 300},
@@ -85,13 +93,9 @@ _PRIM: dict[str, object] = {
     "dust_color": {"color": 300},
     "dust_color_scale": {"color": 300, "scale": 1.5},
     "dust_color_transition": {"from_color": 300, "to_color": 300, "scale": 1.5},
+    "spell_particle": {"color": 300, "power": 1.5},
     "sculk_charge_roll": {"roll": 1.5},
     "shriek_delay": {"delay": 300},
-    "vibration_source": {
-        "block_position": {"raw": 0x4607632C15B4833F},
-        "entity_id": 300,
-        "entity_eye_height": 1.5,
-    },
     "trail_data": {"x": 2.25, "y": 2.25, "z": 2.25, "color": 300, "duration": 300},
 }
 
@@ -204,6 +208,7 @@ def _block_value_shared(items: tuple[ast.BlockItem, ...], local: dict, scope: _E
         )
         out[wf.name] = v
         local[wf.name] = v
+        _fit_length(wf, v, local, out)
         if wf.repeat is not None and wf.repeat.mode == "count":
             driver = _count_driver(wf.repeat.expr)
             if driver is not None and driver != wf.name:
@@ -263,6 +268,7 @@ def _block_value(items: tuple[ast.BlockItem, ...], env: dict, scope: _Env) -> di
         )
         out[wf.name] = v
         local[wf.name] = v
+        _fit_length(wf, v, local, out)
         # A count-modulated repeat may also carry a length field elsewhere in
         # the block, or derive the count from a computed field or an expression
         # over it. In either case the count the decode side evaluates must equal
@@ -313,3 +319,15 @@ def _count_driver(expr) -> str | None:
 def synthesize_packet(resolved: ast.ResolvedSchema, pkt: ast.PacketDecl) -> dict:
     """A decoded-shape value for `pkt` that the interpreter encodes cleanly."""
     return _block_value(pkt.items, {}, _Env(resolved))
+
+
+def _fit_length(wf: ast.WireField, value: object, local: dict, out: dict) -> None:
+    """A `bytes(n)` payload is exactly `n` bytes: make `n` the data's length."""
+    t = wf.type_ref
+    if wf.repeat is not None or not isinstance(t, ast.TypeRef) or t.name != "bytes" or not t.args:
+        return
+    driver = _count_driver(t.args[0])
+    if driver is not None and driver in local and isinstance(value, (bytes, bytearray)):
+        local[driver] = len(value)
+        if driver in out:
+            out[driver] = len(value)

@@ -13,18 +13,16 @@ import "minecraft_core.bps"
 // LpVec3: 1 byte when every component is zero, otherwise 2 bytes plus an
 // optional continuation-flag tail. The wiki pins the bit layout:
 //   byte1 & 0x04 -> the scale factor continues in a VarInt after byte 6.
-// The packed doubles stay raw so the framing around them is exact.
-// `lpvec3_zero` is the all-zero short form (a single 0x00 byte), which is what
-// a spawn packet sends for an entity with no velocity.
-encoding lpvec3_zero = {
-    scale_byte: u8
-}
+// The packed doubles stay raw so the framing around them is exact. A zero
+// vector (an entity with no velocity) is the single byte 0x00.
 
 encoding lpvec3(bits = 46) {
-    scale_byte:        u8
-    packed_second:     u8
-    packed_high_4:     u32be
-    continuation_scale: varint if scale_byte & 0x04 != 0
+    scale_byte: u8
+    if scale_byte != 0 {
+        packed_second:      u8
+        packed_high_4:      u32be
+        continuation_scale: varint if scale_byte & 0x04 != 0
+    }
 }
 
 packet add_entity {
@@ -34,7 +32,7 @@ packet add_entity {
     x: f64be
     y: f64be
     z: f64be
-    velocity: lpvec3_zero
+    velocity: lpvec3
     pitch: u8
     yaw: u8
     head_yaw: u8
@@ -68,20 +66,24 @@ packet explode {
     center_x: f64be
     center_y: f64be
     center_z: f64be
-    has_records: boolean
-    if has_records {
-        records_count: varint
-        records: {
-            x: i8
-            y: i8
-            z: i8
-        }[] count = records_count
+    radius: f32be
+    block_count: i32be
+    has_player_knockback: boolean
+    if has_player_knockback {
+        player_knockback_x: f64be
+        player_knockback_y: f64be
+        player_knockback_z: f64be
     }
-    player_velocity_x: f64be
-    player_velocity_y: f64be
-    player_velocity_z: f64be
+    particle: particle_data
+    sound: id_or_sound_event
     block_particles_count: varint
-    block_particles: { }[] count = block_particles_count
+    block_particles: {
+        particle: particle_data
+        scaling: f32be
+        speed: f32be
+        weight: varint
+    }[] count = block_particles_count
+    play_sound: boolean
 }
 
 // --- Chunk data + light ---
@@ -149,14 +151,13 @@ packet recipe_book_add {
     recipes: {
         recipe_id: varint
         recipe_display: recipe_display
-        group_id: varint
+        // Java OPTIONAL_VAR_INT: 0 absent, otherwise stored value + 1.
+        group_encoded: varint
         category_id: varint
-        has_ingredients: boolean
-        if has_ingredients {
-            ingredients_count: varint
-            // Ingredients are a prefixed array of ID Sets (each self-delimiting:
-            // a tag name or an inline id list).
-            ingredients: id_set[] count = ingredients_count
+        has_crafting_requirements: boolean
+        if has_crafting_requirements {
+            crafting_requirements_count: varint
+            crafting_requirements: ingredient[] count = crafting_requirements_count
         }
         flags: i8
     }[] count = recipes_count
@@ -172,7 +173,7 @@ packet update_recipes {
     }[] count = property_sets_count
     stonecutter_recipes_count: varint
     stonecutter_recipes: {
-        ingredients: id_set
+        ingredients: ingredient
         slot_display: slot_display
     }[] count = stonecutter_recipes_count
 }
@@ -192,19 +193,22 @@ packet player_info_update {
             properties: {
                 name:  string(64)
                 value: string(32767)
-                has_signature: varint
-                if has_signature != 0 {
+                has_signature: boolean
+                if has_signature {
                     signature: string(1024)
                 }
             }[] count = properties_count
         }
         if actions & 0x02 != 0 {
-            chat_session_id: uuid
-            public_key_expiry: i64be
-            public_key_length: varint
-            public_key: i8[] count = public_key_length
-            public_key_signature_length: varint
-            public_key_signature: i8[] count = public_key_signature_length
+            has_chat_session: boolean
+            if has_chat_session {
+                chat_session_id: uuid
+                public_key_expiry: i64be
+                public_key_byte_len: varint
+                public_key: bytes(public_key_byte_len)
+                key_signature_byte_len: varint
+                key_signature: bytes(key_signature_byte_len)
+            }
         }
         if actions & 0x04 != 0 {
             game_mode: varint
@@ -216,8 +220,8 @@ packet player_info_update {
             ping: varint
         }
         if actions & 0x20 != 0 {
-            display_name_flag: varint
-            if display_name_flag != 0 {
+            has_display_name: boolean
+            if has_display_name {
                 display_name: text_component
             }
         }
@@ -232,15 +236,15 @@ packet player_info_update {
 
 // --- Chat ---
 
-// Player Chat Message: header (indices + optional signature), body, a
-// 20-entry previous-message acknowledgment array with inline signatures, then
-// the chat-type (ID or registry reference) and the sender/target names.
+// Player Chat Message: an optional 256-byte header signature, the signed body
+// (message, timestamp, salt, previous-message signatures), an optional unsigned
+// component, the FilterMask, then ChatType.Bound.
 packet player_chat {
     global_index: varint
     sender: uuid
     index: varint
-    has_signature: varint
-    if has_signature != 0 {
+    has_signature: boolean
+    if has_signature {
         signature: bytes(256)
     }
     message: string(256)
@@ -248,41 +252,22 @@ packet player_chat {
     salt: i64be
     previous_messages_count: varint
     previous_messages: {
-        message_id: varint
-        if message_id == 0 {
+        packed_id: varint
+        if packed_id == 0 {
             signature: bytes(256)
         }
     }[] count = previous_messages_count
-    has_unsigned_content: varint
-    if has_unsigned_content != 0 {
+    has_unsigned_content: boolean
+    if has_unsigned_content {
         unsigned_content: text_component
     }
-    filter_type: varint
-    if filter_type == 2 {
-        filter_type_bits: bitset
-    }
-    chat_type_id: varint
-    if chat_type_id == 0 {
-        chat_type: nbt
-    }
-    sender_name: text_component
-    has_target_name: varint
-    if has_target_name != 0 {
-        target_name: text_component
-    }
+    filter_mask: filter_mask
+    chat_type: chat_type_bound
 }
 
 packet disguised_chat {
     message: text_component
-    chat_type_id: varint
-    if chat_type_id == 0 {
-        chat_type: text_component
-    }
-    sender_name: text_component
-    has_target_name: boolean
-    if has_target_name {
-        target_name: text_component
-    }
+    chat_type: chat_type_bound
 }
 
 // --- Player position sync / vehicle ---
@@ -303,23 +288,15 @@ packet player_position {
 
 packet teleport_entity {
     entity_id: varint
-    position_path_type: varint
-    if position_path_type == 0 {
-        x: f64be
-        y: f64be
-        z: f64be
-    }
-    if position_path_type == 1 {
-        steps_count: varint
-        steps: {
-            x:           f64be
-            y:           f64be
-            z:           f64be
-            tick_offset: varint
-        }[] count = steps_count
-    }
+    x:         f64be
+    y:         f64be
+    z:         f64be
+    delta_x:   f64be
+    delta_y:   f64be
+    delta_z:   f64be
     yaw:       f32be
     pitch:     f32be
+    flags:     i32be
     on_ground: boolean
 }
 
@@ -327,44 +304,41 @@ packet teleport_entity {
 
 packet set_entity_motion {
     entity_id: varint
-    velocity:  rest
+    velocity:  lpvec3
 }
 
 packet set_score {
-    item_name: string(32767)
-    action:    varint
-    if action == 1 {
-        objective_name: string(32767)
-        value:          varint
+    entity_name:   string(32767)
+    objective_name: string(32767)
+    value:         varint
+    has_display_name: boolean
+    if has_display_name {
+        display_name: text_component
     }
-    if action == 2 {
-        unique_id: identifier
+    has_number_format: boolean
+    if has_number_format {
+        number_format: number_format
     }
 }
 
 packet set_objective {
     objective_name: string(32767)
-    action:         varint
-    if action != 2 {
-        has_display_name: varint
-        if has_display_name != 0 {
-            display_name: text_component
+    mode:           i8
+    if mode == 0 || mode == 2 {
+        objective_value: text_component
+        type:            varint
+        has_number_format: boolean
+        if has_number_format {
+            number_format: number_format
         }
-        objective_type: varint
     }
 }
 
 packet set_player_team {
-    team_name:      string(32767)
-    action:          varint
+    team_name: string(32767)
+    action:    i8
     if action == 0 || action == 2 {
-        display_name: text_component
-        friendly_flags: i8
-        name_tag_visibility: varint
-        collision_rule: varint
-        team_color: varint
-        prefix: text_component
-        suffix: text_component
+        settings: team_settings
     }
     if action == 0 || action == 3 || action == 4 {
         entities_count: varint
@@ -374,17 +348,64 @@ packet set_player_team {
 
 // --- Advancements ---
 
+// Advancement display data (DisplayInfo): title, description, icon, frame type,
+// a flags int (0x1 background present, 0x2 show toast, 0x4 hidden), then the
+// background texture when flagged. The tab coordinates are not here: vanilla's
+// PositionedAdvancement writes x and y after the whole advancement, once per
+// mapping (the wiki nests them under display).
+encoding advancement_display = {
+    title:       text_component
+    description: text_component
+    icon:        item_stack_template
+    frame_type:  varint
+    flags:       i32be
+    if flags & 0x01 != 0 {
+        background_texture: identifier
+    }
+}
+
+// Advancement: an optional parent id, an optional display, requirement OR-groups
+// of criterion names, and the telemetry flag.
+encoding advancement_mapping_value = {
+    has_parent_id: boolean
+    if has_parent_id {
+        parent_id: identifier
+    }
+    has_display_data: boolean
+    if has_display_data {
+        display_data: advancement_display
+    }
+    requirements_count: varint
+    requirements: {
+        criteria_count: varint
+        criteria: string(32767)[] count = criteria_count
+    }[] count = requirements_count
+    sends_telemetry_data: boolean
+}
+
 packet update_advancements {
     reset: boolean
     advancement_mappings_count: varint
     advancement_mappings: {
         key:   identifier
-        value: bytes(4)
+        value: advancement_mapping_value
+        x:     f32be
+        y:     f32be
     }[] count = advancement_mappings_count
     identifiers_to_remove_count: varint
     identifiers_to_remove: identifier[] count = identifiers_to_remove_count
     progress_mappings_count: varint
-    progress_mappings_count_check: varint
+    progress_mappings: {
+        key: identifier
+        criteria_count: varint
+        criteria: {
+            criterion_identifier: string(32767)
+            has_date_of_achieving: boolean
+            if has_date_of_achieving {
+                date_of_achieving: i64be
+            }
+        }[] count = criteria_count
+    }[] count = progress_mappings_count
     show_advancements: boolean
 }
 
@@ -438,8 +459,8 @@ packet waypoint {
         identifier: string(32767)
     }
     icon_style: identifier
-    has_color: varint
-    if has_color != 0 {
+    has_color: boolean
+    if has_color {
         red:   u8
         green: u8
         blue:  u8
@@ -547,9 +568,8 @@ packet commands {
         if node_type == 2 {
             parser_id: varint
             // Parser Properties are registry-keyed and variable length. v1 stops
-            // at the boundary: the payload is a length-prefixed byte frame so the
-            // node stays self-delimiting inside the array.
-            payload: slot_display
+            // at the boundary rather than modelling Brigadier property shapes.
+            payload: id_or_payload
         }
         if flags & 0x10 != 0 && node_type == 2 {
             suggestions_type: identifier
@@ -561,13 +581,8 @@ packet commands {
 // --- Interact (LpVec3 target offset) ---
 
 packet interact {
-    entity_id: varint
-    interaction_type: varint
-    if interaction_type == 2 {
-        target_offset: lpvec3
-        has_sneak: boolean
-        if has_sneak != 0 {
-            sneak: boolean
-        }
-    }
+    entity_id:     varint
+    hand:          varint
+    target_offset: lpvec3
+    sneak:         boolean
 }

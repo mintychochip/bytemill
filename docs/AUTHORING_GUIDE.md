@@ -221,13 +221,15 @@ encoding nbt_payload = {
     value: match tag_type {
         9  => nbt_list_body      // list of payloads
         10 => nbt_compound_body  // records until TAG_End — this recurses
-        _  => nbt_nothing
+        0  => nbt_nothing        // TAG_End: no payload. An unknown tag id is an error.
     }
 }
 ```
 
 Keep the indirection in the `match` arms, not in the encoding that contains them;
-that is what terminates.
+that is what terminates. `nbt` itself is the root tag's id then its payload
+(`encoding nbt = { tag_type: u8, ...nbt_payload }`): a compound is `0a`, its
+entries, `00`, and an absent tag is a lone `00`.
 
 ## 5. The route table
 
@@ -257,9 +259,13 @@ protocol minecraft @ v26_3 {
 
 ## 6. Registry-dependent payloads
 
-The schema stops at the registry boundary: the framing is transcribed, the
-registry-keyed body stays opaque. This is the boundary between "described" and
-"data", and it is where a v1 schema ends.
+Where vanilla enumerates a registry's variants (slot and recipe displays,
+particles, position sources, number formats, chat types), model them: a `match`
+on the id, and an unknown id is an error because vanilla rejects it too. Where the
+body is keyed by an open registry (data-component patches, command argument
+properties, chunk data), the schema stops at the registry boundary: the framing is
+transcribed, the registry-keyed body stays opaque. That is the line between
+"described" and "data".
 
 ```bps
 // Sound Event: 0 means inline; otherwise registry ID + 1.
@@ -321,6 +327,26 @@ The gates that must stay green (see `tests/`):
 | `test_routes.test_non_stub_packets_smoke_decode` | every packet decodes a zero buffer cleanly |
 | `test_roundtrip_all.RoundTripAllTest` | every packet's synthetic value round-trips |
 | `test_emit_rust` | the generated Rust crate compiles and passes goldens |
+| `test_decode_strict` | `decode_packet(strict=True)` fails when bytes are left unread |
+| `test_java_ground_truth` | the bytes real Minestom writes decode strictly and re-encode identically |
+| `test_frames_gen` | the generated Rust frame walkers measure what the interpreter reads |
+
+### Cross-checking a layout
+
+A round trip only proves a layout agrees with itself. To check one against a real
+implementation:
+
+```bash
+python scripts/java_probe_samples.py                  # packets the schema cannot reproduce
+python scripts/java_probe_samples.py set_objective    # every recorded sample for a packet
+```
+
+The samples are the bytes Minestom wrote, from rstom's `probes/expected/`. Minestom
+is an implementation, not the protocol: vanilla's decompiled
+`net/minecraft/network/protocol/**` is. Where Minestom's bytes differ from
+vanilla's wire format, follow vanilla and list the packet in `KNOWN_MISMATCHES` in
+`tests/test_java_ground_truth.py` with the reason. Packets without a recorded
+sample (95 of 231) are checked only against vanilla's source.
 
 ## 8. Adding a packet to an existing family
 

@@ -27,8 +27,8 @@ encoding game_profile = {
     properties: {
         name:  string(64)
         value: string(32767)
-        has_signature: varint
-        if has_signature != 0 {
+        has_signature: boolean
+        if has_signature {
             signature: string(1024)
         }
     }[] count = properties_count
@@ -65,10 +65,10 @@ encoding meta_entry = {
         13 => { has_value: boolean, if has_value { value: uuid } }
         14 => varint
         15 => varint
-        16 => { particle_id: varint, data: rest }
-        17 => { count: varint, items: { particle_id: varint, data: rest }[] count = count }
+        16 => particle_data
+        17 => { count: varint, items: particle_data[] count = count }
         18 => { villager_type: varint, profession: varint, level: varint }
-        19 => { raw: varint, value: varint if raw != 0 }
+        19 => varint
         20 => varint
         21 => varint
         22 => varint
@@ -99,7 +99,6 @@ encoding meta_entry = {
         41 => rest
         42 => varint
         43 => varint
-        _ => varint
     }
 }
 
@@ -143,7 +142,7 @@ encoding nbt_list_body = {
         8  => nbt_string
         9  => nbt_list_body
         10 => nbt_compound_body
-        _ => nbt_nothing
+        0 => nbt_nothing
     } }[] count = count
 }
 
@@ -164,19 +163,75 @@ encoding nbt_payload = {
         10 => nbt_compound_body
         11 => { byte_len: i32be, data: bytes(byte_len * 4) }
         12 => { byte_len: i32be, data: bytes(byte_len * 8) }
-        _ => nbt_nothing
+        0 => nbt_nothing
     }
 }
 
-// Network NBT root (protocol >= 764): TAG_Compound payload without a root name.
+// Network NBT (protocol >= 764): the root tag's id, then its payload with no root
+// name. A compound root is `0a`, its entries, then `00`; a null tag is a lone
+// `00` (TAG_End has no payload). Java's NbtIo.writeAnyTag.
 encoding nbt = {
-    ...nbt_compound_body
+    tag_type: u8
+    ...nbt_payload
 }
 
 // 26.3 Text Component: an NBT tag — String Tag for plain text, Compound otherwise.
 encoding text_component = {
-    tag_type: u8
-    ...nbt_payload
+    ...nbt
+}
+
+// Scoreboard number format: registry dispatch (0 blank, 1 styled, 2 fixed).
+// Styled carries a Style and fixed a Component; both are network NBT.
+encoding number_format = {
+    format_type: varint
+    if format_type == 1 {
+        style: nbt
+    }
+    if format_type == 2 {
+        content: text_component
+    }
+}
+
+// Update Teams settings block (create + update info actions).
+encoding team_settings = {
+    display_name:        text_component
+    prefix:              text_component
+    suffix:              text_component
+    name_tag_visibility: varint
+    collision_rule:      varint
+    has_team_color:      boolean
+    if has_team_color {
+        team_color: varint
+    }
+    friendly_flags: i8
+}
+
+// Holder<ChatType>: registry id + 1, or 0 followed by an inline ChatType: two
+// ChatTypeDecorations (chat, narration), each a translation key, parameter ids
+// (sender/target/content) and a Style (network NBT). They are spelled out because
+// a generated packet struct has one namespace, so an encoding cannot be used twice.
+encoding chat_type_holder = {
+    holder_id: varint
+    if holder_id == 0 {
+        chat_translation_key:       string(32767)
+        chat_parameters_count:      varint
+        chat_parameters:            varint[] count = chat_parameters_count
+        chat_style:                 nbt
+        narration_translation_key:  string(32767)
+        narration_parameters_count: varint
+        narration_parameters:       varint[] count = narration_parameters_count
+        narration_style:            nbt
+    }
+}
+
+// ChatType.Bound: the chat type, the sender name, an optional target name.
+encoding chat_type_bound = {
+    chat_type:       chat_type_holder
+    sender_name:     text_component
+    has_target_name: boolean
+    if has_target_name {
+        target_name: text_component
+    }
 }
 
 // Rotation angle in steps of 1/256 of a full turn.
@@ -220,9 +275,7 @@ encoding id_set = {
     }
 }
 
-// "ID or X" where the inline X is a registry-tagged union of display shapes.
-// The id names the shape; its fields are registry-dependent, so v1 records the
-// id and stops rather than guessing a length.
+// Registry-tagged union for opaque parser-property frames (not Slot Display).
 encoding id_or_payload = {
     id: varint
     if id == 0 {
@@ -230,9 +283,90 @@ encoding id_or_payload = {
     }
 }
 
-encoding slot_display = id_or_payload
+// Material ingredient: RegistryTag<Material> on the wire (same layout as id_set).
+encoding ingredient = id_set
 
-encoding recipe_display = id_or_payload
+// Item stack template (item, count, component patch). Stops at the patch's
+// added/removed counts: a non-empty patch carries registry-keyed component
+// payloads BPS cannot walk, the same boundary `slot` has.
+encoding item_stack_template = {
+    item_id: varint
+    item_count: varint
+    component_added: varint
+    component_removed: varint
+}
+
+// Slot Display: minecraft:slot_display registry ordinal, then variant payload.
+encoding slot_display = {
+    type: varint
+    value: match type {
+        0  => nbt_nothing
+        1  => nbt_nothing
+        2  => { display: slot_display }
+        3  => { source: slot_display, component_type: varint }
+        4  => { item_id: varint }
+        5  => item_stack_template
+        6  => ingredient
+        7  => { dye: slot_display, target: slot_display }
+        8  => {
+            base: slot_display
+            trim_material: slot_display
+            // Holder<TrimPattern>: registry id + 1, or 0 and an inline pattern.
+            trim_pattern_id: varint
+            if trim_pattern_id == 0 {
+                trim_pattern_asset: identifier
+                trim_pattern_description: text_component
+                trim_pattern_decal: boolean
+            }
+        }
+        9  => { input: slot_display, remainder: slot_display }
+        10 => {
+            contents_count: varint
+            contents: slot_display[] count = contents_count
+        }
+    }
+}
+
+// Recipe Display: minecraft:recipe_display registry ordinal, then variant payload.
+encoding recipe_display = {
+    type: varint
+    value: match type {
+        0 => {
+            ingredients_count: varint
+            ingredients: slot_display[] count = ingredients_count
+            result: slot_display
+            crafting_station: slot_display
+        }
+        1 => {
+            width: varint
+            height: varint
+            ingredients_count: varint
+            ingredients: slot_display[] count = ingredients_count
+            result: slot_display
+            crafting_station: slot_display
+        }
+        2 => {
+            ingredient: slot_display
+            fuel: slot_display
+            result: slot_display
+            crafting_station: slot_display
+            duration: varint
+            experience: f32be
+        }
+        3 => {
+            ingredient: slot_display
+            result: slot_display
+            crafting_station: slot_display
+        }
+        4 => {
+            template: slot_display
+            base: slot_display
+            addition: slot_display
+            result: slot_display
+            crafting_station: slot_display
+        }
+    }
+}
 
 // --- Bit sets ---
 
@@ -241,40 +375,51 @@ encoding bitset = {
     longs:       i64be[] count = long_count
 }
 
+// FilterMask (chat): enum ordinal, then a length-prefixed byte array when
+// PARTIALLY_FILTERED (Java BITSET = BYTE_ARRAY of BitSet.toByteArray()).
+encoding filter_mask = {
+    mask_type: varint
+    if mask_type == 2 {
+        mask_byte_len: varint
+        mask_bytes: bytes(mask_byte_len)
+    }
+}
+
 encoding fixed_bitset(bits = 64) {
     data: bytes(1 + (bits - 1) / 8)
 }
 
 // --- Particles ---
 //
-// Particle data is keyed by the particle_type registry id (declaration order on
-// minecraft.wiki). Only 22 of 125 types carry a payload; the rest send none.
-// The tag is read inside the encoding so the match resolves in scope.
+// Particle data is keyed by the particle_type registry id: the order vanilla's
+// ParticleTypes registers them in (128 types in 26.3). Only 22 carry a payload;
+// the rest send none. The tag is read inside the encoding so the match resolves
+// in scope.
 encoding particle_data = {
     particle_type: varint
     value: match particle_type {
-        1  => block_state          // block
-        2  => block_state          // block_marker
-        7  => water_blocks         // geyser
-        8  => water_blocks_burst    // geyser_base
-        9  => water_blocks_burst    // geyser_poof
-        10 => water_blocks         // geyser_plume
-        15 => power                 // dragon_breath
-        21 => dust_color_scale      // dust
-        22 => dust_color_transition // dust_color_transition
-        23 => dust_color_scale      // effect
-        28 => dust_color            // entity_effect
-        36 => block_state           // falling_dust
-        43 => dust_color            // tinted_leaves
-        45 => sculk_charge_roll     // sculk_charge
-        49 => dust_color            // flash
-        53 => dust_color_scale      // instant_effect
-        54 => slot                  // item
-        55 => vibration_source      // vibration
-        56 => trail_data            // trail
-        112 => shriek_delay         // shriek
-        118 => block_state          // dust_pillar
-        122 => block_state          // block_crumble
+        1   => block_state           // block
+        2   => block_state           // block_marker
+        7   => water_blocks          // geyser
+        8   => water_blocks_burst    // geyser_base
+        9   => water_blocks_burst    // geyser_poof
+        10  => water_blocks          // geyser_plume
+        15  => power                 // dragon_breath
+        21  => dust_color_scale      // dust
+        22  => dust_color_transition // dust_color_transition
+        23  => spell_particle        // effect
+        28  => dust_color            // entity_effect
+        36  => block_state           // falling_dust
+        46  => dust_color            // tinted_leaves
+        48  => sculk_charge_roll     // sculk_charge
+        52  => dust_color            // flash
+        56  => spell_particle        // instant_effect
+        57  => item_stack_template   // item
+        58  => vibration_particle    // vibration
+        59  => trail_data            // trail
+        115 => shriek_delay          // shriek
+        121 => block_state           // dust_pillar
+        125 => block_state           // block_crumble
         _ => nbt_nothing
     }
 }
@@ -286,12 +431,21 @@ encoding power               = { power: f32be }
 encoding dust_color          = { color: i32be }
 encoding dust_color_scale    = { color: i32be, scale: f32be }
 encoding dust_color_transition = { from_color: i32be, to_color: i32be, scale: f32be }
+encoding spell_particle      = { color: i32be, power: f32be }
 encoding sculk_charge_roll   = { roll: f32be }
 encoding shriek_delay        = { delay: varint }
-encoding vibration_source    = {
-    block_position: position
-    entity_id: varint
-    entity_eye_height: f32be
+
+// PositionSource: registry id (0 block, 1 entity), then that source's fields.
+encoding position_source = {
+    source_type: varint
+    value: match source_type {
+        0 => { block_position: position }
+        1 => { entity_id: varint, y_offset: f32be }
+    }
+}
+encoding vibration_particle = {
+    destination:      position_source
+    arrival_in_ticks: varint
 }
 encoding trail_data = {
     x: f64be

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from bps import ast
+from bps import ast, frames_gen
 from bps.analyze import reject_unlowered_scalars
 from bps.ast import (
     BlockItem,
@@ -182,11 +182,7 @@ pub fn position_at(cur: &mut Cursor) -> Result<Value, BpsError> {
     Ok(json!({ "raw": raw, "x": x, "y": y, "z": z }))
 }
 
-/// Network NBT (protocol >= 764): root compound payload, records until TAG_End.
-pub fn nbt_at(cur: &mut Cursor) -> Result<Value, BpsError> {
-    Ok(nbt_compound_body(cur)?)
-}
-
+/// Network NBT (protocol >= 764): the root tag id, then its payload (no root name).
 pub fn nbt_tag_at(cur: &mut Cursor) -> Result<Value, BpsError> {
     let tag_type = u8_at(cur)?;
     Ok(json!({ "tag_type": tag_type, "value": nbt_payload(cur, tag_type)? }))
@@ -320,7 +316,7 @@ INT_TYPES = {
 HELPERS: dict[str, str] = {
     "position": "position_at(cur)?",
     "uuid": "uuid_at(cur)?",
-    "nbt": "nbt_at(cur)?",
+    "nbt": "nbt_tag_at(cur)?",
     "text_component": "nbt_tag_at(cur)?",
     "slot": "slot_at(cur)?",
     "hashed_slot": "hashed_slot_at(cur)?",
@@ -349,6 +345,10 @@ class Walker:
     def __init__(self, resolved: ResolvedSchema) -> None:
         self.resolved = resolved
         self.counter = 0
+        # An encoding that contains itself cannot be expanded inline: it becomes a
+        # function that calls itself. `fns` fills in as packets reach them.
+        self.recursive = frames_gen.recursive_encodings(resolved)
+        self.fns: dict[str, str] = {}
 
     def tmp(self) -> str:
         self.counter += 1
@@ -467,8 +467,26 @@ class Walker:
             if isinstance(enc.body, TypeRef):
                 return self.ref_expr(enc.body, indent)
             if isinstance(enc.body, ast.BlockType):
+                if name in self.recursive:
+                    self.recursive_fn(name, enc.body.items)
+                    return f"{_snake(name)}_at(cur, &env)?"
                 return self.block_expr(enc.body.items, indent)
         raise ValueError(f"unsupported type in Rust emitter: {name}")
+
+    def recursive_fn(self, name: str, items: tuple[BlockItem, ...]) -> None:
+        """Queue the function that decodes a recursive encoding (once)."""
+        if name in self.fns:
+            return
+        self.fns[name] = ""  # claimed: the body below calls back into this name
+        body = self.block_expr(items, "    ")
+        self.fns[name] = (
+            f"\nfn {_snake(name)}_at(\n"
+            "    cur: &mut Cursor,\n"
+            "    env: &std::collections::HashMap<String, i64>,\n"
+            ") -> Result<Value, BpsError> {\n"
+            f"    Ok({body})\n"
+            "}\n"
+        )
 
     def block_expr(self, items: tuple[BlockItem, ...], indent: str) -> str:
         body = self.block_stmts(items, indent + "    ", nested=True)
@@ -614,6 +632,7 @@ pub fn decode_{_snake(pkt.name)}(cur: &mut Cursor) -> Result<Value, BpsError> {{
             )
         else:
             decoders.append(walker.packet_fn(pkt))
+    decoders.extend(walker.fns.values())
 
     route_arms = "\n".join(
         f'        ({route.packet_id}, "{route.state}", "{route.direction}") => '

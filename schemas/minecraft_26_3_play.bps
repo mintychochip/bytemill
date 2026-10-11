@@ -110,8 +110,8 @@ packet command_suggestions {
     matches_count: varint
     matches: {
         match:        string(32767)
-        tooltip_flag: varint
-        if tooltip_flag != 0 {
+        tooltip_flag: boolean
+        if tooltip_flag {
             tooltip: text_component
         }
     }[] count = matches_count
@@ -158,8 +158,8 @@ packet damage_event {
     source_type_id:   varint
     source_cause_id:  varint
     source_direct_id: varint
-    source_position_flag: varint
-    if source_position_flag != 0 {
+    source_position_flag: boolean
+    if source_position_flag {
         x: f64be
         y: f64be
         z: f64be
@@ -172,6 +172,8 @@ packet debug_sample {
     sample_type:  varint
 }
 
+// MessageSignature.Packed: a cached-signature id + 1, or 0 and the full
+// 256-byte signature.
 packet delete_chat {
     message_id: varint
     if message_id == 0 {
@@ -298,16 +300,16 @@ packet map_item_data {
     map_id: varint
     scale: i8
     locked: boolean
-    icons_flag: varint
-    if icons_flag != 0 {
+    tracking_position: boolean
+    if tracking_position {
         icons_count: varint
         icons: {
             type: varint
             x: i8
             z: i8
             direction: i8
-            display_name_flag: varint
-            if display_name_flag != 0 {
+            has_display_name: boolean
+            if has_display_name {
                 display_name: text_component
             }
         }[] count = icons_count
@@ -317,11 +319,8 @@ packet map_item_data {
         rows: u8
         x: u8
         z: u8
-        data_flag: varint
-        if data_flag != 0 {
-            data_count: varint
-            data: u8[] count = data_count
-        }
+        data_count: varint
+        data: u8[] count = data_count
     }
 }
 
@@ -443,8 +442,8 @@ packet registry_data {
     entries_count: varint
     entries: {
         entry_id: identifier
-        data_flag: varint
-        if data_flag != 0 {
+        has_data: boolean
+        if has_data {
             data: nbt
         }
     }[] count = entries_count
@@ -517,8 +516,8 @@ packet remove_mob_effect {
 
 packet reset_score {
     entity_name: string(32767)
-    objective_name_flag: varint
-    if objective_name_flag != 0 {
+    objective_name_flag: boolean
+    if objective_name_flag {
         objective_name: string(32767)
     }
 }
@@ -553,16 +552,16 @@ packet section_blocks_update {
 }
 
 packet select_advancements_tab {
-    identifier_flag: varint
-    if identifier_flag != 0 {
+    identifier_flag: boolean
+    if identifier_flag {
         identifier: identifier
     }
 }
 
 packet server_data {
     motd: text_component
-    icon_flag: varint
-    if icon_flag != 0 {
+    icon_flag: boolean
+    if icon_flag {
         icon_count: varint
         icon: i8[] count = icon_count
     }
@@ -734,9 +733,9 @@ packet test_instance_block_status {
     status: text_component
     has_size: boolean
     if has_size {
-        size_x: f64be
-        size_y: f64be
-        size_z: f64be
+        size_x: varint
+        size_y: varint
+        size_z: varint
     }
 }
 

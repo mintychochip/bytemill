@@ -1,8 +1,14 @@
 # Wiki → BPS transcription cheat sheet
 
-Source of truth: `/tmp/mc_packets.txt` (Minecraft Java Edition protocol/Packets,
+Starting point: `/tmp/mc_packets.txt` (Minecraft Java Edition protocol/Packets,
 protocol 777). Each packet section is `==== Packet Name ====` with a wiki table of
 `Field Name | Field Type | Notes`.
+
+The wiki is not the authority: it is wrong in places (see "Where the wiki is wrong"
+below). What real clients speak is vanilla's own codec, in the decompiled
+`net/minecraft/network/protocol/**` (`StreamCodec.composite(...)` lists a packet's
+fields in wire order). Check a packet there before trusting a wiki row, and
+`python scripts/java_probe_samples.py <packet>` for the bytes Minestom writes.
 
 Output: a file that starts with the imports below and then contains **only**
 `packet NAME { ... }` declarations. A file can use only names it declares or
@@ -34,7 +40,7 @@ import "minecraft_core.bps"
 | `UUID` | `uuid` |
 | `Position` | `position` |
 | `Angle` | `angle` (add if missing) |
-| `NBT` | `nbt` |
+| `NBT` | `nbt` (tag id byte, then the payload; a lone `00` is "absent") |
 | `Text Component` | `text_component` |
 | `JSON Text Component` | `string(262144)` |
 | `Entity Metadata` | `entity_metadata` |
@@ -42,7 +48,7 @@ import "minecraft_core.bps"
 | `Hashed Slot` | `hashed_slot` |
 | `BitSet` | `bitset` |
 | `Fixed BitSet (n)` | `fixed_bitset(n)` |
-| `LpVec3` | **not supported** → whole packet becomes `body: rest` |
+| `LpVec3` | `lpvec3` |
 
 ## Structure rules
 
@@ -56,13 +62,15 @@ import "minecraft_core.bps"
   preceding field named `Count`, `Length`, or `Number of ...`). Use that field's name.
 - `Array of X` with a count known only from context (e.g. "one per bit set") and it runs
   to the end of the packet: `items: X[] until_end`.
-- `Prefixed Optional X` / `Optional X`:
+- `Prefixed Optional X` / `Optional X` (vanilla `ByteBufCodecs.optional`, `writeNullable`):
   ```
-  flag: varint          // presence flag actually on the wire
-  if flag != 0 {
-      value: X
+  has_x: boolean          // always a boolean, never a varint
+  if has_x {
+      x: X
   }
   ```
+  A `holder` (`Holder<T>`) is different: a varint of registry id + 1, where `0`
+  means the value follows inline.
 - Conditional field (`if ...`, "Only present if ..."):
   ```
   if <condition> {
@@ -100,6 +108,22 @@ packet NAME {
 ```
 
 Never guess a layout. A wrong field order is worse than `rest`.
+
+## Where the wiki is wrong
+
+Found by checking packets against vanilla's source and Minestom's recorded bytes:
+
+- Advancement tab coordinates `x`/`y` are not inside the display: they follow the
+  whole advancement, once per mapping.
+- Test Instance Block Status `size` is an optional `Vec3i` (three VarInts), not
+  three Doubles.
+- A chat filter mask's partially-filtered bit set is a length-prefixed byte array,
+  not a list of longs; chunk light masks use the same form.
+- A chat type is a holder (registry id + 1, or `0` and an inline definition), and
+  `Delete Chat` carries a packed message signature (id + 1, then the 256 bytes only
+  when that is `0`).
+- `Teleport Entity` (position, delta, rotation, flags) and `Entity Position Sync`
+  (a position path) are two different packets; do not merge their fields.
 
 ## Verification
 
