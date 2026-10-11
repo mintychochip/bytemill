@@ -39,6 +39,30 @@ encoding meta_entry = {
 }
 ```
 
+## Where names come from
+
+The compiler implements five types: `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`. Every other
+type (`i32be`, `boolean`, `varint`, `string`, `position`) is an `encoding` declared in a
+`.bps` file, and a file uses another file's names only by importing it:
+
+```bps
+import "std/integers.bps"      // i8, u16be, i32be, boolean, ...
+import "std/varint.bps"        // varint, varlong
+import "minecraft_core.bps"    // string, uuid, position, nbt, slot, ...
+```
+
+An import path is relative to the file that contains it, and each file loads once. Imports are
+**not transitive** (the `.proto` rule): the file that uses `varint` is the file that imports
+`std/varint.bps`. Forget one and the error names the line to add:
+
+```
+schemas/minecraft_26_3_login.bps: 1 name not declared here or in an imported file
+  add  import "std/varint.bps"  for varint
+```
+
+`schemas/std/varint.bps` explains the byte layout; `docs/AUTHORING_GUIDE.md` §2 lists where
+each shared name lives and which tool behaviors still depend on a std name.
+
 ## Schemas (protocol 777)
 
 | File | Contents |
@@ -51,7 +75,9 @@ encoding meta_entry = {
 | `schemas/minecraft_26_3_play_serverbound.bps` | Play **serverbound** (68 packets) |
 | `schemas/minecraft_26_3_login.bps` | Login/configuration shared layouts + remaining mechanical packets |
 | `schemas/minecraft_26_3_remaining.bps` | Final transcription batch — remaining registry-independent packets, LpVec3 velocity (`add_entity`) |
-| `schemas/minecraft_26_3_wiki.bps` | The **261 routes** (state × direction × packet id → packet) from minecraft.wiki |
+| `schemas/minecraft_26_3_wiki.bps` | The **261 routes** (state × direction × packet id → packet) from minecraft.wiki. Imports every packet file, so it is the one root that loads the whole protocol |
+
+Each packet file imports `std/integers.bps`, `std/varint.bps` and `minecraft_core.bps`.
 
 **231 packets, 261 routes, 59 encodings, zero `body: rest` stubs.** Every packet carries its
 transcribed field layout; registry-keyed payloads (component data, recipe displays, chunk data)
@@ -62,36 +88,40 @@ Regenerate the route table:
 ```bash
 python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps \
   --manual-replace schemas/minecraft_core.bps schemas/minecraft_26_3.bps \
-  schemas/minecraft_26_3_play.bps schemas/minecraft_26_3_play_serverbound.bps \
-  schemas/minecraft_26_3_login.bps
+  schemas/minecraft_26_3_login.bps schemas/minecraft_26_3_play.bps \
+  schemas/minecraft_26_3_play_serverbound.bps schemas/minecraft_26_3_remaining.bps
 ```
+
+The generated file imports `std/varint.bps` (its frame uses it) and every `--manual-replace`
+file that declares packets.
 
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 44 tests, includes cargo differential
-SCHEMAS="schemas/minecraft_core.bps schemas/minecraft_26_3.bps schemas/minecraft_26_3_login.bps \
-schemas/minecraft_26_3_remaining.bps schemas/minecraft_26_3_play.bps \
-schemas/minecraft_26_3_play_serverbound.bps schemas/minecraft_26_3_wiki.bps"
-python -m bps.cli check $SCHEMAS                # parse + resolve + check
-python -m bps.cli routes $SCHEMAS               # routing table (261 routes)
-python -m bps.cli dump-json $SCHEMAS            # schema.json
-python -m bps.cli emit rust $SCHEMAS --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
-python -m bps.cli emit rstom $SCHEMAS --out ../rstom/crates/bps_rstom  # rstom `PacketSerializer` crate
+python -m unittest discover -s tests -t . -v     # 62 tests, includes cargo differential
+ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file
+python -m bps.cli check $ROOT                    # parse + resolve + check
+python -m bps.cli routes $ROOT                   # routing table (261 routes)
+python -m bps.cli dump-json $ROOT                # schema.json
+python -m bps.cli emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
+python -m bps.cli emit rstom $ROOT --out ../rstom/crates/bps_rstom  # rstom `PacketSerializer` crate
 ```
 
 Decode a handshake **frame** (hex):
 
 ```bash
-echo '10008906096c6f63616c686f737463dd01' | python -m bps.cli decode $SCHEMAS \
+echo '10008906096c6f63616c686f737463dd01' | python -m bps.cli decode $ROOT \
   --state handshaking --direction serverbound --hex
 # {"id": 0, "packet": "handshake", "fields": {"intent": 1, "protocol_version": 777, ...}}
 ```
 
-Encode a VarInt probe round-trip:
+VarInt in both directions (300 is `ac 02`; see `schemas/std/varint.bps`):
 
 ```bash
-echo 'ddc701' | python -m bps.cli decode schemas/minecraft_core.bps --packet varint_probe --hex
+echo 'ac0202' | python -m bps.cli decode schemas/minecraft_26_3_play.bps --packet animate --hex
+# {"animation": 2, "entity_id": 300}
+python -m bps.cli encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
+# ac0202
 ```
 
 ## Rust codegen

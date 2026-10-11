@@ -11,16 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_minecraft():
-    names = (
-        "minecraft_core.bps",
-        "minecraft_26_3.bps",
-        "minecraft_26_3_login.bps",
-        "minecraft_26_3_remaining.bps",
-        "minecraft_26_3_play.bps",
-        "minecraft_26_3_play_serverbound.bps",
-        "minecraft_26_3_wiki.bps",
-    )
-    return analyze(load_schema([ROOT / "schemas" / name for name in names]))
+    """The whole protocol, loaded from the one file that imports the rest."""
+    return analyze(load_schema([ROOT / "schemas" / "minecraft_26_3_wiki.bps"]))
 
 
 def load_with_extra(source: str):

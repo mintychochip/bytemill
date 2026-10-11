@@ -4,7 +4,15 @@ Source of truth: `/tmp/mc_packets.txt` (Minecraft Java Edition protocol/Packets,
 protocol 777). Each packet section is `==== Packet Name ====` with a wiki table of
 `Field Name | Field Type | Notes`.
 
-Output: a file containing **only** `packet NAME { ... }` declarations.
+Output: a file that starts with the imports below and then contains **only**
+`packet NAME { ... }` declarations. A file can use only names it declares or
+imports, so these three lines come first:
+
+```
+import "std/integers.bps"
+import "std/varint.bps"
+import "minecraft_core.bps"
+```
 
 ## Type mapping
 
@@ -96,7 +104,8 @@ Never guess a layout. A wrong field order is worse than `rest`.
 ## Verification
 
 ```
-python -m bps.cli check schemas/minecraft_core.bps <your file>
+python -m bps.cli check <your file>
 ```
 
-must print `ok`.
+must print `ok`. If it instead says a name is not declared, it prints the `import`
+line to add.

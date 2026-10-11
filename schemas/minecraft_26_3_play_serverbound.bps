@@ -1,3 +1,7 @@
+import "std/integers.bps"
+import "std/varint.bps"
+import "minecraft_core.bps"
+
 packet accept_teleportation {
     teleport_id: varint
     x:           f64be

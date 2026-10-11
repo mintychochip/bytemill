@@ -1,7 +1,25 @@
-// LEB128 integers built from `u8`. Minecraft VarInt is 32 bits (at most 5
-// bytes); VarLong is 64 bits (at most 10). The last byte must not carry a
-// continuation bit. `value` on the encode side is masked to the width first,
-// so negatives use the two's-complement bit pattern.
+// VarInt and VarLong: LEB128 integers, built from `u8` like every integer in
+// schemas/std. The compiler's only primitives are u8, bytes, rest, f32be, f64be.
+//
+// The interpreter runs this definition. The Rust emitters do not translate it:
+// they recognise the names `varint` and `varlong` and use hand-written helpers,
+// and tests/test_emit_rstom.py compares their bytes with what this file produces.
+//
+// The bytes: each byte carries 7 bits of the number, lowest group first, and its
+// top bit (0x80) means "another byte follows". 300 is 0b1_0010_1100, so it is
+// written 0xAC (low 7 bits, 0x80 set) then 0x02. A negative number is its 32-bit
+// (VarInt) or 64-bit (VarLong) two's-complement pattern, so -1 always takes the
+// maximum 5 (or 10) bytes.
+//
+// Reading this file:
+//   `b1: u8 if (b0 & 0x80) != 0`  a byte present only when the previous byte's
+//                                 top bit was set.
+//   `= expr` after a field        what to write when encoding. `value` is the
+//                                 number being written (masked to the width first);
+//                                 decoding ignores these and just reads bytes.
+//   `= expr` after the `}`        the decoded number: the 7-bit groups put back
+//                                 together and sign-extended to the full width.
+//   `require (b4 & 0x80) == 0`    rejects a last byte that still says more follow.
 
 encoding varint = {
     b0: u8 = ((value & 0xFFFFFFFF) & 0x7F) | ((((value & 0xFFFFFFFF) >> 7) != 0) ? 0x80 : 0)

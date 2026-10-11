@@ -3,6 +3,10 @@
 // Fallback packets use `body: rest` where the wiki layout is registry- or
 // payload-dependent (chunk data, particles, sound events, recipe displays).
 
+import "std/integers.bps"
+import "std/varint.bps"
+import "minecraft_core.bps"
+
 packet bundle_delimiter {
 }
 

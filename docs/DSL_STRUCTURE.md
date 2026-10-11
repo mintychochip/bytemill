@@ -45,7 +45,7 @@ encoding meta_entry = {
 | --- | --- | --- |
 | primitive | `u8`, `bytes(n)`, `rest`, `f32be`, `f64be` | the only built-in types |
 | scalar encoding | `encoding u16be = { ... } = expr` | block whose value is `expr`; `name: type = expr` is the encode side |
-| import | `import "std/varint.bps"` | path relative to the importing file |
+| import | `import "std/varint.bps"` | makes that file's names visible here; path relative to the importing file; not transitive |
 | bytes | `bytes(n)`, `bytes(n) as utf8` | exactly `n` bytes, optional transform |
 | remainder | `rest` | to end of the length-bounded scope |
 | repeat count | `items: slot[] count = n` | `n` from an already-decoded field |
@@ -120,12 +120,14 @@ encoding nbt_payload = {
 
 ## Example in this repo
 
-- `schemas/std/` — integers, boolean, VarInt, and VarLong, imported by core
+- `schemas/std/` — integers, boolean, VarInt, and VarLong; a file imports them to use them
 - `schemas/minecraft_core.bps` — String, UUID, Position, NBT (recursive),
   Slot, entity metadata (all 44 kinds), 22-particle data table, Light Data, ID Set, LpVec3
 - `schemas/minecraft_26_3*.bps` — protocol **777**: 231 packets across 261 routes, all
-  transcribed (no `body: rest` stubs)
+  transcribed (no `body: rest` stubs). Each packet file imports `std/integers.bps`,
+  `std/varint.bps` and `minecraft_core.bps`; `minecraft_26_3_wiki.bps` (the routes)
+  imports every packet file, so it is the one root that loads the whole protocol
 
 Authoring rules and the per-packet workflow live in `docs/AUTHORING_GUIDE.md`.
 
-Run: `python -m bps.cli check schemas/minecraft_core.bps schemas/minecraft_26_3.bps`
+Run: `python -m bps.cli check schemas/minecraft_26_3_wiki.bps`

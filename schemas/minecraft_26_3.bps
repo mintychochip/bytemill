@@ -1,5 +1,9 @@
 // Minecraft Java Edition 26.3 — protocol 777 (see minecraft.wiki)
 
+import "std/integers.bps"
+import "std/varint.bps"
+import "minecraft_core.bps"
+
 enum intent : varint {
     status = 1
     login = 2

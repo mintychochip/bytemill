@@ -80,8 +80,11 @@ protocol NAME @ VERSION { id = int  frame* route* }
 - `packet`: a top-level payload structure (fields only, no enum/encoding nesting).
 - `protocol`: names the version (`26.3`), the protocol number (`id = 777`), frame templates, and
   the routing table.
-- `import`: includes another `.bps` file, path relative to the importing file. Each file is
-  included once, and a name is still declared in exactly one file.
+- `import`: makes another `.bps` file's declarations visible in this file. The path is
+  relative to the importing file and each file is loaded once. A file sees its own
+  declarations and those of the files it imports directly; imports are not transitive
+  (the `.proto` rule), so every name a file uses traces to an `import` in that file.
+  A name is still declared in exactly one file.
 
 ### 4.2 Encoding bodies
 

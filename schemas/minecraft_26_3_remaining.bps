@@ -4,6 +4,10 @@
 // recipe/slot displays) keep their enclosing framing and stop at the opaque
 // byte-array boundary, which is where the v1 registry boundary lies.
 
+import "std/integers.bps"
+import "std/varint.bps"
+import "minecraft_core.bps"
+
 // --- Spawn Entity (LpVec3 velocity) ---
 
 // LpVec3: 1 byte when every component is zero, otherwise 2 bytes plus an

@@ -1,6 +1,10 @@
 // Minecraft Java Edition 26.3 (protocol 777) — login + configuration/play shared
 // packet layouts transcribed from minecraft.wiki field tables.
 
+import "std/integers.bps"
+import "std/varint.bps"
+import "minecraft_core.bps"
+
 // --- Login (clientbound) ---
 
 packet login_disconnect {

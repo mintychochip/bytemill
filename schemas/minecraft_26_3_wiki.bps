@@ -1,10 +1,20 @@
 // protocol 777 / Minecraft 26.3 routing table, transcribed from minecraft.wiki.
 // Every route binds to a packet declared in a minecraft_26_3*.bps file, so this
-// file holds no packet bodies. Regenerate with:
+// file holds no packet bodies. It imports each of those files, which makes it
+// the one root that loads the whole protocol:
+//   python -m bps.cli check schemas/minecraft_26_3_wiki.bps
+// Regenerate with:
 //   python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps \
 //     --manual-replace schemas/minecraft_core.bps schemas/minecraft_26_3.bps \
 //     schemas/minecraft_26_3_login.bps schemas/minecraft_26_3_play.bps \
 //     schemas/minecraft_26_3_play_serverbound.bps schemas/minecraft_26_3_remaining.bps
+
+import "minecraft_26_3.bps"
+import "minecraft_26_3_login.bps"
+import "minecraft_26_3_remaining.bps"
+import "minecraft_26_3_play.bps"
+import "minecraft_26_3_play_serverbound.bps"
+import "std/varint.bps"    // the frame's length and id
 
 protocol minecraft @ v26_3 {
     id = 777

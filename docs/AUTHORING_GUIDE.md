@@ -14,7 +14,7 @@ keeps a file readable and lets `bpsc check` fail on the missing piece nearest th
 mistake.
 
 ```
-encoding   primitives and composites   (varint, string, position, nbt)
+encoding   wire layouts                (varint, string, position, nbt)
 enum       named integer domains       (intent, chat_mode)
 packet     payload structures          (handshake, block_update)
 protocol   framing + route table       (minecraft @ v26_3)
@@ -29,18 +29,60 @@ schemas/<family>_<state>.bps  per-state batches (play, login, configuration)
 schemas/<family>_routes.bps  generated `route` table + stubs
 ```
 
-Multiple files merge: `import "std/varint.bps"` pulls a file in (path relative
-to the importer; each file is included once), and `bpsc` still concatenates
-every CLI argument before resolving. A name must be declared in exactly one
-file (duplicates are a `ResolveError`).
+Files connect through `import` (§2). A name must be declared in exactly one file
+(duplicates are a `ResolveError`).
 
-## 2. Import the standard integers, then define composites
+## 2. Imports: where every name comes from
 
-The language primitives are `u8`, `bytes(n)`, `rest`, `f32be`, and `f64be`.
-Fixed-width integers, `boolean`, `varint`, and `varlong` are schemas:
+The compiler implements five types: `u8`, `bytes(n)`, `rest`, `f32be`, and
+`f64be`. Every other type is an `encoding` declared in a `.bps` file, fixed-width
+integers, `boolean`, `varint`, and `varlong` included. A file uses one by
+importing the file that declares it:
+
+| Import | Provides |
+| --- | --- |
+| `import "std/integers.bps"` | `i8`, `boolean`, `u16be`, `i16be`, `u32be`, `i32be`, `u64be`, `i64be`, and the six little-endian forms (`u16le` … `i64le`) |
+| `import "std/varint.bps"` | `varint`, `varlong` |
+| `import "minecraft_core.bps"` | `string`, `identifier`, `uuid`, `position`, `angle`, `nbt`, `text_component`, `slot`, `hashed_slot`, `bitset`, `fixed_bitset`, `entity_metadata`, and the other shared layouts |
+
+The rules:
+
+- A file sees its own declarations and the declarations of the files it imports
+  directly. **Imports are not transitive** (the `.proto` rule): if `a.bps` imports
+  `b.bps` and `b.bps` imports `c.bps`, then `a.bps` must import `c.bps` itself to
+  use what `c.bps` declares. So every `varint` in a file traces to an `import`
+  line in that same file.
+- The path is relative to the file that contains the `import`. Each file loads
+  once, however many files import it.
+- The five primitives are the only names that need no import.
+- `bpsc` takes one or more files. A file that imports everything else is the
+  root: `schemas/minecraft_26_3_wiki.bps` imports every packet file, so
+  `bpsc check schemas/minecraft_26_3_wiki.bps` loads the whole protocol.
+- Forget an import and the error names the line to add. It also looks at the
+  `.bps` files beside the file and one folder down, so `std/` is found:
+
+  ```
+  schemas/minecraft_26_3_login.bps: 1 name not declared here or in an imported file
+    add  import "std/varint.bps"  for varint
+  ```
+
+A new packet file starts with the imports it needs:
 
 ```bps
 import "std/integers.bps"
+import "std/varint.bps"
+import "minecraft_core.bps"
+
+packet example {
+    id:        varint
+    name:      string(16)
+    on_ground: boolean
+}
+```
+
+Composite encodings build on the same names:
+
+```bps
 import "std/varint.bps"
 
 encoding string(max_chars = 32767) = {
@@ -52,6 +94,23 @@ encoding string(max_chars = 32767) = {
 encoding identifier = { ...string(32767) }
 encoding angle      = u8
 ```
+
+### Where the tools still know a name
+
+Imports decide what a *schema* may use. Two tool behaviors still depend on a std
+name directly, because they are not generated from the schema:
+
+- The interpreter reads a frame's length and packet id as `varint`
+  (`decode_frame_payload` in `bps/interp/engine.py`), whatever the `frame`
+  declaration says. It also writes the length of a `string`, `identifier` or
+  `nbt_string` given as a Python `str` with `varint` (`u16be` for `nbt_string`).
+- `emit rust` and `emit rstom` recognise the std scalar names (`PRIMITIVES` in
+  `bps/emit_rust.py`, `WIRE_TYPES` in `bps/emit_rstom.py`) and emit hand-written
+  helpers instead of translating the definition. A scalar encoding outside that
+  set is an `EmitError`, not wrong code.
+
+So editing `std/varint.bps` changes the interpreter; emitted Rust follows only
+when its helpers change too. `tests/test_emit_rstom.py` compares the two.
 
 Rules that bite:
 

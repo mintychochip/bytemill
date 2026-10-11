@@ -150,6 +150,16 @@ class EmitterScalarTest(unittest.TestCase):
             with self.assertRaisesRegex(BpsError, "u24be"):
                 emit_rstom(self._resolved(self.U24_PROBE), Path(td))
 
+    def test_a_scalar_reached_through_another_encoding_is_rejected(self) -> None:
+        source = self.U24_PROBE.replace(
+            "packet probe { x: u24be }",
+            "encoding wrapper = { inner: u24be }\n    packet probe { w: wrapper }",
+        )
+        for emit in (emit_rust, emit_rstom):
+            with self.subTest(emitter=emit.__name__), tempfile.TemporaryDirectory() as td:
+                with self.assertRaisesRegex(BpsError, "u24be"):
+                    emit(self._resolved(source), Path(td))
+
     def test_rstom_keeps_std_scalar_default_arm_as_one_value(self) -> None:
         source = "packet probe { kind: varint  value: match kind { 0 => i8, _ => varint } }"
         with tempfile.TemporaryDirectory() as td:

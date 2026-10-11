@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 
 from bps import ast
 from bps.errors import EmitError, ResolveError
 from bps.primitives import BARE_PRIMITIVES
+from bps.refs import Ref, item_refs, references, type_refs
 
 
 def _dedupe(kind: str, decls, name_of) -> dict:
@@ -23,18 +24,14 @@ def analyze(schema: ast.Schema) -> ast.ResolvedSchema:
     packets = _dedupe("packet", schema.packets, lambda p: p.name)
     protocols = _dedupe("protocol", schema.protocols, lambda p: p.name)
 
-    for name, enc in encodings.items():
-        _check_encoding(enc, encodings, enums, name)
+    for ref in references(schema):
+        _resolve(ref, encodings, enums, packets)
 
-    routes: list[tuple[ast.RouteDecl, ast.PacketDecl]] = []
-    for proto in schema.protocols:
-        for route in proto.routes:
-            if route.packet_name not in packets:
-                raise ResolveError(
-                    f"route {route.state}.{route.direction} 0x{route.packet_id:x} "
-                    f"references unknown packet {route.packet_name!r}"
-                )
-            routes.append((route, packets[route.packet_name]))
+    routes = [
+        (route, packets[route.packet_name])
+        for proto in schema.protocols
+        for route in proto.routes
+    ]
 
     return ast.ResolvedSchema(schema, encodings, enums, packets, protocols, routes)
 
@@ -53,38 +50,18 @@ def reject_unlowered_scalars(
     seen: set[str] = set()
     unlowered: set[str] = set()
 
-    def visit_name(name: str) -> None:
-        enc = resolved.encodings.get(name)
-        if enc is None or name in seen or name in lowered:
-            return
-        seen.add(name)
-        if enc.yield_expr is not None:
-            unlowered.add(name)
-        visit_type(enc.body)
-
-    def visit_type(t: ast.TypeRef | ast.BlockType | ast.MatchType) -> None:
-        if isinstance(t, ast.TypeRef):
-            visit_name(t.name)
-        elif isinstance(t, ast.BlockType):
-            visit_items(t.items)
-        else:
-            for arm in t.arms:
-                if arm.type_ref is not None:
-                    visit_type(arm.type_ref)
-
-    def visit_items(items: tuple[ast.BlockItem, ...]) -> None:
-        for item in items:
-            if item.kind == "field" and item.wire is not None:
-                visit_type(item.wire.type_ref)
-            elif item.kind == "group":
-                visit_items(item.group_items)
-            elif item.kind == "match" and item.match is not None:
-                visit_type(item.match)
-            elif item.kind == "spread":
-                visit_name(item.spread_name)
+    def visit(refs: Iterable[Ref]) -> None:
+        for ref in refs:
+            enc = resolved.encodings.get(ref.name)
+            if enc is None or ref.name in seen or ref.name in lowered:
+                continue
+            seen.add(ref.name)
+            if enc.yield_expr is not None:
+                unlowered.add(ref.name)
+            visit(type_refs(enc.body, f"encoding {ref.name}"))
 
     for packet in resolved.packets.values():
-        visit_items(packet.items)
+        visit(item_refs(packet.items, f"packet {packet.name}"))
     if unlowered:
         names = ", ".join(repr(n) for n in sorted(unlowered))
         raise EmitError(
@@ -93,69 +70,21 @@ def reject_unlowered_scalars(
         )
 
 
-def _check_encoding(
-    enc: ast.EncodingDecl,
+def _resolve(
+    ref: Ref,
     encodings: dict[str, ast.EncodingDecl],
     enums: dict[str, ast.EnumDecl],
-    path: str,
+    packets: dict[str, ast.PacketDecl],
 ) -> None:
-    if isinstance(enc.body, ast.TypeRef):
-        _check_type_ref(enc.body, encodings, enums, path)
-    elif isinstance(enc.body, ast.BlockType):
-        _check_block(enc.body, encodings, enums, path, enc.params)
-
-
-def _check_type_ref(
-    ref: ast.TypeRef,
-    encodings: dict[str, ast.EncodingDecl],
-    enums: dict[str, ast.EnumDecl],
-    path: str,
-) -> None:
-    if ref.name in encodings or ref.name in BARE_PRIMITIVES:
-        return
-    if ref.name in enums:
-        return
-    raise ResolveError(f"unknown type {ref.name!r} in {path}")
-
-
-def _check_block(
-    block: ast.BlockType,
-    encodings: dict[str, ast.EncodingDecl],
-    enums: dict[str, ast.EnumDecl],
-    path: str,
-    params: tuple[ast.Param, ...],
-) -> None:
-    param_names = {p.name for p in params}
-    for item in block.items:
-        if item.kind == "field" and item.wire:
-            _check_field_type(item.wire.type_ref, encodings, enums, path, param_names)
-        if item.kind == "spread" and item.spread_name:
-            if item.spread_name not in encodings:
-                raise ResolveError(f"unknown spread encoding {item.spread_name!r} in {path}")
-        if item.kind == "group":
-            _check_block(ast.BlockType(item.group_items), encodings, enums, path, params)
-        if item.kind == "match" and item.match is not None:
-            for arm in item.match.arms:
-                if isinstance(arm.type_ref, ast.BlockType):
-                    _check_block(arm.type_ref, encodings, enums, path, params)
-                elif arm.type_ref is not None:
-                    _check_field_type(arm.type_ref, encodings, enums, path, param_names)
-
-
-def _check_field_type(
-    t: ast.TypeRef | ast.BlockType | ast.MatchType,
-    encodings: dict[str, ast.EncodingDecl],
-    enums: dict[str, ast.EnumDecl],
-    path: str,
-    param_names: set[str],
-) -> None:
-    if isinstance(t, ast.TypeRef):
-        if t.name in param_names:
-            return
-        _check_type_ref(t, encodings, enums, path)
-    elif isinstance(t, ast.BlockType):
-        _check_block(t, encodings, enums, path, ())
-    elif isinstance(t, ast.MatchType):
-        for arm in t.arms:
-            if arm.type_ref is not None:
-                _check_field_type(arm.type_ref, encodings, enums, path, param_names)
+    if ref.kind == "packet":
+        if ref.name not in packets:
+            raise ResolveError(f"{ref.where} references unknown packet {ref.name!r}")
+    elif ref.kind == "spread":
+        if ref.name not in encodings:
+            raise ResolveError(f"unknown spread encoding {ref.name!r} in {ref.where}")
+    elif (
+        ref.name not in encodings
+        and ref.name not in enums
+        and ref.name not in BARE_PRIMITIVES
+    ):
+        raise ResolveError(f"unknown type {ref.name!r} in {ref.where}")

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -116,7 +117,15 @@ def packet_name(official: str, state: str, direction: str, pid: int) -> str:
     return name
 
 
-def emit_bps(rows: list[RouteRow], extra_routes: list[str], manual: set[str] = frozenset()) -> str:
+def emit_bps(
+    rows: list[RouteRow],
+    extra_routes: list[str],
+    manual: set[str] = frozenset(),
+    imports: tuple[str, ...] | list[str] = (),
+) -> str:
+    """The route file. `imports` are paths relative to the output file: the file
+    declaring `varint` (the frame uses it) and each file declaring packets that
+    routes bind to. A name the output uses without importing it will not load."""
     needed_packets: dict[str, None] = {}
     routes: list[str] = []
     for r in rows:
@@ -130,6 +139,9 @@ def emit_bps(rows: list[RouteRow], extra_routes: list[str], manual: set[str] = f
         "// Regenerate: python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps",
         "",
     ]
+    if imports:
+        lines.extend(f'import "{path}"' for path in imports)
+        lines.append("")
     for pname in sorted(needed_packets):
         if pname in manual or pname in MANUAL_PACKETS:
             continue
@@ -166,13 +178,22 @@ def main() -> int:
         print("no routes parsed", file=sys.stderr)
         return 1
     manual: set[str] = set()
+    packet_files: list[Path] = []
     for path in args.manual_replace:
         from bps.parser import parse as _parse
 
-        for pkt in _parse(path.read_text(encoding="utf-8")).packets:
-            manual.add(pkt.name)
+        declared = _parse(path.read_text(encoding="utf-8")).packets
+        manual.update(pkt.name for pkt in declared)
+        if declared:
+            packet_files.append(path)
     extra = ["    route handshaking.serverbound 0xfe => legacy_server_list_ping"]
-    text = emit_bps(rows, extra, manual)
+    out_dir = (args.out.parent if args.out else Path.cwd()).resolve()
+    std_varint = Path(__file__).resolve().parents[1] / "schemas" / "std" / "varint.bps"
+    imports = [
+        Path(os.path.relpath(path.resolve(), out_dir)).as_posix()
+        for path in [*packet_files, std_varint]
+    ]
+    text = emit_bps(rows, extra, manual, imports)
     print(f"parsed {len(rows)} wiki routes", file=sys.stderr)
     if args.out:
         args.out.write_text(text, encoding="utf-8")
