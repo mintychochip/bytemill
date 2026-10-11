@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 from pathlib import Path
 
 from bps.minestom import ClassTable
 
-RSTOM = Path(__file__).resolve().parents[2] / "rstom"
+RSTOM = Path(os.environ.get("BPS_RSTOM_DIR") or Path(__file__).resolve().parents[2] / "rstom")
+CARGO_TARGET = Path(
+    os.environ.get("BPS_CARGO_TARGET_DIR") or Path(tempfile.gettempdir()) / "bps-rstom-target"
+)
 PACKETS_GEN_SCHEMA = RSTOM / "tools" / "packets_gen" / "schema" / "packets.json"
 RSTOM_PACKETS = RSTOM / "crates" / "rstom-packets"
 

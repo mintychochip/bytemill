@@ -118,6 +118,12 @@ class EmitRstomTest(unittest.TestCase):
         self.assertEqual(len(recorded), 10)
         self.assertEqual(expected, recorded)
 
+    def test_the_compile_test_never_uses_rstoms_own_target_dir(self) -> None:
+        from tests.rstom_tables import CARGO_TARGET, RSTOM
+
+        self.assertNotEqual(CARGO_TARGET.resolve(), (RSTOM / "target").resolve())
+        self.assertFalse(str(CARGO_TARGET).startswith(str(RSTOM)))
+
     def test_emitted_crate_compiles_and_passes_its_tests(self) -> None:
         """The crate builds against real rstom; the round-trips and registry tables pass.
 
@@ -129,9 +135,20 @@ class EmitRstomTest(unittest.TestCase):
             self.skipTest("cargo not installed")
         if not (RSTOM / "Cargo.toml").is_file():
             self.skipTest("rstom workspace not present")
-        env = dict(os.environ, CARGO_TARGET_DIR=str(RSTOM / "target"))
+        from tests.rstom_tables import CARGO_TARGET
+
+        env = dict(
+            os.environ,
+            CARGO_TARGET_DIR=str(CARGO_TARGET),
+            CARGO_BUILD_JOBS="4",
+            CARGO_PROFILE_DEV_DEBUG="0",
+            CARGO_INCREMENTAL="0",
+        )
+        cargo_cmd = ["cargo", "test", "--manifest-path", str(self.out / "Cargo.toml"), "--quiet"]
+        if shutil.which("nice"):
+            cargo_cmd = ["nice", "-n", "19"] + cargo_cmd
         proc = subprocess.run(
-            ["cargo", "test", "--manifest-path", str(self.out / "Cargo.toml"), "--quiet"],
+            cargo_cmd,
             env=env,
             capture_output=True,
             text=True,
