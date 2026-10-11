@@ -9,14 +9,25 @@ from bps.interp.cursor import Cursor, WriteCursor
 from bps.interp.evalexpr import eval_expr, truthy
 
 
-def decode_packet(resolved: ast.ResolvedSchema, packet_name: str, data: bytes) -> dict[str, Any]:
+def decode_packet(
+    resolved: ast.ResolvedSchema,
+    packet_name: str,
+    data: bytes,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
+    """Decode one packet payload. `strict` fails when bytes remain unread, which
+    is how a layout that stops short of the real wire format shows up."""
     if packet_name not in resolved.packets:
         raise DecodeError(f"unknown packet {packet_name!r}")
     pkt = resolved.packets[packet_name]
     cur = Cursor(data)
     env = _decode_block_items(pkt.items, cur, resolved, {})
-    if cur.remaining() != 0:
-        pass  # trailing bytes allowed for rest fields in future
+    if strict and cur.remaining() != 0:
+        raise DecodeError(
+            f"{cur.remaining()} of {len(data)} bytes left unread after packet {packet_name!r}",
+            offset=cur.pos,
+        )
     return env
 
 
