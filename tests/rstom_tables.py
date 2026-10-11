@@ -10,9 +10,11 @@ from pathlib import Path
 from bps.minestom import ClassTable
 
 RSTOM = Path(os.environ.get("BPS_RSTOM_DIR") or Path(__file__).resolve().parents[2] / "rstom")
-CARGO_TARGET = Path(
-    os.environ.get("BPS_CARGO_TARGET_DIR") or Path(tempfile.gettempdir()) / "bps-rstom-target"
+_shm = Path("/dev/shm")
+_default_cargo_target = (
+    _shm / "rstom-bps-target" if _shm.is_dir() else Path(tempfile.gettempdir()) / "bps-rstom-target"
 )
+CARGO_TARGET = Path(os.environ.get("BPS_CARGO_TARGET_DIR") or _default_cargo_target)
 PACKETS_GEN_SCHEMA = RSTOM / "tools" / "packets_gen" / "schema" / "packets.json"
 RSTOM_PACKETS = RSTOM / "crates" / "rstom-packets"
 

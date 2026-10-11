@@ -127,9 +127,9 @@ class EmitRstomTest(unittest.TestCase):
     def test_emitted_crate_compiles_and_passes_its_tests(self) -> None:
         """The crate builds against real rstom; the round-trips and registry tables pass.
 
-        The emit is outside the rstom checkout, with the workspace's target dir
-        reused for the build cache, so running this suite never writes into
-        another repository: refreshing the deployed crate is the CLI's job.
+        The emit is outside the rstom checkout; cargo runs via ``scripts/rstom_cargo.sh``
+        into a private target dir (not rstom's ``target/``), so this suite never writes
+        into another repository: refreshing the deployed crate is the CLI's job.
         """
         if shutil.which("cargo") is None:
             self.skipTest("cargo not installed")
@@ -139,16 +139,17 @@ class EmitRstomTest(unittest.TestCase):
 
         env = dict(
             os.environ,
-            CARGO_TARGET_DIR=str(CARGO_TARGET),
-            CARGO_BUILD_JOBS="4",
-            CARGO_PROFILE_DEV_DEBUG="0",
-            CARGO_INCREMENTAL="0",
+            BPS_RSTOM_DIR=str(RSTOM),
+            BPS_CARGO_TARGET_DIR=str(CARGO_TARGET),
         )
-        cargo_cmd = ["cargo", "test", "--manifest-path", str(self.out / "Cargo.toml"), "--quiet"]
-        if shutil.which("nice"):
-            cargo_cmd = ["nice", "-n", "19"] + cargo_cmd
         proc = subprocess.run(
-            cargo_cmd,
+            [
+                str(ROOT / "scripts" / "rstom_cargo.sh"),
+                "test",
+                "--manifest-path",
+                str(self.out / "Cargo.toml"),
+                "--quiet",
+            ],
             env=env,
             capture_output=True,
             text=True,
