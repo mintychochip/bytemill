@@ -110,8 +110,8 @@ list[PinRow]` (sorted by side, state, id; one row per contiguous id-table entry)
   - `test_every_row_round_trips_in_the_interpreter`: for each row find the unit's packet,
     `decode_packet(..., strict=True)` then `encode_packet` reproduces `bytes.fromhex(row.hex)`.
   - `test_class_names_come_from_the_class_table`: `row.cls == table.at(state, direction, id).name`.
-  - `test_json_is_stable_one_row_per_line`: `pins_json(rows) == pins_json(list(reversed(rows)) sorted)`;
-    parses with `json.loads`; has a `_generated` key.
+  - `test_json_is_stable_one_row_per_line`: `pins_json(rows) == pins_json(list(reversed(rows)))`
+    (it sorts by side, state, id itself); parses with `json.loads`; has a `_generated` key.
 - [ ] **Step 2:** run; expect `ModuleNotFoundError: bps.pins`.
 - [ ] **Step 3:** implement. Reuse `emit_rstom._registry_entries(units)` for the entries and
   `emit_rstom._packet_fields` + `_parity_args` for the bytes (raise `EmitError` if a packet has none):
@@ -340,9 +340,9 @@ impl sets `extras`. It raises `ShapeError` (naming the construct) for another at
   - real tree (skipped without `BPS_RSTOM_DIR` or `rstom-bps`): all 64 eligible packets extract
     and `mismatch(...) == []`; the others are reported with a reason.
 - [ ] **Step 2:** implement; tests pass.
-- [ ] **Step 3:** CLI `shapes extract --rstom WS --out DIR [--eligible]` writes
-  `<DIR>/<module>.json` (for `--eligible`, only packets whose `mismatch` is `[]`), and
-  `shapes report --rstom WS` prints per packet `eligible` or its reason (the worklist for waves 2-4).
+- [ ] **Step 3:** CLI `shapes extract <schemas> --rstom WS --out DIR [--eligible] [--class N ...]`
+  writes `<DIR>/<module>.json` (for `--eligible`, only packets whose `mismatch` is `[]`), and
+  `shapes report <schemas> --rstom WS` prints per packet `eligible` or its reason (the worklist for waves 2-4).
 - [ ] **Step 4:** commit `feat(shapes): extract the hand API of a packet into a shape`.
 
 ### Task 6: The tree emitter

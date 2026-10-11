@@ -102,7 +102,7 @@ schema through the existing emitter. If `extras` is set the file ends with
 ### 4.3 CLI (`protoc`)
 
 ```bash
-python -m bps.cli shapes extract --rstom <workspace> --class <Name> ... [--out <dir>]  # hand file -> shape json
+python -m bps.cli shapes extract <schemas> --rstom <workspace> [--eligible | --class <Name> ...] [--out <dir>]  # hand file -> shape json
 python -m bps.cli emit rstom-tree <schemas> --rstom <workspace> [--shapes <dir>] [--check]  # shapes -> files, pins
 ```
 
