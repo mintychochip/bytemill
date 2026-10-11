@@ -11,6 +11,11 @@ contract `tools/packets_gen` emits:
   `packet_vanilla/`, one module per (side, state).
 * The interpreter and this emitter share the grammar, so a schema that
   round-trips in Python emits a serializer that round-trips in Rust.
+* Each packet's `roundtrip_*.rs` pins the Rust encoder against the Python
+  interpreter's bytes for the same synthetic value (`bps/synth.py`), except
+  where this emitter must frame a payload the reference does not (an unframed
+  opaque repeat element, a non-final `rest` field); those keep the
+  encode/decode consistency check and say so in the test.
 
 Registry-keyed payloads (`slot`, `nbt`, `particle_data`, `id_or_payload`) are
 carried as the opaque byte frames the schema declares, which keeps the crate
@@ -27,6 +32,8 @@ from pathlib import Path
 
 from bps import ast
 from bps.ast import BlockItem, PacketDecl, ResolvedSchema, RouteDecl, TypeRef
+from bps.interp.engine import encode_packet
+from bps.synth import synthesize_packet
 
 # BPS type -> (NetworkBuffer type constant, Rust type). Mirrors the constants the
 # rstom crate re-exports from `rstom::network::types`.
@@ -103,10 +110,11 @@ def _opaque_len(
     whose body is a single `bytes(n)` — that body, with the encoding's parameters
     bound (`fixed_bitset(20)` -> `bytes(3)`).
     """
-    if ref is not None and ref.args:
+    if ref is not None and ref.name == "bytes" and ref.args:
         val = _eval_len_expr(ref.args[0], params or {})
         if val is not None:
             return str(val)
+        return None
     if resolved is None:
         return None
     enc = resolved.encodings.get(ref.name)
@@ -221,6 +229,36 @@ def _expand_encoding(
     return True
 
 
+def _elem_needs_prefix(e: "PacketShape", resolved: ResolvedSchema) -> bool:
+    """An opaque payload with no declared length is not self-delimiting.
+
+    `RAW_BYTES` reads to end of buffer, so inside a repeat it must be framed.
+    This is the same varint-length + fixed-frame convention the single-field
+    path uses (`_emit_packet`'s `prefixed` rest mode).
+    """
+    if e.wire != "RAW_BYTES" or e.repeat_mode is not None:
+        return False
+    return _opaque_len(e.ref, resolved, e.params) is None
+
+
+def _prefix_write(ident: str, indent: str) -> list[str]:
+    return [
+        f"{indent}buffer.write(VAR_INT, {ident}.len() as i32);",
+        f"{indent}if !{ident}.is_empty() {{",
+        f"{indent}    buffer.write(fixed_raw_bytes({ident}.len() as i32), {ident}.clone());",
+        f"{indent}}}",
+    ]
+
+
+def _prefix_read(ident: str, indent: str) -> list[str]:
+    return [
+        f"{indent}let {ident} = {{",
+        f"{indent}    let len = buffer.read(VAR_INT) as usize;",
+        f"{indent}    if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len as i32)) }}",
+        f"{indent}}};",
+    ]
+
+
 def _elem_writes(
     f: "PacketShape",
     resolved: ResolvedSchema,
@@ -241,6 +279,9 @@ def _elem_writes(
                     top_fields=top_fields,
                 )
             )
+            continue
+        if _elem_needs_prefix(e, resolved):
+            out.extend(_prefix_write(e.ident, "            "))
             continue
         frame = _frame_expr(e, resolved) or e.wire
         # The element's fields are bound as locals by `_destructure`.
@@ -268,6 +309,9 @@ def _elem_reads(
                     top_fields=top_fields,
                 )
             )
+            continue
+        if _elem_needs_prefix(e, resolved):
+            out.extend(_prefix_read(e.ident, "            "))
             continue
         frame = _frame_expr(e, resolved) or e.wire
         out.append(f"            let {e.ident} = buffer.read({frame});")
@@ -512,17 +556,13 @@ def _repeat_shape(
     if isinstance(wf.type_ref, ast.BlockType):
         _flatten(wf.type_ref.items, element, resolved, bind, None, elem_types)
     elif isinstance(wf.type_ref, TypeRef):
-        if wf.type_ref.name not in WIRE_TYPES:
-            wire, rtype = _field_rust(wf.type_ref)
-            if wire != "RAW_BYTES":
-                element.append(
-                    PacketShape("_item", wire, rtype, False, wf.type_ref, bind)
-                )
-        else:
-            wire, rtype = _field_rust(wf.type_ref)
-            element.append(
-                PacketShape("_item", wire, rtype, False, wf.type_ref, bind)
-            )
+        # An opaque, registry-keyed element (a repeated Slot, say) has no plain
+        # wire type; carry its bytes so the element is written at all. Dropping
+        # it here silently erased the field from the wire (`Vec<()>`).
+        wire, rtype = _field_rust(wf.type_ref)
+        element.append(
+            PacketShape("_item", wire, rtype, wire == "RAW_BYTES", wf.type_ref, bind)
+        )
     return PacketShape(
         wf.name,
         "REPEAT",
@@ -1015,7 +1055,10 @@ def _routes_by_registry(
     return {key: _contiguous_registry_entries(entries) for key, entries in out.items()}
 
 
-def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
+def _packet_fields(
+    pkt: PacketDecl, resolved: ResolvedSchema
+) -> tuple[list["PacketShape"], dict[str, str]]:
+    """The packet's flattened fields, plus the Rust type each name maps to."""
     fields: list[PacketShape] = []
     flatten_types: dict[str, str] = {}
     _flatten(pkt.items, fields, resolved, None, None, flatten_types)
@@ -1025,6 +1068,11 @@ def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
         mapped = f"Option<{base}>" if f.guard is not None else base
         field_types[f.ident] = mapped
         field_types[_snake(f.ident)] = mapped
+    return fields, field_types
+
+
+def _emit_packet(pkt: PacketDecl, resolved: ResolvedSchema) -> str:
+    fields, field_types = _packet_fields(pkt, resolved)
     name = _struct_name(pkt)
     ser = name[: -len("Packet")] + "Serializer"
 
@@ -1340,22 +1388,250 @@ impl PacketSerializer for {ser} {{
 '''
 
 
-def _emit_roundtrip_test(stem: str, name: str, ser: str) -> str:
+def _encode_bare(
+    ref, value: object, resolved: ResolvedSchema, env: dict[str, int] | None = None
+) -> bytes | None:
+    """Python-encoded bytes for one field value, or None if it cannot encode."""
+    from bps.interp.cursor import WriteCursor
+    from bps.interp.engine import _encode_type
+
+    w = WriteCursor()
+    try:
+        _encode_type(ref, w, resolved, dict(env or {}), value)
+    except Exception:
+        return None
+    return w.result()
+
+
+def _rust_str(value: str) -> str:
+    body = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{body}".to_string()'
+
+
+def _rust_bytes(data: bytes) -> str:
+    return 'b"' + "".join(f"\\x{b:02x}" for b in data) + '".to_vec()'
+
+
+def _rust_int(value: object, bits: int, signed: bool) -> str | None:
+    v = int(value)
+    if signed:
+        lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+        if not (lo <= v <= hi):
+            v = ((v - lo) % (1 << bits)) + lo
+    else:
+        if not (0 <= v < (1 << bits)):
+            return None
+    return str(v)
+
+
+def _position_components(raw: int) -> tuple[int, int, int]:
+    def ext(v: int, bits: int) -> int:
+        return (v + (1 << (bits - 1))) % (1 << bits) - (1 << (bits - 1))
+
+    return (ext(raw >> 38, 26), ext(raw % 4096, 12), ext((raw >> 12) % 67108864, 26))
+
+
+_PRIM_RTYPES = {
+    "i8": (8, True),
+    "u8": (8, True),
+    "i16": (16, True),
+    "u16": (16, False),
+    "i32": (32, True),
+    "u32": (32, False),
+    "i64": (64, True),
+    "u64": (64, False),
+}
+
+
+def _rust_element(
+    e: "PacketShape", value: object, resolved: ResolvedSchema
+) -> str | None:
+    """A repeat element's literal: the element type is never an Option."""
+    if e.guard is not None and value is None:
+        return None
+    return _rust_inner(e, value, resolved)
+
+
+def _rust_literal(
+    f: "PacketShape", value: object, resolved: ResolvedSchema
+) -> str | None:
+    """Rust source for one field value, or None when it cannot be rendered."""
+    if f.guard is not None and value is None:
+        return "None"
+    lit = _rust_inner(f, value, resolved)
+    if lit is None:
+        return None
+    return f"Some({lit})" if f.guard is not None else lit
+
+
+def _rust_inner(
+    f: "PacketShape", value: object, resolved: ResolvedSchema
+) -> str | None:
+    """The `T` in `Option<T>` / the bare value: no optionality wrapper."""
+    if f.repeat_mode is not None:
+        if not isinstance(value, list):
+            return None
+        if not value:
+            return "Vec::new()"
+        parts = []
+        for item in value:
+            if len(f.element) == 1 and f.element[0].ident == "_item":
+                lit = _rust_element(f.element[0], item, resolved)
+            elif isinstance(item, dict):
+                lits = []
+                for e in f.element:
+                    ev = item.get(e.ident, item.get(e.ident.rstrip("_")))
+                    # A tuple slot is never optional, so a guarded element field
+                    # must carry its value or the packet has no pinned vector.
+                    if e.guard is not None and ev is None:
+                        return None
+                    el = _rust_inner(e, ev, resolved)
+                    if el is None:
+                        return None
+                    lits.append(el)
+                lit = "(" + ", ".join(lits) + ")"
+            else:
+                lit = None
+            if lit is None:
+                return None
+            parts.append(lit)
+        return "vec![" + ", ".join(parts) + "]"
+
+    frame = _frame_expr(f, resolved)
+    if f.opaque or frame or f.rtype == "Vec<u8>":
+        if isinstance(value, (bytes, bytearray)):
+            data = bytes(value)
+        elif isinstance(value, str):
+            data = value.encode("utf-8")
+        elif f.ref is not None:
+            data = _encode_bare(f.ref, value, resolved, f.params)
+            if data is None:
+                return None
+        else:
+            return None
+        # A declared frame is exactly its length: the interpreter zero-pads a
+        # short value and rejects a long one, and `fixed_raw_bytes` panics on
+        # any other length, so a literal must match that contract.
+        n = _opaque_len(f.ref, resolved, f.params)
+        if n is not None:
+            n = int(n)
+            if len(data) < n:
+                data = data + bytes(n - len(data))
+            elif len(data) > n:
+                return None
+        return _rust_bytes(data)
+
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if f.rtype == "String":
+        return _rust_str(value) if isinstance(value, str) else None
+    if f.rtype in ("f32", "f64"):
+        return repr(value) if isinstance(value, float) else None
+    if f.rtype == "Uuid":
+        if not isinstance(value, dict) or "msb" not in value or "lsb" not in value:
+            return None
+        mask = (1 << 64) - 1
+        return f"Uuid::from_bits({int(value['msb']) & mask}, {int(value['lsb']) & mask})"
+    if f.rtype == "CoordVec":
+        if not isinstance(value, dict) or "raw" not in value:
+            return None
+        x, y, z = _position_components(int(value["raw"]))
+        return f"CoordVec::new({float(x)}, {float(y)}, {float(z)})"
+    if f.rtype in _PRIM_RTYPES and isinstance(value, int) and not isinstance(value, bool):
+        bits, signed = _PRIM_RTYPES[f.rtype]
+        return _rust_int(value, bits, signed)
+    return None
+
+
+def _py_field_value(f: "PacketShape", value: dict) -> object:
+    for key in (f.ident, f.ident.rstrip("_")):
+        if key in value:
+            return value[key]
+    return None
+
+
+def _parity_args(
+    pkt: PacketDecl, fields: list["PacketShape"], resolved: ResolvedSchema
+) -> tuple[list[str], bytes] | None:
+    """Constructor literals + the Python-encoded reference bytes for `pkt`.
+
+    The interpreter is the reference encoder (its output is pinned by the
+    golden frames in `tests/test_play_packets.py`), so a Rust serializer that
+    agrees with it is wire-correct — a self-roundtrip alone only proves the
+    encoder and decoder are mutually inverse. Returns None when a packet's
+    value cannot be rendered; the caller then falls back to a default-value
+    self-roundtrip rather than failing the emit.
+    """
+    try:
+        # This emitter frames a payload two ways the reference does not: an
+        # unframed opaque repeat element and a non-final `rest` field are both
+        # length-prefixed (the only self-delimiting option available), so those
+        # packets keep the consistency check but not a byte-for-byte pin.
+        for i, f in enumerate(fields):
+            if f.repeat_mode is not None and any(
+                _elem_needs_prefix(e, resolved) for e in f.element
+            ):
+                return None
+            if f.ref is not None and f.ref.name == "rest" and i != len(fields) - 1:
+                return None
+        py = synthesize_packet(resolved, pkt)
+        expected = encode_packet(resolved, pkt.name, py)
+        lits = []
+        for f in fields:
+            lit = _rust_literal(f, _py_field_value(f, py), resolved)
+            if lit is None:
+                return None
+            lits.append(lit)
+    except Exception:
+        return None
+    return lits, expected
+
+
+def _emit_roundtrip_test(
+    stem: str, name: str, ser: str, pkt: PacketDecl, resolved: ResolvedSchema
+) -> str:
     """One test per packet, matching rstom's `*.tests.rs` contract."""
+    fields, _types = _packet_fields(pkt, resolved)
+    parity = _parity_args(pkt, fields, resolved)
+    if parity:
+        literals, pin_bytes = parity
+        ctor = f"{name}::new({', '.join(literals)})"
+        pin = (
+            "    // Pinned by the Python interpreter's encoding of the same\n"
+            "    // synthetic value (`bps/synth.py`); this asserts the Rust\n"
+            "    // serializer produces identical bytes, not just inverse ones.\n"
+            f"    assert_eq!(bytes, {_rust_bytes(pin_bytes)});\n"
+        )
+        extra = [
+            use
+            for use, marker in (
+                ("use rstom::coordinate::Vec as CoordVec;", "CoordVec::new"),
+                ("use rstom::network::uuid::Uuid;", "Uuid::from_bits"),
+            )
+            if marker in ctor
+        ]
+        use_block = "".join(f"{use}\n" for use in extra) + "\n"
+    else:
+        ctor = f"{name}::default()"
+        pin = (
+            "    // No pinned reference for this packet's synthetic value; the\n"
+            "    // encode/decode pair is only checked for consistency.\n"
+        )
+        use_block = ""
     return f'''//! Generated by `bps emit rust`: round-trip for `{name}`.
 
 use bps_rstom::packets::{stem}::{name};
 
 use rstom::network::buffer::NetworkBuffer;
 use rstom::network::packet::serializer::PacketValue;
-
+{use_block}
 #[test]
 fn round_trips() {{
-    let packet = {name}::default();
+    let packet = {ctor};
     let bytes = NetworkBuffer::make_array(|buffer| {{
         {name}::serializer().write(buffer, &(Box::new(packet.clone()) as PacketValue))
     }});
-    let mut buffer = NetworkBuffer::wrap(bytes.clone(), 0, bytes.len() as i64);
+{pin}    let mut buffer = NetworkBuffer::wrap(bytes.clone(), 0, bytes.len() as i64);
     let decoded = {name}::serializer().read(&mut buffer);
     let bytes2 = NetworkBuffer::make_array(|buffer| {{
         {name}::serializer().write(buffer, &decoded)
@@ -1636,8 +1912,17 @@ def _emit_packet_vanilla(resolved: ResolvedSchema, vanilla_dir: Path) -> list[Pa
     return written
 
 
-def emit_rstom(resolved: ResolvedSchema, out_dir: Path) -> list[Path]:
-    """Emit an rstom-compatible packet crate. Returns the emitted files."""
+def emit_rstom(
+    resolved: ResolvedSchema,
+    out_dir: Path,
+    rstom_path: str = "../rstom",
+) -> list[Path]:
+    """Emit an rstom-compatible packet crate. Returns the emitted files.
+
+    `rstom_path` is the `path` dependency written into the crate's manifest;
+    the deployment target (`../rstom/crates/bps_rstom`) resolves its sibling
+    crate relatively, while a scratch emit can point at an absolute path.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     src = out_dir / "src"
     written: list[Path] = []
@@ -1681,7 +1966,8 @@ def emit_rstom(resolved: ResolvedSchema, out_dir: Path) -> list[Path]:
         stem = _snake(pkt.name)
         ser = name[: -len("Packet")] + "Serializer"
         (tests / f"roundtrip_{stem}.rs").write_text(
-            _emit_roundtrip_test(stem, name, ser), encoding="utf-8"
+            _emit_roundtrip_test(stem, name, ser, pkt, resolved),
+            encoding="utf-8",
         )
         written.append(tests / f"roundtrip_{stem}.rs")
 
@@ -1697,9 +1983,9 @@ def emit_rstom(resolved: ResolvedSchema, out_dir: Path) -> list[Path]:
     (out_dir / "Cargo.toml").write_text(
         '[package]\nname = "bps_rstom"\nversion = "0.1.0"\nedition = "2024"\n\n'
         "[dependencies]\n"
-        'rstom = { path = "../rstom" }\n\n'
+        f'rstom = {{ path = "{rstom_path}" }}\n\n'
         "[dev-dependencies]\n"
-        'rstom = { path = "../rstom" }\n',
+        f'rstom = {{ path = "{rstom_path}" }}\n',
         encoding="utf-8",
     )
     written.append(out_dir / "Cargo.toml")

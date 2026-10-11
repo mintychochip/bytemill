@@ -1,6 +1,7 @@
 """Tests for `bps emit rstom` (rstom `PacketSerializer` crate shape)."""
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -67,27 +68,36 @@ class EmitRstomTest(unittest.TestCase):
                 ),
             )
 
-    def test_bps_rstom_workspace_cargo_test(self) -> None:
+    def test_emitted_crate_compiles_and_passes_roundtrips(self) -> None:
+        """The emitted crate compiles against real rstom and its tests pass.
+
+        The emit goes to a scratch directory outside the rstom checkout (which
+        points at rstom by absolute path, with the workspace's target dir
+        reused for the build cache), so running this suite never mutates
+        another repository — refreshing the deployed crate is the CLI's job.
+        """
         if shutil.which("cargo") is None:
             self.skipTest("cargo not installed")
         rstom_ws = ROOT.parent / "rstom"
-        out = rstom_ws / "crates" / "bps_rstom"
         if not (rstom_ws / "Cargo.toml").is_file():
             self.skipTest("rstom workspace not present")
         resolved = load_minecraft()
-        emit_rstom(resolved, out)
-        proc = subprocess.run(
-            ["cargo", "test", "-p", "bps_rstom", "--quiet"],
-            cwd=rstom_ws,
-            capture_output=True,
-            text=True,
-            timeout=600,
-        )
-        self.assertEqual(
-            proc.returncode,
-            0,
-            msg=proc.stdout + proc.stderr,
-        )
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "bps_rstom"
+            emit_rstom(resolved, out, rstom_path=str(rstom_ws / "crates" / "rstom"))
+            env = dict(os.environ, CARGO_TARGET_DIR=str(rstom_ws / "target"))
+            proc = subprocess.run(
+                ["cargo", "test", "--manifest-path", str(out / "Cargo.toml"), "--quiet"],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            self.assertEqual(
+                proc.returncode,
+                0,
+                msg=proc.stdout + proc.stderr,
+            )
 
 
 if __name__ == "__main__":
