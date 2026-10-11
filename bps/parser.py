@@ -37,9 +37,13 @@ class Parser:
         enums: list[ast.EnumDecl] = []
         packets: list[ast.PacketDecl] = []
         protocols: list[ast.ProtocolDecl] = []
+        imports: list[str] = []
         while not self.at(TokKind.EOF):
             name = self.cur().value
-            if name == "encoding":
+            if name == "import":
+                self.pos += 1
+                imports.append(str(self.eat(TokKind.STRING, "expected import path").value))
+            elif name == "encoding":
                 encodings.append(self.parse_encoding())
             elif name == "enum":
                 enums.append(self.parse_enum())
@@ -49,7 +53,13 @@ class Parser:
                 protocols.append(self.parse_protocol())
             else:
                 raise ParseError(f"expected top-level declaration, got {name!r}", offset=self.cur().pos)
-        return ast.Schema(tuple(encodings), tuple(enums), tuple(packets), tuple(protocols))
+        return ast.Schema(
+            tuple(encodings),
+            tuple(enums),
+            tuple(packets),
+            tuple(protocols),
+            tuple(imports),
+        )
 
     def parse_encoding(self) -> ast.EncodingDecl:
         self.eat_ident("encoding")
@@ -57,8 +67,13 @@ class Parser:
         params = self.parse_params()
         if self.at(TokKind.EQ):
             self.eat(TokKind.EQ)
-        body = self.parse_type_body()
-        return ast.EncodingDecl(name, params, body)
+        if self.at(TokKind.LBRACE):
+            body = self.parse_block_type()
+            yield_expr = None
+            if self.try_eat(TokKind.EQ):
+                yield_expr = self.parse_expr()
+            return ast.EncodingDecl(name, params, body, yield_expr)
+        return ast.EncodingDecl(name, params, self.parse_type_ref())
 
     def parse_params(self) -> tuple[ast.Param, ...]:
         if not self.at(TokKind.LPAREN):
@@ -161,6 +176,16 @@ class Parser:
                     ast.BlockItem("group", group_if=cond, group_items=group_items)
                 )
                 continue
+            # `match:` / `match =` are a field and a computed value. A statement
+            # is `match (action) { ... }` or `switch action { ... }`.
+            if self.cur().value in ("match", "switch") and self.peek().kind not in (
+                TokKind.COLON,
+                TokKind.EQ,
+            ):
+                items.append(
+                    ast.BlockItem("match", match=self.parse_match_type(statement=True))
+                )
+                continue
             name = self.eat_ident_value()
             if self.try_eat(TokKind.EQ):
                 items.append(
@@ -191,13 +216,16 @@ class Parser:
                     items.append(self.parse_conditional_group_item())
                     continue
                 if_expr = cond
+            encode_expr = None
+            if self.try_eat(TokKind.EQ):
+                encode_expr = self.parse_expr()
             repeat = None
             if self.at(TokKind.LBRACK):
                 repeat = self.parse_repeat()
             items.append(
                 ast.BlockItem(
                     "field",
-                    wire=ast.WireField(name, type_ref, if_expr, repeat),
+                    wire=ast.WireField(name, type_ref, if_expr, repeat, encode_expr),
                 )
             )
             self.try_eat(TokKind.COMMA)
@@ -220,36 +248,61 @@ class Parser:
         raise ParseError("expected until, until_end, or count", offset=self.cur().pos)
 
     def parse_field_type(self) -> ast.TypeRef | ast.BlockType | ast.MatchType:
-        if self.cur().value == "match":
+        if self.cur().value in ("match", "switch"):
             return self.parse_match_type()
         if self.at(TokKind.LBRACE):
             return self.parse_block_type()
         return self.parse_type_ref()
 
-    def parse_match_type(self) -> ast.MatchType:
-        self.eat_ident("match")
+    def parse_match_type(self, statement: bool = False) -> ast.MatchType:
+        kw = self.cur().value
+        if kw not in ("match", "switch"):
+            raise ParseError(f"expected match or switch, got {kw!r}", offset=self.cur().pos)
+        self.pos += 1
         tag = self.parse_expr()
         self.eat(TokKind.LBRACE)
         arms: list[ast.MatchArm] = []
         while not self.at(TokKind.RBRACE):
-            if self.cur().value == "_":
-                self.pos += 1
-                self.eat(TokKind.OP)
-                arms.append(ast.MatchArm(None, self.parse_type_ref_only()))
+            tag_val, tags = self.parse_arm_tags()
+            self.eat_op("=>")
+            if statement:
+                if not self.at(TokKind.LBRACE):
+                    raise ParseError("match arm must be a block", offset=self.cur().pos)
+                body: ast.TypeRef | ast.BlockType = self.parse_block_type()
+            elif self.at(TokKind.LBRACE):
+                body = self.parse_block_type()
             else:
-                if self.at(TokKind.INT):
-                    tag_val = int(self.eat(TokKind.INT).value)
-                else:
-                    tag_val = self.eat_ident_value()
-                self.eat(TokKind.OP)
-                if self.at(TokKind.LBRACE):
-                    t = self.parse_block_type()
-                else:
-                    t = self.parse_type_ref_only()
-                arms.append(ast.MatchArm(tag_val, t))
+                body = self.parse_type_ref_only()
+            arms.append(ast.MatchArm(tag_val, body, tags))
             self.try_eat(TokKind.COMMA)
         self.eat(TokKind.RBRACE)
         return ast.MatchType(tag, tuple(arms))
+
+    def parse_arm_tags(self) -> tuple[int | str | None, tuple[int | str, ...]]:
+        """One arm's tags: `_`, `0`, or `0 | 1 | name`."""
+        if self.cur().value == "_":
+            self.pos += 1
+            if self.cur().kind == TokKind.OP and self.cur().value == "|":
+                raise ParseError(
+                    "'_' cannot be combined with other tags", offset=self.cur().pos
+                )
+            return None, ()
+        tags = [self.parse_one_arm_tag()]
+        while self.cur().kind == TokKind.OP and self.cur().value == "|":
+            self.pos += 1
+            tags.append(self.parse_one_arm_tag())
+        if len(tags) == 1:
+            return tags[0], ()
+        return tags[0], tuple(tags)
+
+    def parse_one_arm_tag(self) -> int | str:
+        if self.cur().value == "_":
+            raise ParseError(
+                "'_' cannot be combined with other tags", offset=self.cur().pos
+            )
+        if self.at(TokKind.INT):
+            return int(self.eat(TokKind.INT).value)
+        return self.eat_ident_value()
 
     def parse_block_type(self) -> ast.BlockType:
         items = self.parse_block_items()
@@ -419,6 +472,12 @@ class Parser:
         if len(path) == 1:
             return ast.Expr("ident", name=path[0])
         return ast.Expr("path", value=".".join(path))
+
+    def eat_op(self, text: str) -> None:
+        tok = self.cur()
+        if tok.kind != TokKind.OP or tok.value != text:
+            raise ParseError(f"expected {text!r}", offset=tok.pos)
+        self.pos += 1
 
     def eat_ident(self, text: str) -> None:
         tok = self.cur()

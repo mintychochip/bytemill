@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from bps import ast
 from bps.errors import BpsError
+from bps.interp.engine import select_match_arm
 from bps.interp.evalexpr import eval_expr, truthy
 
 # Value per primitive, small enough to satisfy the schema's own constraints.
@@ -32,8 +33,6 @@ _PRIM: dict[str, object] = {
     "f64be": 2.25,
     "varint": 300,
     "varlong": 300,
-    "leb128": 300,
-    "bool": True,
     "boolean": True,
     "angle": 64,
     "string": "abc",
@@ -124,7 +123,43 @@ def _value_for(t, env: dict, scope: _Env) -> object:
         return _RAW
     if isinstance(enc.body, ast.TypeRef):
         return _value_for(enc.body, env, scope)
+    if enc.yield_expr is not None:
+        return _PRIM.get(name, 1)
     return _block_value(enc.body.items, env, scope)
+
+
+def _concrete_arm_tag(arm: ast.MatchArm) -> int | None:
+    raw = arm.tags if arm.tags else (() if arm.tag is None else (arm.tag,))
+    for tag in raw:
+        if isinstance(tag, int):
+            return tag
+    return None
+
+
+def _synth_match(item: ast.BlockItem, local: dict, scope: _Env) -> dict:
+    """Synthesize the arm selected by the scrutinee already in `local`.
+
+    When no arm matches and there is no `_`, retarget a plain identifier
+    scrutinee onto the first concrete tag so the value can still encode.
+    """
+    mt = item.match
+    if mt is None:
+        return {}
+    try:
+        tag = int(eval_expr(mt.tag_expr, local))
+    except (BpsError, TypeError, ValueError):
+        tag = None
+    arm = select_match_arm(mt, tag) if tag is not None else None
+    extra: dict = {}
+    if arm is None and mt.arms:
+        arm = next((a for a in mt.arms if _concrete_arm_tag(a) is not None), mt.arms[0])
+        chosen = _concrete_arm_tag(arm) if arm is not None else None
+        if chosen is not None and mt.tag_expr.kind == "ident" and mt.tag_expr.name:
+            local[mt.tag_expr.name] = chosen
+            extra[mt.tag_expr.name] = chosen
+    if arm is not None and isinstance(arm.type_ref, ast.BlockType):
+        extra.update(_block_value_shared(arm.type_ref.items, local, scope))
+    return extra
 
 
 def _block_value_shared(items: tuple[ast.BlockItem, ...], local: dict, scope: _Env) -> dict:
@@ -149,6 +184,9 @@ def _block_value_shared(items: tuple[ast.BlockItem, ...], local: dict, scope: _E
                 cond = True
             if cond:
                 out.update(_block_value_shared(item.group_items, local, scope))
+            continue
+        if item.kind == "match":
+            out.update(_synth_match(item, local, scope))
             continue
         if item.kind != "field" or item.wire is None:
             continue
@@ -205,6 +243,9 @@ def _block_value(items: tuple[ast.BlockItem, ...], env: dict, scope: _Env) -> di
                 # The group shares this block's scope, so a count adjustment
                 # inside it is visible here — pass `local` itself.
                 out.update(_block_value_shared(item.group_items, local, scope))
+            continue
+        if item.kind == "match":
+            out.update(_synth_match(item, local, scope))
             continue
         if item.kind != "field" or item.wire is None:
             continue

@@ -11,7 +11,16 @@ import re
 from pathlib import Path
 
 from bps import ast
-from bps.ast import BlockItem, EncodingDecl, PacketDecl, ResolvedSchema, TypeRef, WireField
+from bps.analyze import reject_unlowered_scalars
+from bps.ast import (
+    BlockItem,
+    EncodingDecl,
+    MatchArm,
+    PacketDecl,
+    ResolvedSchema,
+    TypeRef,
+    WireField,
+)
 
 RUNTIME_RS = r'''//! Generated BPS runtime: cursor, Minecraft VarInt, and shared wire helpers.
 
@@ -282,7 +291,9 @@ pub fn hashed_slot_at(cur: &mut Cursor) -> Result<Value, BpsError> {
 }
 '''
 
-# Primitives emitted inline (no helper function needed beyond runtime fns).
+# Names lowered to runtime helpers. `u8`/`f32be`/`f64be` are real primitives.
+# The integer and varint names are schemas in `schemas/std/`; the helpers must
+# agree with those schemas, which the differential tests check.
 PRIMITIVES: dict[str, str] = {
     "u8": "u8_at(cur)? as i64",
     "i8": "i8_at(cur)?",
@@ -296,14 +307,13 @@ PRIMITIVES: dict[str, str] = {
     "f64be": "f64_be(cur)?",
     "varint": "varint(cur)?",
     "varlong": "varlong(cur)?",
-    "bool": "boolean(cur)?",
     "boolean": "boolean(cur)?",
     "angle": "u8_at(cur)? as i64",
 }
 
 INT_TYPES = {
     "u8", "i8", "u16be", "i16be", "u32be", "i32be", "u64be", "i64be",
-    "varint", "varlong", "angle", "leb128",
+    "varint", "varlong", "angle",
 }
 
 # Encodings with dedicated runtime helpers.
@@ -345,6 +355,16 @@ class Walker:
         return f"t{self.counter}"
 
     # --- expressions -------------------------------------------------------
+
+    def match_pat(self, arm: MatchArm) -> str | None:
+        """Rust pattern for an arm. `None` is an unresolved enum-member tag."""
+        if (arm.tag is None or arm.tag == "_") and not arm.tags:
+            return "_"
+        raw = arm.tags if arm.tags else (arm.tag,)
+        ints = [str(int(t)) for t in raw if isinstance(t, int)]
+        if not ints:
+            return None
+        return " | ".join(ints)
 
     def expr(self, e: ast.Expr) -> str:
         k = e.kind
@@ -399,8 +419,10 @@ class Walker:
             for arm in t.arms:
                 if arm.type_ref is None:
                     continue
+                pat = self.match_pat(arm)
+                if pat is None:
+                    continue
                 body = self.decode_expr(arm.type_ref, indent + "        ")
-                pat = "_" if arm.tag is None else str(int(arm.tag))
                 arms.append(f"{indent}        {pat} => {body},")
             joined = "\n".join(arms)
             return (
@@ -428,9 +450,6 @@ class Walker:
             return f"json!(cur.read(({n}) as usize)?.to_vec())"
         if name == "rest":
             return "json!(cur.read(cur.remaining())?.to_vec())"
-        if name == "leb128":
-            bits = self.expr(ref.args[0]) if ref.args else "32"
-            return f"json!(runtime::leb128(cur, ({bits}) as u32)?)"
         enc = self.resolved.encodings.get(name)
         if enc is not None:
             if name == "varint":
@@ -478,6 +497,26 @@ class Walker:
                 inner = self.block_stmts(item.group_items, indent + "    ")
                 lines.append(f"{indent}if {cond} != 0 {{")
                 lines.append(inner)
+                lines.append(f"{indent}}}")
+                continue
+            if item.kind == "match" and item.match is not None:
+                lines.append(f"{indent}match {self.expr(item.match.tag_expr)} {{")
+                saw_default = False
+                for arm in item.match.arms:
+                    pat = self.match_pat(arm)
+                    if pat is None:
+                        continue
+                    if pat == "_":
+                        saw_default = True
+                    body = ""
+                    if isinstance(arm.type_ref, ast.BlockType):
+                        body = self.block_stmts(arm.type_ref.items, indent + "        ")
+                    lines.append(f"{indent}    {pat} => {{")
+                    if body:
+                        lines.append(body)
+                    lines.append(f"{indent}    }}")
+                if not saw_default:
+                    lines.append(f"{indent}    _ => {{}}")
                 lines.append(f"{indent}}}")
                 continue
             if item.kind == "spread":
@@ -552,6 +591,7 @@ pub fn decode_{name}(cur: &mut Cursor) -> Result<Value, BpsError> {{
 
 
 def emit_rust(resolved: ResolvedSchema, out_dir: Path) -> None:
+    reject_unlowered_scalars(resolved, {*PRIMITIVES, *HELPERS}, "Rust")
     out_dir.mkdir(parents=True, exist_ok=True)
     src = out_dir / "src"
     src.mkdir(parents=True, exist_ok=True)

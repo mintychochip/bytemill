@@ -31,6 +31,7 @@ import subprocess
 from pathlib import Path
 
 from bps import ast
+from bps.analyze import reject_unlowered_scalars
 from bps.ast import BlockItem, PacketDecl, ResolvedSchema, RouteDecl, TypeRef
 from bps.interp.engine import encode_packet
 from bps.synth import synthesize_packet
@@ -50,7 +51,6 @@ WIRE_TYPES: dict[str, tuple[str, str]] = {
     "f64be": ("DOUBLE", "f64"),
     "varint": ("VAR_INT", "i32"),
     "varlong": ("VAR_LONG", "i64"),
-    "bool": ("BOOLEAN", "bool"),
     "boolean": ("BOOLEAN", "bool"),
     "angle": ("BYTE", "i8"),
     "position": ("BLOCK_POSITION", "CoordVec"),
@@ -204,7 +204,11 @@ def _expand_encoding(
     emit an opaque frame for it. Prevents infinite recursion on self-referential
     encodings (NBT).
     """
-    if resolved is None or ref.name in seen or ref.name in OPAQUE:
+    if resolved is None or ref.name in seen:
+        return False
+    # Wire types and opaque payloads have their own lowering; their block bodies
+    # (a varint's continuation bytes) are not packet fields.
+    if ref.name in OPAQUE or ref.name in WIRE_TYPES:
         return False
     enc = resolved.encodings.get(ref.name)
     if enc is None or not isinstance(enc.body, ast.BlockType):
@@ -922,6 +926,11 @@ def _or_guard(left: ast.Expr | None, right: ast.Expr | None) -> ast.Expr | None:
     return ast.Expr("binop", "||", left, right)
 
 
+def _arm_int_tags(arm: ast.MatchArm) -> list[int]:
+    raw = arm.tags if arm.tags else (() if arm.tag is None else (arm.tag,))
+    return [int(t) for t in raw if isinstance(t, int)]
+
+
 def _match_tag_name(expr: ast.Expr) -> str:
     if expr.kind == "ident" and expr.name:
         return expr.name
@@ -1246,20 +1255,26 @@ def _flatten_match(
     parent: str = "",
 ) -> None:
     tag = _match_tag_name(mt.tag_expr)
-    explicit: list[int | str] = []
+    explicit: list[int] = []
     for arm in mt.arms:
-        if arm.tag is None or arm.tag == "_":
+        if (arm.tag is None or arm.tag == "_") and not arm.tags:
             continue
-        explicit.append(arm.tag)
-        arm_guard = _and_guard(
-            parent_guard,
-            ast.Expr(
-                "binop",
-                "==",
-                ast.Expr("ident", name=tag),
-                ast.Expr("int", arm.tag) if isinstance(arm.tag, int) else None,
-            ),
-        )
+        tags = _arm_int_tags(arm)
+        if not tags:
+            continue
+        explicit.extend(tags)
+        arm_guard: ast.Expr | None = None
+        for arm_tag in tags:
+            arm_guard = _or_guard(
+                arm_guard,
+                ast.Expr(
+                    "binop",
+                    "==",
+                    ast.Expr("ident", name=tag),
+                    ast.Expr("int", arm_tag),
+                ),
+            )
+        arm_guard = _and_guard(parent_guard, arm_guard)
         if arm.type_ref is None:
             continue
         if isinstance(arm.type_ref, ast.BlockType):
@@ -1270,7 +1285,10 @@ def _flatten_match(
             _expand_encoding(
                 arm.type_ref, resolved, out, set(), arm_guard, field_types, parent
             )
-    default = next((a for a in mt.arms if a.tag is None or a.tag == "_"), None)
+    default = next(
+        (a for a in mt.arms if (a.tag is None or a.tag == "_") and not a.tags),
+        None,
+    )
     if default is None or default.type_ref is None:
         return
     if isinstance(default.type_ref, TypeRef) and default.type_ref.name == "nbt_nothing":
@@ -1325,6 +1343,11 @@ def _flatten(
                 field_types,
                 parent,
                 expand_payloads,
+            )
+            continue
+        if item.kind == "match" and item.match is not None:
+            _flatten_match(
+                item.match, out, resolved, bind, parent_guard, field_types, parent
             )
             continue
         if item.kind == "spread" and resolved is not None:
@@ -2553,6 +2576,7 @@ def emit_rstom(
     the deployment target (`../rstom/crates/bps_rstom`) resolves its sibling
     crate relatively, while a scratch emit can point at an absolute path.
     """
+    reject_unlowered_scalars(resolved, {*WIRE_TYPES, *OPAQUE, *SELF_DELIMITING}, "rstom")
     out_dir.mkdir(parents=True, exist_ok=True)
     src = out_dir / "src"
     written: list[Path] = []

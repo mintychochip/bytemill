@@ -34,9 +34,18 @@ def _decode_block_items(
     cur: Cursor,
     resolved: ast.ResolvedSchema,
     param_env: dict[str, Any],
+    prebind: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Decode a block; returns only the names this block defines (no parent env leak)."""
-    env: dict[str, Any] = dict(param_env)
+    """Decode a block; returns only the names this block defines (no parent env leak).
+
+    `prebind` supplies values visible to conditions and `require` (optional
+    varint bytes are 0 when absent) without being stamped as spread parameters,
+    which would overwrite the bytes actually read.
+    """
+    env: dict[str, Any] = {}
+    if prebind:
+        env.update(prebind)
+    env.update(param_env)
     out: dict[str, Any] = {}
     expanded = _expand_items(items, resolved, param_env)
 
@@ -73,11 +82,25 @@ def _decode_block_items(
                     cur,
                     resolved,
                     _merge_group_env(group_env, item),
+                    prebind,
                 ).items():
                     bind(k, v)
             continue
         if item.kind == "computed":
             bind(item.computed_name, eval_expr(item.computed_expr, env))
+            continue
+        if item.kind == "match" and item.match is not None:
+            tag = int(eval_expr(item.match.tag_expr, env))
+            arm = select_match_arm(item.match, tag)
+            if arm is None:
+                raise DecodeError(f"no match arm for tag {tag}")
+            if isinstance(arm.type_ref, ast.BlockType):
+                for k, v in _decode_block_items(
+                    arm.type_ref.items, cur, resolved, env, prebind
+                ).items():
+                    bind(k, v)
+            elif arm.type_ref is not None:
+                raise DecodeError("statement match arm must be a block")
             continue
         if item.kind == "field" and item.wire:
             wf = item.wire
@@ -135,6 +158,24 @@ def _expand_items(
                         ),
                     ),
                     item._param_env or param_env,
+                )
+            )
+        elif item.kind == "match" and item.match is not None:
+            new_arms = []
+            for arm in item.match.arms:
+                body = arm.type_ref
+                if isinstance(body, ast.BlockType):
+                    body = ast.BlockType(
+                        tuple(_expand_items(body.items, resolved, param_env))
+                    )
+                new_arms.append(ast.MatchArm(arm.tag, body, arm.tags))
+            out.append(
+                _with_param_env(
+                    ast.BlockItem(
+                        "match",
+                        match=ast.MatchType(item.match.tag_expr, tuple(new_arms)),
+                    ),
+                    param_env,
                 )
             )
         else:
@@ -213,6 +254,33 @@ def _decode_type(
     return _decode_type_ref(t, cur, resolved, env)
 
 
+def _is_default_arm(arm: ast.MatchArm) -> bool:
+    return arm.tag is None and not arm.tags
+
+
+def _arm_tag_list(arm: ast.MatchArm) -> tuple[int | str, ...]:
+    if arm.tags:
+        return arm.tags
+    if arm.tag is None:
+        return ()
+    return (arm.tag,)
+
+
+def select_match_arm(mt: ast.MatchType, tag: int) -> ast.MatchArm | None:
+    """First arm whose tags include `tag`. `_` is the fallback, wherever it sits."""
+    default: ast.MatchArm | None = None
+    for arm in mt.arms:
+        if _is_default_arm(arm):
+            default = arm
+            continue
+        for arm_tag in _arm_tag_list(arm):
+            if isinstance(arm_tag, str):
+                continue
+            if int(arm_tag) == tag:
+                return arm
+    return default
+
+
 def decode_type_with_tag(
     t: ast.TypeRef | ast.BlockType | ast.MatchType,
     cur: Cursor,
@@ -221,18 +289,10 @@ def decode_type_with_tag(
     tag: int,
 ) -> Any:
     if isinstance(t, ast.MatchType):
-        for arm in t.arms:
-            if arm.tag is None:
-                if arm.type_ref is None:
-                    continue
-                return _decode_arm_type(arm.type_ref, cur, resolved, env)
-            arm_tag = arm.tag
-            if isinstance(arm_tag, str):
-                # enum member - skip for now
-                continue
-            if int(arm_tag) == tag:
-                return _decode_arm_type(arm.type_ref, cur, resolved, env)
-        raise DecodeError(f"no match arm for tag {tag}")
+        arm = select_match_arm(t, tag)
+        if arm is None:
+            raise DecodeError(f"no match arm for tag {tag}")
+        return _decode_arm_type(arm.type_ref, cur, resolved, env)
     return _decode_type(t, cur, resolved, env)
 
 
@@ -262,24 +322,15 @@ def _decode_type_ref(
         # whole scope, or its field names collide with the caller's.
         bind = _bind_params(enc.params, ref.args, {} if not enc.params else env)
         if isinstance(enc.body, ast.BlockType):
+            if enc.yield_expr is not None:
+                return _decode_scalar(enc, cur, resolved, bind)
             # Parameters of the encoding stay in scope for its own fields and
             # for any `...spread` inside it.
             decoded = _decode_block_items(_expand_items(enc.body.items, resolved, bind), cur, resolved, bind)
             if enc.name in ("string", "identifier", "nbt_string") and "value" in decoded:
                 return decoded["value"]
-            if enc.name == "boolean" and "value" in decoded:
-                return decoded["value"] != 0
             return decoded
         return _decode_type_ref(enc.body, cur, resolved, bind)
-    if name == "leb128":
-        bits = int(eval_expr(ref.args[0], env)) if ref.args else 32
-        signed = False
-        if len(ref.args) > 1:
-            if ref.args[1].kind == "bool":
-                signed = bool(ref.args[1].value)
-            elif ref.args[1].kind == "ident" and ref.args[1].name == "signed":
-                signed = True
-        return _read_leb128(cur, bits, signed)
     if name == "bytes":
         n = int(eval_expr(ref.args[0], env))
         raw = cur.read(n)
@@ -291,23 +342,6 @@ def _decode_type_ref(
         return cur.read(cur.remaining())
     if name == "u8":
         return struct.unpack(">B", cur.read(1))[0]
-    if name == "i8":
-        return struct.unpack(">b", cur.read(1))[0]
-    if name == "u16be":
-        return struct.unpack(">H", cur.read(2))[0]
-    if name == "i16be":
-        return struct.unpack(">h", cur.read(2))[0]
-    if name == "u32be":
-        return struct.unpack(">I", cur.read(4))[0]
-    if name == "i32be":
-        return struct.unpack(">i", cur.read(4))[0]
-    if name == "u64be":
-        return struct.unpack(">Q", cur.read(8))[0]
-    if name == "i64be":
-        return struct.unpack(">q", cur.read(8))[0]
-    if name == "bool" or name == "boolean":
-        b = cur.read(1)[0]
-        return b != 0
     if name == "f32be":
         return struct.unpack(">f", cur.read(4))[0]
     if name == "f64be":
@@ -315,41 +349,99 @@ def _decode_type_ref(
     raise DecodeError(f"cannot decode type {name!r}")
 
 
-def _read_leb128(cur: Cursor, bits: int, signed: bool) -> int:
-    shift = 0
-    result = 0
-    max_bytes = 10 if bits == 64 else 5
-    for _ in range(max_bytes):
-        b = cur.read(1)[0]
-        result |= (b & 0x7F) << shift
-        shift += 7
-        if (b & 0x80) == 0:
-            break
-    else:
-        raise DecodeError("leb128 too long", offset=cur.pos)
-    if signed:
-        if bits == 32:
-            if result & (1 << 31):
-                result -= 1 << 32
-        elif bits == 64:
-            if result & (1 << 63):
-                result -= 1 << 64
-    return result
+def _collect_wire_names(items: tuple[ast.BlockItem, ...]) -> list[str]:
+    names: list[str] = []
+    for item in items:
+        if item.kind == "field" and item.wire is not None and item.wire.name != "_spread":
+            names.append(item.wire.name)
+        elif item.kind == "group":
+            names.extend(_collect_wire_names(item.group_items))
+        elif item.kind == "match" and item.match is not None:
+            for arm in item.match.arms:
+                if isinstance(arm.type_ref, ast.BlockType):
+                    names.extend(_collect_wire_names(arm.type_ref.items))
+    return names
 
 
-def _write_leb128(w: WriteCursor, value: int, bits: int) -> None:
-    if bits == 32:
-        value &= 0xFFFFFFFF
-    elif bits == 64:
-        value &= 0xFFFFFFFFFFFFFFFF
-    while True:
-        b = value & 0x7F
-        value >>= 7
-        if value:
-            w.emit(bytes([b | 0x80]))
-        else:
-            w.emit(bytes([b]))
-            break
+def _decode_scalar(
+    enc: ast.EncodingDecl,
+    cur: Cursor,
+    resolved: ast.ResolvedSchema,
+    bind: dict[str, Any],
+) -> Any:
+    """Decode a block encoding whose value is `yield_expr`, not the field dict.
+
+    Optional wire fields (a varint's continuation bytes) are 0 when absent, so
+    the yield expression and any `require` can mention them unconditionally.
+    """
+    assert isinstance(enc.body, ast.BlockType)
+    assert enc.yield_expr is not None
+    zeros = {name: 0 for name in _collect_wire_names(enc.body.items)}
+    decoded = _decode_block_items(enc.body.items, cur, resolved, bind, zeros)
+    env = dict(zeros)
+    env.update(bind)
+    env.update(decoded)
+    return eval_expr(enc.yield_expr, env)
+
+
+def _encode_scalar(
+    enc: ast.EncodingDecl,
+    w: WriteCursor,
+    resolved: ast.ResolvedSchema,
+    bind: dict[str, Any],
+    val: Any,
+) -> None:
+    """Encode a scalar by writing each field from its encode expression.
+
+    `value` is the scalar being written. Each field is bound under its name
+    after its expression runs, so a later `if` can see the byte just chosen.
+    """
+    assert isinstance(enc.body, ast.BlockType)
+    env = dict(bind)
+    env["value"] = val
+    for name in _collect_wire_names(enc.body.items):
+        env.setdefault(name, 0)
+    _encode_scalar_items(enc.body.items, w, resolved, env)
+
+
+def _encode_scalar_items(
+    items: tuple[ast.BlockItem, ...],
+    w: WriteCursor,
+    resolved: ast.ResolvedSchema,
+    env: dict[str, Any],
+) -> None:
+    for item in items:
+        if item.kind in ("require", "spread"):
+            continue
+        if item.kind == "computed" and item.computed_expr is not None:
+            env[item.computed_name] = eval_expr(item.computed_expr, env)
+            continue
+        if item.kind == "group":
+            if item.group_if is not None and not truthy(eval_expr(item.group_if, env)):
+                continue
+            _encode_scalar_items(item.group_items, w, resolved, env)
+            continue
+        if item.kind == "match" and item.match is not None:
+            tag_value = int(eval_expr(item.match.tag_expr, env))
+            arm = select_match_arm(item.match, tag_value)
+            if arm is None:
+                raise EncodeError(f"no match arm for tag {tag_value}")
+            if isinstance(arm.type_ref, ast.BlockType):
+                _encode_scalar_items(arm.type_ref.items, w, resolved, env)
+            continue
+        if item.kind == "field" and item.wire is not None:
+            wf = item.wire
+            if wf.if_expr is not None and not truthy(eval_expr(wf.if_expr, env)):
+                continue
+            if wf.encode_expr is not None:
+                written = eval_expr(wf.encode_expr, env)
+            else:
+                written = env.get(wf.name)
+            env[wf.name] = written
+            if wf.repeat:
+                _encode_repeat(wf, w, resolved, env, written)
+            else:
+                _encode_type(wf.type_ref, w, resolved, env, written)
 
 
 def _group_field_names(items: tuple[ast.BlockItem, ...]) -> list[ast.WireField]:
@@ -359,6 +451,10 @@ def _group_field_names(items: tuple[ast.BlockItem, ...]) -> list[ast.WireField]:
             names.append(it.wire)
         elif it.kind == "group":
             names.extend(_group_field_names(it.group_items))
+        elif it.kind == "match" and it.match is not None:
+            for arm in it.match.arms:
+                if isinstance(arm.type_ref, ast.BlockType):
+                    names.extend(_group_field_names(arm.type_ref.items))
     return names
 
 
@@ -423,6 +519,17 @@ def _encode_block_items(
             if present:
                 _encode_block_items(item.group_items, w, resolved, env)
             continue
+        if item.kind == "match" and item.match is not None:
+            scope = _merge_param_env(env, item)
+            tag_value = int(eval_expr(item.match.tag_expr, scope))
+            arm = select_match_arm(item.match, tag_value)
+            if arm is None:
+                raise EncodeError(f"no match arm for tag {tag_value}")
+            if isinstance(arm.type_ref, ast.BlockType):
+                _encode_block_items(arm.type_ref.items, w, resolved, scope)
+            elif arm.type_ref is not None:
+                raise EncodeError("statement match arm must be a block")
+            continue
         if item.kind == "field" and item.wire:
             wf = item.wire
             if wf.name == "_spread":
@@ -481,19 +588,14 @@ def _encode_type(
         _encode_type_ref(t, w, resolved, env, val)
         return
     if isinstance(t, ast.MatchType):
-        tag_value = eval_expr(t.tag_expr, env)
-        for arm in t.arms:
-            if arm.tag is None:
-                if arm.type_ref is None:
-                    return
-                _encode_type(arm.type_ref, w, resolved, env, val)
-                return
-            if int(arm.tag) == int(tag_value):
-                if arm.type_ref is None:
-                    return
-                _encode_type(arm.type_ref, w, resolved, env, val)
-                return
-        raise EncodeError(f"no match arm for tag {tag_value}")
+        tag_value = int(eval_expr(t.tag_expr, env))
+        arm = select_match_arm(t, tag_value)
+        if arm is None:
+            raise EncodeError(f"no match arm for tag {tag_value}")
+        if arm.type_ref is None:
+            return
+        _encode_type(arm.type_ref, w, resolved, env, val)
+        return
     raise EncodeError(f"cannot encode type {t!r}")
 
 
@@ -511,22 +613,20 @@ def _encode_type_ref(
         # whole scope, or its field names collide with the caller's.
         bind = _bind_params(enc.params, ref.args, {} if not enc.params else env)
         if isinstance(enc.body, ast.BlockType):
+            if enc.yield_expr is not None:
+                _encode_scalar(enc, w, resolved, bind, val)
+                return
             if isinstance(val, str) and enc.name in ("string", "identifier", "nbt_string"):
+                raw = val.encode("utf-8")
                 if enc.name == "nbt_string":
-                    raw = val.encode("utf-8")
-                    w.emit(struct.pack(">H", len(raw)))
-                    w.emit(raw)
+                    _encode_type_ref(ast.TypeRef("u16be"), w, resolved, {}, len(raw))
                 else:
-                    raw = val.encode("utf-8")
-                    _write_leb128(w, len(raw), 32)
-                    w.emit(raw)
+                    _encode_type_ref(ast.TypeRef("varint"), w, resolved, {}, len(raw))
+                w.emit(raw)
                 return
             if enc.name == "uuid" and isinstance(val, dict):
                 w.emit(struct.pack(">Q", int(val["msb"])))
                 w.emit(struct.pack(">Q", int(val["lsb"])))
-                return
-            if enc.name == "boolean":
-                w.emit(bytes([1 if val else 0]))
                 return
             if enc.name == "fixed_bitset":
                 raw = _raw_bytes(val)
@@ -543,12 +643,6 @@ def _encode_type_ref(
             _encode_block_items(expanded, w, resolved, {**env, **bind, **payload})
             return
         return _encode_type_ref(enc.body, w, resolved, bind, val)
-    if name == "leb128" or name == "varint" or name == "varlong":
-        bits = 64 if name == "varlong" else 32
-        if name == "leb128" and ref.args:
-            bits = int(eval_expr(ref.args[0], env))
-        _write_leb128(w, int(val), bits)
-        return
     if name == "bytes":
         n = int(eval_expr(ref.args[0], env))
         raw = val.encode("utf-8") if isinstance(val, str) else bytes(val)
@@ -564,24 +658,6 @@ def _encode_type_ref(
             raise EncodeError(f"expected bytes for rest, got {type(val).__name__}")
         w.emit(raw)
         return
-    if name == "u16be":
-        w.emit(struct.pack(">H", int(val) & 0xFFFF))
-        return
-    if name == "i16be":
-        w.emit(struct.pack(">h", int(val)))
-        return
-    if name == "i64be":
-        w.emit(struct.pack(">q", int(val)))
-        return
-    if name == "u64be":
-        w.emit(struct.pack(">Q", int(val)))
-        return
-    if name == "u32be":
-        w.emit(struct.pack(">I", int(val) & 0xFFFFFFFF))
-        return
-    if name == "i32be":
-        w.emit(struct.pack(">i", int(val)))
-        return
     if name == "f32be":
         w.emit(struct.pack(">f", float(val)))
         return
@@ -590,12 +666,6 @@ def _encode_type_ref(
         return
     if name == "u8":
         w.emit(struct.pack(">B", int(val) & 0xFF))
-        return
-    if name == "i8":
-        w.emit(struct.pack(">b", int(val)))
-        return
-    if name == "bool" or name == "boolean":
-        w.emit(bytes([1 if val else 0]))
         return
     raise EncodeError(f"cannot encode type {name!r}")
 
@@ -608,9 +678,9 @@ def decode_frame_payload(
 ) -> tuple[int, dict[str, Any]]:
     """Decode length-prefixed frame: returns (packet_id, payload_fields)."""
     cur = Cursor(data)
-    length = _read_leb128(cur, 32, True)
+    length = int(_decode_type_ref(ast.TypeRef("varint"), cur, resolved, {}))
     frame_end = cur.pos + length
-    packet_id = _read_leb128(cur, 32, True)
+    packet_id = int(_decode_type_ref(ast.TypeRef("varint"), cur, resolved, {}))
     payload_data = cur.read(frame_end - cur.pos)
     for route, pkt in resolved.routes:
         if route.state == state and route.direction == direction and route.packet_id == packet_id:

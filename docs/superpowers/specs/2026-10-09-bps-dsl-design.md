@@ -67,6 +67,7 @@ references allowed).
 ### 4.1 Declarations
 
 ```
+import "path.bps"
 encoding NAME(param: default, ...) = encoding_body
 enum NAME : primitive_ref { member = int, ... }
 packet NAME { field* }
@@ -79,22 +80,28 @@ protocol NAME @ VERSION { id = int  frame* route* }
 - `packet`: a top-level payload structure (fields only, no enum/encoding nesting).
 - `protocol`: names the version (`26.3`), the protocol number (`id = 777`), frame templates, and
   the routing table.
+- `import`: includes another `.bps` file, path relative to the importing file. Each file is
+  included once, and a name is still declared in exactly one file.
 
 ### 4.2 Encoding bodies
 
 ```
 encoding_body := primitive_ref ('as' transform)*
-                | '{' (field | require_stmt)* '}'
+                | '{' (field | match_stmt | require_stmt)* '}' ('=' expression)?
 
-field         := NAME ':' type modifiers?        // wire field: consumes bytes
+field         := NAME ':' type modifiers? write_expr?   // wire field: consumes bytes
                 | NAME '=' expression            // computed value: consumes nothing
 type          := primitive_ref | NAME | block | match_ref
 modifiers    := 'if' expression                  // conditional presence
                 | '[' ']' ('count' '=' expression
                           | 'until_end'
                           | 'until' expression)  // repetition
-match_ref     := 'match' expression '{' arm (',' arm)* '}'
-arm           := (int | enum_member | '_') '=>' type
+match_ref     := ('match' | 'switch') expression '{' arm (',' arm)* '}'   // field type
+match_stmt    := ('match' | 'switch') expression '{' (tags '=>' block)* '}'   // statement
+arm           := tags '=>' type
+tags          := '_' | tag ('|' tag)*
+tag           := int | enum_member
+write_expr    := '=' expression                  // scalar encodings only, see §4.2
 transform     := 'utf8' | 'fixed' '(' expression ')' | 'mutf8'
 require_stmt  := 'require' expression            // assertion, see §4.5
 ```
@@ -103,10 +110,31 @@ Blocks are also types: an encoding may be declared inline (`{ a: u8, b: varint }
 by name; a named encoding with parameters is instantiated with `NAME(args)`; a parameterized
 encoding can be spread into a block with `...NAME(args)`.
 
-Primitives (built-in encodings): `u8 i8 u16be u16le u32be u32le u64be u64le i16be i16le i32be
-i32le i64be i64le f32be f32le f64be f64le bool bytes(expr) rest utf8 mutf8 leb128(bits, signed)`.
-`bytes(n)` reads exactly `n` bytes; `rest` reads to the end of the enclosing length-bounded scope
-(packet payload or an enclosing `bytes(...)` scope — never silently crosses it).
+Primitives are the only types the compiler implements: `u8`, `f32be`, `f64be`, `bytes(expr)`, and
+`rest`. Floats stay primitive because IEEE-754 is not integer arithmetic over bytes. Every other
+fixed-width integer, `boolean`, `varint`, and `varlong` is an ordinary encoding in `schemas/std/`
+(see *Scalar encodings*). `bytes(n)` reads exactly `n` bytes; `rest` reads to the end of the
+enclosing length-bounded scope (packet payload or an enclosing `bytes(...)` scope — never silently
+crosses it).
+
+**Scalar encodings.** A block followed by `= expr` is an encoding whose value is `expr`, not the
+field dictionary. Decode reads the block, then evaluates `expr` over its fields; an optional field
+that was not read is `0`. Encode binds the scalar being written to `value`, and a wire field's own
+`= expr` is the byte it writes. `schemas/std/` builds its integers and LEB128 this way:
+
+```
+encoding u16be = {
+    b0: u8 = (value >> 8) & 0xFF
+    b1: u8 = value & 0xFF
+} = (b0 << 8) | b1
+
+encoding i16be = {
+    raw: u16be = value & 0xFFFF
+} = sign_extend(raw, 16)
+```
+
+The Rust emitters lower the std scalars by name, to runtime helpers that the differential tests
+compare against the interpreter, and refuse any other scalar encoding a packet reaches.
 
 ### 4.3 Worked example (abridged; the full tree is `schemas/minecraft_26_3.bps`)
 
@@ -116,8 +144,8 @@ mixes both for brevity. `match` arms are integer literals or members of an enum 
 tag's domain (here `enum metadata_kind : varint { byte = 0, varint = 1, … }`).
 
 ```
-encoding varint  = leb128(32, signed)     // VarInt:  two's complement, <= 5 bytes
-encoding varlong = leb128(64, signed)     // VarLong: <= 10 bytes
+import "std/integers.bps"                 // i8, u16be, ..., boolean: scalars built from u8
+import "std/varint.bps"                   // VarInt (<= 5 bytes), VarLong (<= 10): LEB128 from u8
 
 encoding string(max_chars = 32767) {      // String(n)
     byte_len: varint
@@ -211,16 +239,21 @@ Decode, per scope, in order:
 2. `if` modifiers skip the field when the expression is false (value: absent).
 3. Repetition: `count = e` reads `e` items; `until_end` consumes to scope end; `until e` reads
    items until the next value equals `e`, then consumes and drops that terminator byte/value.
-4. `match` dispatches the tag value to the arm; unmatched arm → `DecodeError`.
+4. `match` (synonym `switch`) dispatches the tag value to an arm; `A | B =>` shares one arm and
+   `_` is the fallback wherever it sits; no arm and no `_` → `DecodeError`. As a statement
+   (`match (tag) { 0 => { x: u8 } }`) an arm is a block whose fields splice into the enclosing
+   value, like an `if` group. As a field type (`v: match tag { 0 => i8 }`) an arm is one type.
 5. Computed `=` fields evaluate after the wire fields they reference, in declaration order.
 6. `require` evaluates immediately after the enclosing scope is read; failure → `DecodeError`
    with byte offset.
+7. A scalar encoding yields its trailing `= expr`, evaluated after its block and its `require`s.
 
 Encode: wire fields serialize in declaration order; `if`/repetition driven by the same
 expressions evaluated on the *value being encoded*; `require` validates before writing;
 computed fields are **not** serialized (they are read-side derivations; to encode a `position`,
 set `raw`). This is a deliberate, documented simplification — the alternative (automatic inverse
-solving) is deferred.
+solving) is deferred. Scalar encodings are the exception: they carry their own inverse, the
+per-field `= expr` writes.
 
 Errors: `BpsError` hierarchy (`ParseError`, `ResolveError`, `DecodeError`, `EncodeError`) with
 source positions and byte offsets. Decode never raises `KeyError`/`IndexError` uncaught; any malformed
@@ -228,10 +261,11 @@ input yields `DecodeError`.
 
 ## 5. Standard library
 
-Built-in primitives and transforms (§4.2), helper functions (§4.4), plus the Minecraft encoding
-library shipped as a `.bps` file (`schemas/minecraft_26_3.bps` and a shared
-`schemas/minecraft_core.bps` for encodings reusable across versions): `string`, `identifier`,
-`uuid`, `angle`, `position`, `lp_vec3`, `boolean`, `bitset`, `fixed_bitset`, `id_or`,
+Built-in primitives and transforms (§4.2), helper functions (§4.4), the std scalars in
+`schemas/std/` (`integers.bps`: `i8`, `u16be`, …, `boolean`; `varint.bps`: `varint`, `varlong`),
+plus the Minecraft encoding library shipped as a `.bps` file (`schemas/minecraft_26_3.bps` and a
+shared `schemas/minecraft_core.bps` for encodings reusable across versions): `string`, `identifier`,
+`uuid`, `angle`, `position`, `lp_vec3`, `bitset`, `fixed_bitset`, `id_or`,
 `entity_metadata`, `slot`, `hashed_slot`, `nbt`, `particle`, `optional_varint`,
 `optional_blockstate`, `game_profile`, `resolvable_profile`, `chat_type`, `sound_event`,
 `teleport_flags`, `recipe_display`, `slot_display`, `light_data`, `lp_vec3`, `debug_subscription_*`
@@ -259,6 +293,8 @@ bps/
   ast.py           frozen dataclasses: Schema, Encoding, Enum, Packet, Protocol, Route, Field...
   lexer.py         hand-written tokenizer
   parser.py        recursive descent -> AST
+  load.py          import resolution: files -> one Schema, each file included once
+  primitives.py    the five compiler primitives (u8, f32be, f64be, bytes, rest)
   analyze.py       symbol tables, parameter binding, cycle detection, reachability
   emit_json.py     schema.json (stable, versioned)
   interp/
@@ -268,6 +304,7 @@ bps/
   emit_rust.py     AST -> dependency-free Rust crate
   cli.py           bpsc entry point
 schemas/
+  std/                      # integers.bps, varint.bps: scalars built from u8
   minecraft_core.bps        # shared encodings
   minecraft_26_3.bps        # imports core; full protocol 777
 tests/
@@ -336,7 +373,7 @@ Exit codes: 0 ok, 1 usage, 2 schema errors, 3 decode/encode errors. `decode`/`en
 | --- | --- |
 | Wiki transcription errors for ~70 play packets | Two-pass transcription (per-state batches), golden vectors pinned from wiki sample tables, coverage test blocks unrouted packets |
 | Emitter complexity for `match`/computed/expressions | Emitter owns a small, mechanical mapping; expressions restricted to whitelisted ops evaluated identically in interp and Rust |
-| Integer width divergence (Python bignum vs Rust i64) | All wire math in `i64`/`u64` with explicit masks in the Rust runtime; interp mirrors masking at `leb128(bits,·)` boundaries |
+| Integer width divergence (Python bignum vs Rust i64) | All wire math in `i64`/`u64` with explicit masks in the Rust runtime; the std `varint`/`varlong` schemas mask the scalar to its width before writing |
 | Chunk-data per-version instability | Encode structure now (bit-unpacked long arrays via computed fields); palette semantics can refine without language changes |
 | Scope creep in expressions | Whitelist + resolver rejects unknown functions |
 

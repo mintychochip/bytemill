@@ -29,17 +29,19 @@ schemas/<family>_<state>.bps  per-state batches (play, login, configuration)
 schemas/<family>_routes.bps  generated `route` table + stubs
 ```
 
-Multiple files merge: `bpsc` concatenates declarations from every argument before
-resolving, so a name must be declared in exactly one file (duplicates are a
-`ResolveError`).
+Multiple files merge: `import "std/varint.bps"` pulls a file in (path relative
+to the importer; each file is included once), and `bpsc` still concatenates
+every CLI argument before resolving. A name must be declared in exactly one
+file (duplicates are a `ResolveError`).
 
-## 2. Define the primitives first
+## 2. Import the standard integers, then define composites
 
-Minecraft-family layouts that everything else leans on:
+The language primitives are `u8`, `bytes(n)`, `rest`, `f32be`, and `f64be`.
+Fixed-width integers, `boolean`, `varint`, and `varlong` are schemas:
 
 ```bps
-encoding varint  = leb128(32, signed)
-encoding varlong = leb128(64, signed)
+import "std/integers.bps"
+import "std/varint.bps"
 
 encoding string(max_chars = 32767) = {
     byte_len: varint
@@ -68,7 +70,9 @@ Ask, in order:
 1. **Is the length known before the data?** → a count field plus `[] count = n`.
 2. **Does it end at a sentinel?** → `[] until 0xFF`.
 3. **Does it run to the end of the packet?** → `[] until_end`.
-4. **Is the shape selected by a value?** → `match tag { ... }`.
+4. **Is the shape selected by a value?** → `match (tag) { 0 => { ... } _ => { ... } }`
+   when the arm is several fields, or `value: match tag { 0 => i8 }` when the arm is one
+   type. `switch` is the same statement. `0 | 1 =>` shares an arm.
 5. **Is the whole group present conditionally?** → `if cond { ... }`.
 6. **Is the value derived, not sent?** → `name = expr`.
 

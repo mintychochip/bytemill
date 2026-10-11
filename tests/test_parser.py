@@ -10,10 +10,11 @@ class ParserSmoke(unittest.TestCase):
     def test_parse_core(self) -> None:
         src = (ROOT / "schemas" / "minecraft_core.bps").read_text(encoding="utf-8")
         s = parse(src)
-        self.assertTrue(any(e.name == "varint" for e in s.encodings))
+        self.assertEqual(s.imports, ("std/integers.bps", "std/varint.bps"))
+        self.assertFalse(any(e.name == "varint" for e in s.encodings))
 
     def test_parse_all_schemas(self) -> None:
-        for path in sorted((ROOT / "schemas").glob("*.bps")):
+        for path in sorted((ROOT / "schemas").rglob("*.bps")):
             parse(path.read_text(encoding="utf-8"))
 
 

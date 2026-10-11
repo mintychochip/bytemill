@@ -11,23 +11,11 @@ from bps.emit_rust import emit_rust
 from bps.emit_rstom import emit_rstom
 from bps.errors import BpsError
 from bps.interp.engine import decode_frame_payload, decode_packet, encode_packet
-from bps.parser import parse
+from bps.load import load_schema
 
 
 def _load_schema(paths: list[str]):
-    encodings: list = []
-    enums: list = []
-    packets: list = []
-    protocols: list = []
-    for p in paths:
-        s = parse(Path(p).read_text(encoding="utf-8"))
-        encodings.extend(s.encodings)
-        enums.extend(s.enums)
-        packets.extend(s.packets)
-        protocols.extend(s.protocols)
-    from bps.ast import Schema
-
-    return analyze(Schema(tuple(encodings), tuple(enums), tuple(packets), tuple(protocols)))
+    return analyze(load_schema(paths))
 
 
 def main(argv: list[str] | None = None) -> int:

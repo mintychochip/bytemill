@@ -4,13 +4,14 @@ from pathlib import Path
 from bps.analyze import analyze
 from bps.ast import Schema
 from bps.interp.engine import decode_packet, encode_packet
+from bps.load import load_schema
 from bps.parser import parse
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_nbt():
-    core = parse((ROOT / "schemas" / "minecraft_core.bps").read_text(encoding="utf-8"))
+    core = load_schema([ROOT / "schemas" / "minecraft_core.bps"])
     probe = parse("packet nb { t: nbt }")
     return analyze(Schema(core.encodings, (), probe.packets, ()))
 

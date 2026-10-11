@@ -10,7 +10,7 @@ protocol 777**.
 2. **`packet` / `enum`** — logical message payloads
 3. **`protocol`** — framing (`length` + `id` + `payload`) and `route state.direction id => packet`
 
-Encoder/decode constructs: `match` (tagged unions), `[] count = expr` / `[] until expr`
+Encoder/decode constructs: `match` / `switch` (tagged unions, as a field type or a statement), `[] count = expr` / `[] until expr`
 (repeats), `if cond { ... }` (conditional field groups), `name = expr` (computed values),
 `require expr` (assertions), `...encoding(args)` (spread into a block).
 
@@ -43,7 +43,9 @@ encoding meta_entry = {
 
 | File | Contents |
 | --- | --- |
-| `schemas/minecraft_core.bps` | VarInt/VarLong, String, Identifier, UUID, Game Profile, Position, Angle, BitSet, network **NBT** (recursive), Slot/Hashed Slot frame, entity metadata |
+| `schemas/std/integers.bps` | Fixed-width integers and `boolean`, built from `u8` |
+| `schemas/std/varint.bps` | `varint` and `varlong`, built from `u8` |
+| `schemas/minecraft_core.bps` | Imports `std/`. String, Identifier, UUID, Game Profile, Position, Angle, BitSet, network **NBT** (recursive), Slot/Hashed Slot frame, entity metadata |
 | `schemas/minecraft_26_3.bps` | Handshake, status ping/pong, login start, keep-alive, legacy ping |
 | `schemas/minecraft_26_3_play.bps` | Play + configuration **clientbound** (135 + 20 packets, transcribed field layouts) |
 | `schemas/minecraft_26_3_play_serverbound.bps` | Play **serverbound** (68 packets) |
@@ -51,7 +53,7 @@ encoding meta_entry = {
 | `schemas/minecraft_26_3_remaining.bps` | Final transcription batch — remaining registry-independent packets, LpVec3 velocity (`add_entity`) |
 | `schemas/minecraft_26_3_wiki.bps` | The **261 routes** (state × direction × packet id → packet) from minecraft.wiki |
 
-**231 packets, 261 routes, 45 encodings, zero `body: rest` stubs.** Every packet carries its
+**231 packets, 261 routes, 59 encodings, zero `body: rest` stubs.** Every packet carries its
 transcribed field layout; registry-keyed payloads (component data, recipe displays, chunk data)
 stop at a self-delimiting boundary via `id_or_payload`, `id_set`, `slot`, `particle_data`.
 
@@ -67,7 +69,7 @@ python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps \
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 25 tests, includes cargo differential
+python -m unittest discover -s tests -t . -v     # 44 tests, includes cargo differential
 SCHEMAS="schemas/minecraft_core.bps schemas/minecraft_26_3.bps schemas/minecraft_26_3_login.bps \
 schemas/minecraft_26_3_remaining.bps schemas/minecraft_26_3_play.bps \
 schemas/minecraft_26_3_play_serverbound.bps schemas/minecraft_26_3_wiki.bps"

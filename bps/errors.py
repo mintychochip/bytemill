@@ -24,3 +24,7 @@ class DecodeError(BpsError):
 
 class EncodeError(BpsError):
     pass
+
+
+class EmitError(BpsError):
+    pass

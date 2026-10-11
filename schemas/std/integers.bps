@@ -1,0 +1,83 @@
+// Fixed-width integers and boolean, built only from `u8`.
+//
+// A trailing `= expr` is the encoding's value. Each wire field's `= expr`
+// is the encode direction; `value` is the scalar being written. Decode reads
+// the bytes and ignores those expressions.
+
+encoding i8 = {
+    raw: u8 = value & 0xFF
+} = sign_extend(raw, 8)
+
+encoding boolean = {
+    raw: u8 = value ? 1 : 0
+} = raw != 0
+
+encoding u16be = {
+    b0: u8 = (value >> 8) & 0xFF
+    b1: u8 = value & 0xFF
+} = (b0 << 8) | b1
+
+encoding i16be = {
+    raw: u16be = value & 0xFFFF
+} = sign_extend(raw, 16)
+
+encoding u32be = {
+    b0: u8 = (value >> 24) & 0xFF
+    b1: u8 = (value >> 16) & 0xFF
+    b2: u8 = (value >> 8) & 0xFF
+    b3: u8 = value & 0xFF
+} = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+
+encoding i32be = {
+    raw: u32be = value & 0xFFFFFFFF
+} = sign_extend(raw, 32)
+
+encoding u64be = {
+    b0: u8 = (value >> 56) & 0xFF
+    b1: u8 = (value >> 48) & 0xFF
+    b2: u8 = (value >> 40) & 0xFF
+    b3: u8 = (value >> 32) & 0xFF
+    b4: u8 = (value >> 24) & 0xFF
+    b5: u8 = (value >> 16) & 0xFF
+    b6: u8 = (value >> 8) & 0xFF
+    b7: u8 = value & 0xFF
+} = (b0 << 56) | (b1 << 48) | (b2 << 40) | (b3 << 32) | (b4 << 24) | (b5 << 16) | (b6 << 8) | b7
+
+encoding i64be = {
+    raw: u64be = value & 0xFFFFFFFFFFFFFFFF
+} = sign_extend(raw, 64)
+
+encoding u16le = {
+    b0: u8 = value & 0xFF
+    b1: u8 = (value >> 8) & 0xFF
+} = (b1 << 8) | b0
+
+encoding i16le = {
+    raw: u16le = value & 0xFFFF
+} = sign_extend(raw, 16)
+
+encoding u32le = {
+    b0: u8 = value & 0xFF
+    b1: u8 = (value >> 8) & 0xFF
+    b2: u8 = (value >> 16) & 0xFF
+    b3: u8 = (value >> 24) & 0xFF
+} = (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
+
+encoding i32le = {
+    raw: u32le = value & 0xFFFFFFFF
+} = sign_extend(raw, 32)
+
+encoding u64le = {
+    b0: u8 = value & 0xFF
+    b1: u8 = (value >> 8) & 0xFF
+    b2: u8 = (value >> 16) & 0xFF
+    b3: u8 = (value >> 24) & 0xFF
+    b4: u8 = (value >> 32) & 0xFF
+    b5: u8 = (value >> 40) & 0xFF
+    b6: u8 = (value >> 48) & 0xFF
+    b7: u8 = (value >> 56) & 0xFF
+} = (b7 << 56) | (b6 << 48) | (b5 << 40) | (b4 << 32) | (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
+
+encoding i64le = {
+    raw: u64le = value & 0xFFFFFFFFFFFFFFFF
+} = sign_extend(raw, 64)

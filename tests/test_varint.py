@@ -4,14 +4,14 @@ from pathlib import Path
 from bps.analyze import analyze
 from bps.ast import Schema
 from bps.interp.engine import decode_frame_payload, decode_packet, encode_packet
+from bps.load import load_schema
 from bps.parser import parse
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_minecraft():
-    enc, enu, pkt, proto = [], [], [], []
-    for name in (
+    names = (
         "minecraft_core.bps",
         "minecraft_26_3.bps",
         "minecraft_26_3_login.bps",
@@ -19,13 +19,8 @@ def load_minecraft():
         "minecraft_26_3_play.bps",
         "minecraft_26_3_play_serverbound.bps",
         "minecraft_26_3_wiki.bps",
-    ):
-        s = parse((ROOT / "schemas" / name).read_text(encoding="utf-8"))
-        enc.extend(s.encodings)
-        enu.extend(s.enums)
-        pkt.extend(s.packets)
-        proto.extend(s.protocols)
-    return analyze(Schema(tuple(enc), tuple(enu), tuple(pkt), tuple(proto)))
+    )
+    return analyze(load_schema([ROOT / "schemas" / name for name in names]))
 
 
 def load_with_extra(source: str):
@@ -66,7 +61,7 @@ class HandshakeGolden(unittest.TestCase):
 
 class PositionGolden(unittest.TestCase):
     def test_position_decode(self) -> None:
-        core = parse((ROOT / "schemas" / "minecraft_core.bps").read_text(encoding="utf-8"))
+        core = load_schema([ROOT / "schemas" / "minecraft_core.bps"])
         merged = analyze(
             Schema(
                 core.encodings,
@@ -84,7 +79,7 @@ class PositionGolden(unittest.TestCase):
 
 class MetadataGolden(unittest.TestCase):
     def test_entity_metadata_sample(self) -> None:
-        core = parse((ROOT / "schemas" / "minecraft_core.bps").read_text(encoding="utf-8"))
+        core = load_schema([ROOT / "schemas" / "minecraft_core.bps"])
         merged = analyze(
             Schema(
                 core.encodings,

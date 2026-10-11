@@ -4,11 +4,13 @@ BPS separates **how bytes are laid out** from **what messages exist** and **how 
 
 ## 1. `encoding` — wire layouts
 
-Reusable, parameterizable byte grammars. Primitives (`u16be`, `leb128`) compose with blocks,
-`match`, repetition, conditional groups, computed fields, and `require` assertions.
+Reusable, parameterizable byte grammars. The compiler's primitives are `u8`,
+`bytes(n)`, `rest`, `f32be`, and `f64be`. Wider integers and LEB128 live in
+`schemas/std/` and are pulled in with `import`.
 
 ```bps
-encoding varint  = leb128(32, signed)
+import "std/integers.bps"
+import "std/varint.bps"
 
 encoding string(max_chars = 32767) = {
     byte_len: varint
@@ -41,14 +43,15 @@ encoding meta_entry = {
 
 | Construct | Example | Meaning |
 | --- | --- | --- |
-| primitive | `u8`, `i16be`, `f32be`, `bool` | fixed-width big-endian |
-| varint | `varint`, `varlong`, `leb128(bits, signed)` | LEB128 two's complement |
+| primitive | `u8`, `bytes(n)`, `rest`, `f32be`, `f64be` | the only built-in types |
+| scalar encoding | `encoding u16be = { ... } = expr` | block whose value is `expr`; `name: type = expr` is the encode side |
+| import | `import "std/varint.bps"` | path relative to the importing file |
 | bytes | `bytes(n)`, `bytes(n) as utf8` | exactly `n` bytes, optional transform |
 | remainder | `rest` | to end of the length-bounded scope |
 | repeat count | `items: slot[] count = n` | `n` from an already-decoded field |
 | repeat term. | `entries: meta_entry[] until 0xFF` | until a terminator byte, consumed |
 | conditional group | `if has_item { item_id: varint }` | whole group present/absent |
-| tagged union | `match kind { 1 => varint, _ => varint }` | arm chosen by a field value |
+| tagged union | `match (action) { 0 => { title: text_component } _ => { } }` | arm chosen by a field value; `switch` is the same statement; `0 \| 1 =>` shares an arm. A field can also be `value: match kind { 0 => i8, _ => varint }` |
 | computed | `x = sign_extend(...)` | no wire bytes, value derives |
 | assertion | `require protocol_version == 777` | decode fails if false |
 | spread | `...string(32767)` | inline another encoding's block |
@@ -117,7 +120,8 @@ encoding nbt_payload = {
 
 ## Example in this repo
 
-- `schemas/minecraft_core.bps` — 45 encodings: VarInt, String, UUID, Position, NBT (recursive),
+- `schemas/std/` — integers, boolean, VarInt, and VarLong, imported by core
+- `schemas/minecraft_core.bps` — String, UUID, Position, NBT (recursive),
   Slot, entity metadata (all 44 kinds), 22-particle data table, Light Data, ID Set, LpVec3
 - `schemas/minecraft_26_3*.bps` — protocol **777**: 231 packets across 261 routes, all
   transcribed (no `body: rest` stubs)

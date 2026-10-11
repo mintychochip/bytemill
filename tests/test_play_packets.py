@@ -1,27 +1,29 @@
 import struct
 import unittest
 
+from bps.ast import TypeRef
 from bps.interp.cursor import WriteCursor
-from bps.interp.engine import _write_leb128, decode_frame_payload
+from bps.interp.engine import _encode_type_ref, decode_frame_payload
 
 from tests.test_varint import load_minecraft
 
 
-def frame(pid: int, payload: bytes) -> bytes:
-    body = WriteCursor()
-    _write_leb128(body, pid, 32)
-    body.emit(payload)
-    raw = body.result()
-    out = WriteCursor()
-    _write_leb128(out, len(raw), 32)
-    out.emit(raw)
-    return out.result()
+def frame(resolved, pid: int, payload: bytes) -> bytes:
+    """Length-prefixed frame whose length and id are the imported `varint` schema."""
+
+    def vint(n: int) -> bytes:
+        w = WriteCursor()
+        _encode_type_ref(TypeRef("varint"), w, resolved, {}, n)
+        return w.result()
+
+    body = vint(pid) + payload
+    return vint(len(body)) + body
 
 
 class PlayGolden(unittest.TestCase):
     def test_block_update(self) -> None:
         resolved = load_minecraft()
-        raw = frame(0x08, bytes.fromhex("4607632c15b4833f") + bytes.fromhex("01"))
+        raw = frame(resolved, 0x08, bytes.fromhex("4607632c15b4833f") + bytes.fromhex("01"))
         pid, out = decode_frame_payload(resolved, "play", "clientbound", raw)
         self.assertEqual(pid, 0x08)
         fields = out["fields"]
@@ -31,7 +33,7 @@ class PlayGolden(unittest.TestCase):
 
     def test_animate(self) -> None:
         resolved = load_minecraft()
-        raw = frame(0x02, bytes.fromhex("ac02") + bytes([2]))
+        raw = frame(resolved, 0x02, bytes.fromhex("ac02") + bytes([2]))
         _, out = decode_frame_payload(resolved, "play", "clientbound", raw)
         self.assertEqual(out["packet"], "animate")
         self.assertEqual(out["fields"]["entity_id"], 300)
@@ -39,14 +41,14 @@ class PlayGolden(unittest.TestCase):
 
     def test_game_event(self) -> None:
         resolved = load_minecraft()
-        raw = frame(0x27, bytes([1]) + struct.pack(">f", 1.5))
+        raw = frame(resolved, 0x27, bytes([1]) + struct.pack(">f", 1.5))
         _, out = decode_frame_payload(resolved, "play", "clientbound", raw)
         self.assertEqual(out["fields"]["event"], 1)
         self.assertAlmostEqual(out["fields"]["value"], 1.5)
 
     def test_bundle_delimiter_is_empty(self) -> None:
         resolved = load_minecraft()
-        raw = frame(0x00, b"")
+        raw = frame(resolved, 0x00, b"")
         _, out = decode_frame_payload(resolved, "play", "clientbound", raw)
         self.assertEqual(out["packet"], "bundle_delimiter")
         self.assertEqual(out["fields"], {})
@@ -63,7 +65,7 @@ class PlayGolden(unittest.TestCase):
             + struct.pack(">f", 0.5)
             + struct.pack(">f", 1.0)
         )
-        _, out = decode_frame_payload(resolved, "play", "clientbound", frame(0x73, payload))
+        _, out = decode_frame_payload(resolved, "play", "clientbound", frame(resolved, 0x73, payload))
         fields = out["fields"]
         self.assertEqual(fields["world_age"], 100)
         self.assertEqual(fields["clocks_count"], 1)

@@ -62,7 +62,17 @@ Output: a file containing **only** `packet NAME { ... }` declarations.
   }
   ```
   Only when the condition references an already-decoded field; otherwise `body: rest`.
-- `match` for tagged unions (e.g. entity metadata kinds, sound event ID-or-inline):
+- `match` / `switch` when several fields depend on an already-decoded value:
+  ```
+  action: varint
+  match (action) {
+      0 => { title: text_component  health: f32be }
+      2 | 5 => { flags: u8 }
+      _ => { }
+  }
+  ```
+  `switch (action)` is the same statement.
+- `match` as a field type for a tagged union (entity metadata kinds, sound event ID-or-inline):
   ```
   kind: varint
   value: match kind { 0 => i8, 1 => varint, _ => varint }

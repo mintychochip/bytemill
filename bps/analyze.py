@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from bps import ast
-from bps.errors import ResolveError
+from bps.errors import EmitError, ResolveError
+from bps.primitives import BARE_PRIMITIVES
 
 
 def _dedupe(kind: str, decls, name_of) -> dict:
@@ -36,6 +39,60 @@ def analyze(schema: ast.Schema) -> ast.ResolvedSchema:
     return ast.ResolvedSchema(schema, encodings, enums, packets, protocols, routes)
 
 
+def reject_unlowered_scalars(
+    resolved: ast.ResolvedSchema, lowered: Collection[str], target: str
+) -> None:
+    """Raise `EmitError` when a packet reaches a scalar encoding `target` cannot lower.
+
+    A scalar encoding is a block with a trailing `= expr`: its value is the
+    expression, not the block's fields. An emitter that lowers scalars by name
+    (`lowered`) would otherwise emit the block's wire bytes as fields. Scalars
+    that are declared but never reached from a packet do not matter, and a
+    lowered name is never entered, because the emitter never looks inside it.
+    """
+    seen: set[str] = set()
+    unlowered: set[str] = set()
+
+    def visit_name(name: str) -> None:
+        enc = resolved.encodings.get(name)
+        if enc is None or name in seen or name in lowered:
+            return
+        seen.add(name)
+        if enc.yield_expr is not None:
+            unlowered.add(name)
+        visit_type(enc.body)
+
+    def visit_type(t: ast.TypeRef | ast.BlockType | ast.MatchType) -> None:
+        if isinstance(t, ast.TypeRef):
+            visit_name(t.name)
+        elif isinstance(t, ast.BlockType):
+            visit_items(t.items)
+        else:
+            for arm in t.arms:
+                if arm.type_ref is not None:
+                    visit_type(arm.type_ref)
+
+    def visit_items(items: tuple[ast.BlockItem, ...]) -> None:
+        for item in items:
+            if item.kind == "field" and item.wire is not None:
+                visit_type(item.wire.type_ref)
+            elif item.kind == "group":
+                visit_items(item.group_items)
+            elif item.kind == "match" and item.match is not None:
+                visit_type(item.match)
+            elif item.kind == "spread":
+                visit_name(item.spread_name)
+
+    for packet in resolved.packets.values():
+        visit_items(packet.items)
+    if unlowered:
+        names = ", ".join(repr(n) for n in sorted(unlowered))
+        raise EmitError(
+            f"{target} emitter has no lowering for scalar encoding {names}; "
+            f"only the std scalars map to {target} types"
+        )
+
+
 def _check_encoding(
     enc: ast.EncodingDecl,
     encodings: dict[str, ast.EncodingDecl],
@@ -54,7 +111,7 @@ def _check_type_ref(
     enums: dict[str, ast.EnumDecl],
     path: str,
 ) -> None:
-    if ref.name in encodings or ref.name in _PRIMITIVES:
+    if ref.name in encodings or ref.name in BARE_PRIMITIVES:
         return
     if ref.name in enums:
         return
@@ -77,6 +134,12 @@ def _check_block(
                 raise ResolveError(f"unknown spread encoding {item.spread_name!r} in {path}")
         if item.kind == "group":
             _check_block(ast.BlockType(item.group_items), encodings, enums, path, params)
+        if item.kind == "match" and item.match is not None:
+            for arm in item.match.arms:
+                if isinstance(arm.type_ref, ast.BlockType):
+                    _check_block(arm.type_ref, encodings, enums, path, params)
+                elif arm.type_ref is not None:
+                    _check_field_type(arm.type_ref, encodings, enums, path, param_names)
 
 
 def _check_field_type(
@@ -94,35 +157,5 @@ def _check_field_type(
         _check_block(t, encodings, enums, path, ())
     elif isinstance(t, ast.MatchType):
         for arm in t.arms:
-            if arm.type_ref and isinstance(arm.type_ref, ast.TypeRef):
-                _check_type_ref(arm.type_ref, encodings, enums, path)
-
-
-_PRIMITIVES = frozenset(
-    {
-        "u8",
-        "i8",
-        "u16be",
-        "u16le",
-        "u32be",
-        "u32le",
-        "u64be",
-        "u64le",
-        "i16be",
-        "i16le",
-        "i32be",
-        "i32le",
-        "i64be",
-        "i64le",
-        "f32be",
-        "f32le",
-        "f64be",
-        "f64le",
-        "bool",
-        "bytes",
-        "rest",
-        "utf8",
-        "mutf8",
-        "leb128",
-    }
-)
+            if arm.type_ref is not None:
+                _check_field_type(arm.type_ref, encodings, enums, path, param_names)

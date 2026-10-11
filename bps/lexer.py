@@ -15,6 +15,7 @@ KEYWORDS = frozenset(
         "route",
         "require",
         "match",
+        "switch",
         "until",
         "until_end",
         "count",
@@ -24,34 +25,7 @@ KEYWORDS = frozenset(
         "true",
         "false",
         "rest",
-    }
-)
-
-PRIMITIVES = frozenset(
-    {
-        "u8",
-        "i8",
-        "u16be",
-        "u16le",
-        "u32be",
-        "u32le",
-        "u64be",
-        "u64le",
-        "i16be",
-        "i16le",
-        "i32be",
-        "i32le",
-        "i64be",
-        "i64le",
-        "f32be",
-        "f32le",
-        "f64be",
-        "f64le",
-        "bool",
-        "bytes",
-        "utf8",
-        "mutf8",
-        "leb128",
+        "import",
     }
 )
 

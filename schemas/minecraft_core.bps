@@ -1,7 +1,8 @@
-// Minecraft Java Edition — shared wire encodings (protocol-family stable)
+// Minecraft Java Edition — shared wire encodings (protocol-family stable).
+// Integers, boolean, and VarInt live in schemas/std and are imported.
 
-encoding varint  = leb128(32, signed)
-encoding varlong = leb128(64, signed)
+import "std/integers.bps"
+import "std/varint.bps"
 
 encoding string(max_chars = 32767) {
     byte_len: varint
@@ -31,10 +32,6 @@ encoding game_profile = {
             signature: string(1024)
         }
     }[] count = properties_count
-}
-
-encoding boolean = {
-    value: u8
 }
 
 encoding position = {
