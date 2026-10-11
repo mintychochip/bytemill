@@ -48,6 +48,7 @@ encoding meta_entry = {
 | `schemas/minecraft_26_3_play.bps` | Play + configuration **clientbound** (135 + 20 packets, transcribed field layouts) |
 | `schemas/minecraft_26_3_play_serverbound.bps` | Play **serverbound** (68 packets) |
 | `schemas/minecraft_26_3_login.bps` | Login/configuration shared layouts + remaining mechanical packets |
+| `schemas/minecraft_26_3_remaining.bps` | Final transcription batch — remaining registry-independent packets, LpVec3 velocity (`add_entity`) |
 | `schemas/minecraft_26_3_wiki.bps` | The **261 routes** (state × direction × packet id → packet) from minecraft.wiki |
 
 **231 packets, 261 routes, 45 encodings, zero `body: rest` stubs.** Every packet carries its
@@ -66,14 +67,15 @@ python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps \
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 20 tests, includes cargo differential
+python -m unittest discover -s tests -t . -v     # 24 tests, includes cargo differential
 SCHEMAS="schemas/minecraft_core.bps schemas/minecraft_26_3.bps schemas/minecraft_26_3_login.bps \
-schemas/minecraft_26_3_play.bps schemas/minecraft_26_3_play_serverbound.bps \
-schemas/minecraft_26_3_wiki.bps"
+schemas/minecraft_26_3_remaining.bps schemas/minecraft_26_3_play.bps \
+schemas/minecraft_26_3_play_serverbound.bps schemas/minecraft_26_3_wiki.bps"
 python -m bps.cli check $SCHEMAS                # parse + resolve + check
 python -m bps.cli routes $SCHEMAS               # routing table (261 routes)
 python -m bps.cli dump-json $SCHEMAS            # schema.json
 python -m bps.cli emit rust $SCHEMAS --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
+python -m bps.cli emit rstom $SCHEMAS --out ../rstom/crates/bps_rstom  # rstom `PacketSerializer` crate
 ```
 
 Decode a handshake **frame** (hex):
@@ -96,6 +98,10 @@ echo 'ddc701' | python -m bps.cli decode schemas/minecraft_core.bps --packet var
 Slot; `src/packets.rs` one decoder per packet; `src/lib.rs` dispatch by state × direction ×
 id). `tests/golden.rs` carries the same vectors as the Python side, so Python and Rust must
 agree.
+
+`bpsc emit rstom` targets the `rstom` workspace crate shape. The output is rustfmt-canonical,
+and each emit drops files the current schema no longer declares, so the generated tree
+always matches its `lib.rs`.
 
 ## Docs
 

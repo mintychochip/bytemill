@@ -10,7 +10,13 @@
 // optional continuation-flag tail. The wiki pins the bit layout:
 //   byte1 & 0x04 -> the scale factor continues in a VarInt after byte 6.
 // The packed doubles stay raw so the framing around them is exact.
-encoding lpvec3 = {
+// `lpvec3_zero` is the all-zero short form (a single 0x00 byte), which is what
+// a spawn packet sends for an entity with no velocity.
+encoding lpvec3_zero = {
+    scale_byte: u8
+}
+
+encoding lpvec3(bits = 46) {
     scale_byte:        u8
     packed_second:     u8
     packed_high_4:     u32be
@@ -24,7 +30,7 @@ packet add_entity {
     x: f64be
     y: f64be
     z: f64be
-    velocity: lpvec3
+    velocity: lpvec3_zero
     pitch: u8
     yaw: u8
     head_yaw: u8

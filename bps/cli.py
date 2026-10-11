@@ -8,6 +8,7 @@ from pathlib import Path
 from bps.analyze import analyze
 from bps.emit_json import schema_to_json
 from bps.emit_rust import emit_rust
+from bps.emit_rstom import emit_rstom
 from bps.errors import BpsError
 from bps.interp.engine import decode_frame_payload, decode_packet, encode_packet
 from bps.parser import parse
@@ -55,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     enc_p.add_argument("json_value")
 
     emit_p = sub.add_parser("emit")
-    emit_p.add_argument("target", choices=["rust"])
+    emit_p.add_argument("target", choices=["rust", "rstom"])
     emit_p.add_argument("schemas", nargs="+")
     emit_p.add_argument("--out", required=True)
 
@@ -100,12 +101,12 @@ def main(argv: list[str] | None = None) -> int:
             print(out.hex())
             return 0
         if args.cmd == "emit":
-            if args.target != "rust":
-                print("only rust emit supported", file=sys.stderr)
-                return 1
             resolved = _load_schema(args.schemas)
-            emit_rust(resolved, Path(args.out))
-            print(f"emitted rust crate to {args.out}")
+            if args.target == "rust":
+                emit_rust(resolved, Path(args.out))
+            else:
+                emit_rstom(resolved, Path(args.out))
+            print(f"emitted {args.target} crate to {args.out}")
             return 0
     except BpsError as e:
         print(str(e), file=sys.stderr)
