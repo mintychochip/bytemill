@@ -20,7 +20,44 @@ from bps.interp.engine import select_match_arm
 from bps.interp.evalexpr import eval_expr, truthy
 
 # Per-packet field overrides for domains the generic synthesizer cannot infer (Task 4c).
-SYNTH_OVERRIDES: dict[tuple[str, str], object] = {}
+SYNTH_OVERRIDES: dict[tuple[str, str], object] = {
+    # Client settings: view distance must be 2..32 (ServerboundClientInformationPacket).
+    ("client_information", "view_distance"): 8,
+    # Login disconnect reason is a JSON text component string on the wire (LoginDisconnectPacket).
+    ("login_disconnect", "reason"): '"abc"',
+    # RemoteDebugSampleType has one constant TICK_TIME (ordinal 0).
+    ("debug_sample", "sample_type"): 0,
+    # Recipe property sets: hand port keys are short names (DeclareRecipesPacket / RecipeProperty).
+    (
+        "update_recipes",
+        "property_sets",
+    ): [{"property_set_id": "smithing_base", "items_count": 1, "items": [1]}],
+    # Advancement icon uses ItemStackTemplate; empty DataComponentPatch only (Advancement.java:51-63).
+    ("update_advancements", "identifiers_to_remove_count"): 0,
+    ("update_advancements", "identifiers_to_remove"): [],
+    ("update_advancements", "progress_mappings_count"): 0,
+    ("update_advancements", "progress_mappings"): [],
+    (
+        "update_advancements",
+        "advancement_mappings",
+    ): [
+        {
+            "key": "minecraft:stone",
+            "value": {
+                "has_parent_id": False,
+                "has_display_data": False,
+                "requirements_count": 0,
+                "requirements": [],
+                "sends_telemetry_data": False,
+            },
+            "x": 0.0,
+            "y": 0.0,
+        }
+    ],
+    # Length-prefixed optional tag: byte length must match the following network NBT
+    # (ServerboundCustomClickActionPacket.java UNTRUSTED_TAG_CODEC + lengthPrefixed).
+    ("custom_click_action", "payload_size"): 2,
+}
 
 # Value per primitive, small enough to satisfy the schema's own constraints.
 _PRIM: dict[str, object] = {
@@ -64,7 +101,8 @@ _PRIM: dict[str, object] = {
         "packed_second": 0x00,
         "packed_high_4": 0x00000000,
     },
-    "particle_data": {"particle_type": 300, "value": {}},
+    # angry_villager (id 0): SimpleParticleType with no payload (ParticleTypes.java).
+    "particle_data": {"particle_type": 0, "value": {}},
     # An empty slot display, and a stonecutter recipe display of three empty ones.
     "slot_display": {"type": 0, "value": {}},
     "recipe_display": {
@@ -112,6 +150,15 @@ def _value_for(t, env: dict, scope: _Env) -> object:
         return _RAW
     if name in _PRIM:
         return _PRIM[name]
+    if name == "item_stack_template":
+        return {
+            "item_id": 1,
+            "item_count": 1,
+            "component_added": 0,
+            "component_removed": 0,
+        }
+    if name == "item_cost":
+        return {"item_id": 1, "count": 1, "predicate_count": 0}
     enc = scope.encodings.get(name)
     if enc is None:
         return _RAW
@@ -347,8 +394,24 @@ def _declared_wire_fields(items: tuple[ast.BlockItem, ...]) -> set[str]:
     return names
 
 
-def _validate_synth_overrides(resolved: ast.ResolvedSchema) -> None:
+def validate_all_synth_overrides(resolved: ast.ResolvedSchema) -> None:
+    """Every production override must name a real packet and field on `resolved`."""
     for (pkt_name, field_name), _ in SYNTH_OVERRIDES.items():
+        pkt = resolved.packets.get(pkt_name)
+        if pkt is None:
+            raise BpsError(f"SYNTH_OVERRIDES references unknown packet {pkt_name!r}")
+        if field_name not in _declared_wire_fields(pkt.items):
+            raise BpsError(
+                f"SYNTH_OVERRIDES references unknown field {field_name!r} on packet {pkt_name!r}"
+            )
+
+
+def _validate_synth_overrides_for_packet(
+    pkt_name: str, resolved: ast.ResolvedSchema
+) -> None:
+    for (name, field_name), _ in SYNTH_OVERRIDES.items():
+        if name != pkt_name:
+            continue
         pkt = resolved.packets.get(pkt_name)
         if pkt is None:
             raise BpsError(f"SYNTH_OVERRIDES references unknown packet {pkt_name!r}")
@@ -361,7 +424,7 @@ def _validate_synth_overrides(resolved: ast.ResolvedSchema) -> None:
 def synthesize_packet(resolved: ast.ResolvedSchema, pkt: ast.PacketDecl) -> dict:
     """A decoded-shape value for `pkt` that the interpreter encodes cleanly."""
     if SYNTH_OVERRIDES:
-        _validate_synth_overrides(resolved)
+        _validate_synth_overrides_for_packet(pkt.name, resolved)
     out = _block_value(pkt.items, {}, _Env(resolved))
     for name, val in _require_equalities(pkt.items):
         out[name] = val
