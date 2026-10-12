@@ -9,7 +9,18 @@ from pathlib import Path
 
 from bps.minestom import ClassTable
 
-RSTOM = Path(os.environ.get("BPS_RSTOM_DIR") or Path(__file__).resolve().parents[2] / "rstom")
+def _default_rstom() -> Path:
+    env = os.environ.get("BPS_RSTOM_DIR")
+    if env:
+        return Path(env)
+    protoc = Path(__file__).resolve().parents[1]
+    worktree = protoc.parent / "rstom-bps"
+    if worktree.is_dir():
+        return worktree
+    return protoc.parent / "rstom"
+
+
+RSTOM = _default_rstom()
 _shm = Path("/dev/shm")
 _default_cargo_target = (
     _shm / "rstom-bps-target" if _shm.is_dir() else Path(tempfile.gettempdir()) / "bps-rstom-target"
