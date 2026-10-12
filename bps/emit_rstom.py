@@ -1273,7 +1273,8 @@ def _append_field(
         return
     type_ref = wf.type_ref
     if isinstance(type_ref, ast.MatchType):
-        _flatten_match(type_ref, out, resolved, bind, guard, field_types, parent)
+        match_parent = f"{parent}.{wf.name}" if parent else wf.name
+        _flatten_match(type_ref, out, resolved, bind, guard, field_types, match_parent)
         return
     if isinstance(type_ref, ast.BlockType):
         _flatten(type_ref.items, out, resolved, bind, guard, field_types, parent)
@@ -2476,8 +2477,8 @@ fn varint_value(bytes: &[u8]) -> Option<i32> {
 }
 
 fn skip_u16(bytes: &[u8], pos: &mut usize) -> Option<()> {
-    let lo = *bytes.get(*pos)? as usize;
-    let hi = *bytes.get(*pos + 1)? as usize;
+    let hi = *bytes.get(*pos)? as usize;
+    let lo = *bytes.get(*pos + 1)? as usize;
     *pos += 2 + ((hi << 8) | lo);
     Some(())
 }

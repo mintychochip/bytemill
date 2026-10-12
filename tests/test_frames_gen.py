@@ -103,6 +103,51 @@ def _hex(data: bytes) -> str:
     return data.hex()
 
 
+def _nbt_tag_len_mismatches(rust_frames: str, cases: list[tuple[bytes, int]]) -> list[str]:
+    """Compile `rust_frames` and compare `nbt_tag_len` to hand-computed lengths."""
+    table = "\n".join(
+        f'        ("{_hex(payload)}", {want}),' for payload, want in cases
+    )
+    main = f"""mod frames;
+
+fn unhex(s: &str) -> Vec<u8> {{
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+}}
+
+fn main() {{
+    let cases: &[(&str, usize)] = &[
+{table}
+    ];
+    let mut bad = 0;
+    for (hex, want) in cases {{
+        let bytes = unhex(hex);
+        let got = frames::nbt_tag_len(&bytes);
+        if got != *want {{
+            println!("nbt_tag_len {{got}} != {{want}} for {{hex}}");
+            bad += 1;
+        }}
+    }}
+    if bad > 0 {{
+        std::process::exit(1);
+    }}
+}}
+"""
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td)
+        (d / "frames.rs").write_text(rust_frames, encoding="utf-8")
+        (d / "main.rs").write_text(main, encoding="utf-8")
+        built = subprocess.run(
+            ["rustc", "--edition", "2021", "-A", "warnings", "-O", "main.rs", "-o", "runner"],
+            cwd=d,
+            capture_output=True,
+            text=True,
+        )
+        if built.returncode != 0:
+            return ["rustc failed:\n" + built.stderr[-3000:]]
+        ran = subprocess.run([str(d / "runner")], capture_output=True, text=True)
+    return [line for line in ran.stdout.splitlines() if line]
+
+
 def _differences(resolved, names: dict[str, str], rust_frames: str) -> list[str]:
     """Walker length != interpreter length, over random valid payloads of each name."""
     cases: list[tuple[str, bytes]] = []
@@ -214,6 +259,25 @@ class GeneratedWalkerTest(unittest.TestCase):
         self.assertTrue({"slot_display", "recipe_display", "particle_data", "id_set"} <= set(names))
         rust = em._FRAMES_RS + plan.walkers.source
         self.assertEqual(_differences(resolved, names, rust), [])
+
+    def test_nbt_tag_len_uses_big_endian_modified_utf8_lengths(self) -> None:
+        """Java `DataInput.readUTF` length is u16 big-endian; LE breaks non-empty strings."""
+        resolved = load_minecraft()
+        plan = em._frames(resolved)
+        rust = em._FRAMES_RS + plan.walkers.source
+
+        payload_258 = b"x" * 258
+        cases: list[tuple[bytes, int]] = [
+            # TAG_String "abc": tag + u16 BE len 3 + 3 bytes; trailing bytes untouched.
+            (bytes.fromhex("080003616263ffff"), 6),
+            # TAG_Compound { "abc": 5 }: tag + entry + name + byte + TAG_End.
+            (bytes.fromhex("0a0100036162630500ee"), 9),
+            # u16 BE length 5 (high 0, low nonzero): 1 + 2 + 5.
+            (bytes([0x08, 0x00, 0x05]) + b"hello" + b"\xff", 8),
+            # u16 BE length 0x0102 = 258: 1 + 2 + 258.
+            (bytes([0x08, 0x01, 0x02]) + payload_258 + b"\xaa", 261),
+        ]
+        self.assertEqual(_nbt_tag_len_mismatches(rust, cases), [])
 
     def test_an_until_loop_is_reported_not_guessed(self) -> None:
         std = "".join(
