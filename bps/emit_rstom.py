@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from bps import ast, frames_gen
@@ -1523,20 +1524,24 @@ def _packet_fields(
     return fields, field_types
 
 
-def _emit_packet(unit: Unit, resolved: ResolvedSchema) -> str:
+@dataclass(frozen=True)
+class _PacketBody:
+    """Template-independent wire body shared by the standalone and in-tree templates."""
+
+    fields: list["PacketShape"]
+    field_types: dict[str, str]
+    writes: str
+    reads: str
+    ctor: str
+    init: str
+    used_wires: list[str]
+    needs_fixed_raw_bytes: bool
+    rtypes: set[str]
+
+
+def _packet_body(unit: Unit, resolved: ResolvedSchema) -> _PacketBody:
     pkt = unit.pkt
     fields, field_types = _packet_fields(pkt, resolved)
-    name = unit.cls.name
-    ser = name.removesuffix("Packet") + "Serializer"
-
-    struct_lines = []
-    for f in fields:
-        base = f"Vec<{f.rtype}>" if f.repeat_mode is not None else f.rtype
-        rtype = f"Option<{base}>" if f.guard is not None else base
-        struct_lines.append(f"    /// Java: `{f.java}`.")
-        struct_lines.append(f"    pub {f.ident}: {rtype},")
-    if struct_lines and struct_lines[-1].endswith(","):
-        struct_lines[-1] = struct_lines[-1][:-1]
 
     def _payload_mode(f: PacketShape, index: int) -> str:
         """How an unframed payload field is carried on the wire.
@@ -1693,10 +1698,10 @@ def _emit_packet(unit: Unit, resolved: ResolvedSchema) -> str:
         else ""
     )
     init = ",\n            ".join(f"{f.ident}" for f in fields) if fields else ""
-    field_decls = "\n".join(struct_lines) or "    // no wire fields"
 
     writes = "\n".join(writes) or "        let _ = (buffer, value);"
     reads = "\n".join(reads) or "        let _ = buffer;"
+
     def collect(items: list["PacketShape"]) -> tuple[set[str], set[str]]:
         """(wire constants, domain types) needed by these fields and their elements."""
         wires: set[str] = set()
@@ -1722,10 +1727,47 @@ def _emit_packet(unit: Unit, resolved: ResolvedSchema) -> str:
     )
     if any(_payload_mode(f, i) == "prefixed" for i, f in enumerate(fields)):
         used_wires = sorted(set(used_wires) | {"VAR_INT"})
+    needs_fixed_raw_bytes = "fixed_raw_bytes(" in body_text
+    return _PacketBody(
+        fields=fields,
+        field_types=field_types,
+        writes=writes,
+        reads=reads,
+        ctor=ctor,
+        init=init,
+        used_wires=used_wires,
+        needs_fixed_raw_bytes=needs_fixed_raw_bytes,
+        rtypes=rtypes,
+    )
+
+
+def _emit_packet(unit: Unit, resolved: ResolvedSchema) -> str:
+    pkt = unit.pkt
+    body = _packet_body(unit, resolved)
+    fields = body.fields
+    field_types = body.field_types
+    writes = body.writes
+    reads = body.reads
+    ctor = body.ctor
+    init = body.init
+    rtypes = body.rtypes
+    name = unit.cls.name
+    ser = name.removesuffix("Packet") + "Serializer"
+
+    struct_lines = []
+    for f in fields:
+        base = f"Vec<{f.rtype}>" if f.repeat_mode is not None else f.rtype
+        rtype = f"Option<{base}>" if f.guard is not None else base
+        struct_lines.append(f"    /// Java: `{f.java}`.")
+        struct_lines.append(f"    pub {f.ident}: {rtype},")
+    if struct_lines and struct_lines[-1].endswith(","):
+        struct_lines[-1] = struct_lines[-1][:-1]
+    field_decls = "\n".join(struct_lines) or "    // no wire fields"
+
     imports = ""
-    if used_wires:
-        imports += "use rstom::network::types::{" + ", ".join(used_wires) + "};\n"
-    if "fixed_raw_bytes(" in body_text and "fixed_raw_bytes" not in imports:
+    if body.used_wires:
+        imports += "use rstom::network::types::{" + ", ".join(body.used_wires) + "};\n"
+    if body.needs_fixed_raw_bytes:
         imports += "use rstom::network::types::fixed_raw_bytes;\n"
     # A hand-written Default is needed whenever a field's zero value is not the
     # derive's: rstom's Uuid has no Default, and an opaque byte frame must be
