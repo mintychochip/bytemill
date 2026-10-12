@@ -15,7 +15,9 @@ from pathlib import Path
 from bps import ast
 from bps.interp.engine import decode_packet, encode_packet
 
-PROBES = Path(__file__).resolve().parents[2] / "rstom" / "probes" / "expected"
+from tests.rstom_tables import RSTOM
+
+PROBES = RSTOM / "probes" / "expected"
 
 STATE = {
     "HANDSHAKE": "handshaking",

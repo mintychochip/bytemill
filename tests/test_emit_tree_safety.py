@@ -39,6 +39,16 @@ from tests.test_emit_tree import (
 RSTOM_PACKET = RSTOM / "crates" / "rstom" / "src" / "network" / "packet"
 
 
+def _workspace_snapshot(ws: Path) -> dict[str, tuple[bool, int]]:
+    """Every path under ``ws`` (files and directories), relative to ``ws``."""
+    snap: dict[str, tuple[bool, int]] = {}
+    for path in sorted(ws.rglob("*"), key=lambda p: p.as_posix()):
+        rel = path.relative_to(ws).as_posix()
+        st = path.stat()
+        snap[rel] = (path.is_dir(), st.st_mtime_ns)
+    return snap
+
+
 class HandContentGuardTest(unittest.TestCase):
     def test_missing_doc_in_generated_raises(self) -> None:
         hand = "//! top\n/// keep me\npub struct X;\n"
@@ -303,10 +313,10 @@ class EmitTreeCheckReadOnlyTest(unittest.TestCase):
         (ws / "tools/packets_gen/schema/packets.json").write_text(
             json.dumps(KEEP_ALIVE_TABLE_DATA), encoding="utf-8"
         )
-        before = {p: p.stat().st_mtime_ns for p in ws.rglob("*") if p.is_file()}
+        before = _workspace_snapshot(ws)
         emit_tree(resolved, ws, KEEP_ALIVE_TABLE, shapes, check=True)
-        after = {p: p.stat().st_mtime_ns for p in ws.rglob("*") if p.is_file()}
-        self.assertEqual(before, after, msg="check=True modified workspace files")
+        after = _workspace_snapshot(ws)
+        self.assertEqual(before, after, msg="check=True modified workspace entries")
 
     def test_rustfmt_failure_does_not_leak_temp_files(self) -> None:
         resolved, _ = _analyze_keep_alive()
