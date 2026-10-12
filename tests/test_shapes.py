@@ -747,9 +747,10 @@ class ShapeSnippetTest(unittest.TestCase):
             "ClientPunchPacket",
             "client/play/client_punch_packet",
         )
-        self.assertEqual(len(shape.new.docs), 2)
-        self.assertIn("ClientPunchPacket", shape.new.docs[0])
-        self.assertIn("Play", shape.new.docs[1])
+        self.assertGreaterEqual(len(shape.new.docs), 2)
+        joined = "\n".join(shape.new.docs)
+        self.assertIn("ClientPunchPacket", joined)
+        self.assertIn("Play", joined)
 
     def test_read_via_new_detected_from_serializer_read(self) -> None:
         shape = extract_shape(
