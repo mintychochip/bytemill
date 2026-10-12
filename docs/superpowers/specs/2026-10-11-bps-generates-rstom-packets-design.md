@@ -195,8 +195,8 @@ the user before it starts.
 
 **Wave 0.** `shapes extract` writes a shape for each of the 64 wave-1 candidates into a scratch
 directory, and `emit rstom-tree --shapes <scratch>` accepts every one (the BPS-derived fields
-equal the shape's `fields`). With the real ledger (`targets/rstom/shapes/`, still empty)
-`emit rstom-tree --check` is clean: it generates only the pin gate. The pin gate runs over all
+equal the shape's `fields`). With the real ledger (`targets/rstom/shapes/`, 64 shapes)
+`emit rstom-tree --check` is clean on a worktree that matches the ledger. The pin gate runs over all
 260 rows and every non-passing row has a triage entry with a category and reason; each
 `bps-bug` is fixed or explicitly deferred.
 

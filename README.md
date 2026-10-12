@@ -100,13 +100,15 @@ file that declares packets.
 ## Quick start
 
 ```bash
-python -m unittest discover -s tests -t . -v     # 94 tests, includes the cargo build of the rstom crate
+BPS_RSTOM_DIR=../rstom-bps python -m pytest -q -p no:cacheprovider  # 193 tests (+ 29 subtests); one cargo build via rstom_cargo.sh
 ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file
 python -m bps.cli check $ROOT                    # parse + resolve + check
 python -m bps.cli routes $ROOT                   # routing table (261 routes)
 python -m bps.cli dump-json $ROOT                # schema.json
+python -m bps.cli shapes report $ROOT --rstom ../rstom-bps   # eligible vs blocked packets (worklist)
 python -m bps.cli emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
 python -m bps.cli emit rstom $ROOT --out ../rstom/crates/bps_rstom  # drop-in for `rstom-packets`
+python -m bps.cli emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
 python scripts/java_probe_samples.py             # packets whose layout disagrees with real Minestom bytes
 ```
 
@@ -164,6 +166,57 @@ those scanners: NBT and slots are hand-written, every other one is compiled from
 encoding (`bps/frames_gen.py`) and checked against the interpreter on random valid payloads
 (`tests/test_frames_gen.py`). The generated struct has one namespace per packet, so using
 the same encoding twice in one packet is an `EmitError`; give the fields distinct names.
+
+## Generating rstom's packets in place
+
+`emit rstom` writes a mirror crate; `emit rstom-tree` writes **inside** an `rstom` workspace at the
+hand packet paths. A **shape** is the hand file's public API (type name, derives, field names and
+types, `new`, serializer layout, module docs) extracted once and kept in the ledger; BPS supplies
+the wire layout from the schemas. Where Minestom or the hand port disagrees with vanilla, BPS wins.
+
+```bash
+python -m bps.cli shapes extract $ROOT --rstom ../rstom-bps --eligible --out targets/rstom/shapes
+python -m bps.cli shapes report $ROOT --rstom ../rstom-bps
+python -m bps.cli emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes
+python -m bps.cli emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes --check
+```
+
+The ledger is `targets/rstom/shapes/` (**64** JSON files at
+`<group>/<package>/<stem>.json`). Each shape records module and struct docs, derives, fields
+(names, types, docs), `new` and serializer metadata, and optionally an `extras` filename. When
+`extras` is set, add `<stem>.ext.rs` beside the packet (helpers the generator does not emit);
+the packet re-exports it via `#[path = "<stem>.ext.rs"] mod ext` and
+`#[allow(unused_imports)] pub use ext::*` so module-level constants keep their paths without
+`-D warnings` on an empty ext module. Five wave-1 shapes name extras today.
+
+Every emit also refreshes the **wire pin gate** in the worktree:
+`crates/rstom/tests/bps_wire_pins.rs`, `crates/rstom/tests/bps/wire_pins.json` (**260** rows,
+one per id-table slot, bytes from `bps/synth.py`), and `wire_pins_known.json` (triaged failures;
+**9** entries in three categories: `minestom-deviation`, `hand-bug`, `domain-limit` — the list
+only shrinks). Swapped packets must not appear in the known file.
+
+**Safety on an in-place swap:** the emitter refuses to overwrite a hand `.rs` unless a fresh
+extract matches the ledger shape; it refuses when doc or attribute lines before `#[cfg(test)]`
+would be lost (they may live in `.ext.rs` instead). Any other hand packet path without the
+generated marker aborts the whole run (all-or-nothing). Re-emit with the same schema and ledger
+is byte-identical. `--check` regenerates in memory and reports drift, missing files, hand-shaped
+ledger entries, and orphan generated packets; it never writes. Inline `#[cfg(test)]` modules in
+hand packets are not copied — the pin gate holds wire-byte coverage instead. Packets with
+`extras` need **nightly** `rustfmt` (`--unstable-features --skip-children`) on emit.
+
+Rstom-side rules: `docs/constraints/MAIN/BPS_GENERATED_PACKETS.md` in the worktree (62 constraint
+rows). Wave **0** landed the extractor, in-tree emitter, and pin gate; wave **1** swaps the **64**
+ledger packets whose BPS fields already match (`shapes report` marks them `eligible`; the rest are
+later waves). See `docs/superpowers/specs/2026-10-11-bps-generates-rstom-packets-design.md` and
+`docs/superpowers/plans/2026-10-11-bps-rstom-tree-waves-0-1.md`.
+
+### Building the rstom workspace politely
+
+`scripts/rstom_cargo.sh` runs `cargo` under `nice -n 19` / `ionice -c3`, `CARGO_BUILD_JOBS=4`, and
+a private target dir (`/dev/shm/rstom-bps-target` by default). Point it at the worktree with
+`BPS_RSTOM_DIR` and override the target with `BPS_CARGO_TARGET_DIR`; never share one target dir
+between two checkouts (the suite asserts it never writes into `rstom`'s own `target/`). For a full
+`rstom` test run use `cargo test --no-fail-fast` so every failure is reported.
 
 ## Docs
 
