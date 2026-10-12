@@ -26,7 +26,7 @@ def real_table() -> ClassTable:
     return ClassTable.load(PACKETS_GEN_SCHEMA)
 
 
-def _entry(group: str, package: str, name: str) -> dict:
+def class_entry(group: str, package: str, name: str) -> dict:
     return {
         "name": name,
         "java": f"net.minestom.server.network.packet.{group}.{package}.{name}",
@@ -45,7 +45,7 @@ def small_table(*tables: tuple[str, str, list[str]]) -> ClassTable:
     names = dict.fromkeys(name for _, _, packets in tables for name in packets)
     return ClassTable(
         {
-            "packets": [_entry("server", "play", name) for name in names],
+            "packets": [class_entry("server", "play", name) for name in names],
             "stateTables": [
                 {"state": state, "side": side, "packets": packets}
                 for state, side, packets in tables
@@ -75,7 +75,7 @@ def _table_data() -> dict:
         state = route.split(".")[0].replace("handshaking", "handshake")
         tables.setdefault((state, "CLIENT" if group == "client" else "SERVER"), []).append(name)
     return {
-        "packets": [_entry(group, package, name) for _, _, group, package, name in _PROTOCOL],
+        "packets": [class_entry(group, package, name) for _, _, group, package, name in _PROTOCOL],
         "stateTables": [
             {"state": state, "side": side, "packets": names}
             for (state, side), names in tables.items()

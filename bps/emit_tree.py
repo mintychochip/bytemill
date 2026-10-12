@@ -8,10 +8,23 @@ import tempfile
 from pathlib import Path
 
 from bps.ast import ResolvedSchema
-from bps.emit_rstom import _is_generated
+from bps.emit_rstom import _is_generated, _packet_body
 from bps.errors import EmitError
-from bps.minestom import ClassTable, build_units
+from bps.minestom import ClassTable, Unit, build_units
 from bps.pins import PINS_TEST_RS, build_pins, pins_json, pins_json_is_owned
+from bps.shapes import (
+    Shape,
+    ShapeError,
+    bps_field_pairs,
+    extract_shape,
+    hand_packet_path,
+    load_ledger,
+    mismatch,
+    module_path,
+)
+from bps.tree_packet import _validate_shape, tree_packet
+
+_PACKET_SCAN_ROOT = Path("crates") / "rstom" / "src" / "network" / "packet"
 
 
 def _rustfmt_text(text: str) -> str:
@@ -62,6 +75,75 @@ def _refuse_hand_files(planned: dict[Path, str]) -> None:
             raise EmitError(f"refusing to overwrite hand file {path}")
 
 
+def _packet_output_path(workspace: Path, unit: Unit) -> Path:
+    return workspace / _PACKET_SCAN_ROOT / f"{module_path(unit)}.rs"
+
+
+def _require_extras(workspace: Path, shape: Shape, packet_dir: Path) -> None:
+    if not shape.extras:
+        return
+    ext = packet_dir / shape.extras
+    if not ext.is_file():
+        raise EmitError(f"create {ext.relative_to(workspace).as_posix()} first")
+
+
+def _hand_matches_ledger(path: Path, shape: Shape) -> bool:
+    try:
+        hand = extract_shape(path.read_text(encoding="utf-8"), shape.cls, shape.module)
+    except ShapeError:
+        return False
+    return hand == shape
+
+
+def _orphan_generated_packets(workspace: Path, shaped_modules: set[str]) -> list[str]:
+    root = workspace / _PACKET_SCAN_ROOT
+    if not root.is_dir():
+        return []
+    out: list[str] = []
+    for path in sorted(root.rglob("*.rs")):
+        if not _is_generated(path):
+            continue
+        rel = path.relative_to(root).with_suffix("").as_posix()
+        if rel not in shaped_modules:
+            out.append(f"{path}: orphan")
+    return out
+
+
+def _planned_packets(
+    resolved: ResolvedSchema,
+    workspace: Path,
+    classes: ClassTable,
+    shapes: dict[str, Shape],
+    *,
+    swap_hand: bool,
+) -> dict[Path, str]:
+    units = build_units(resolved, classes)
+    by_module = {module_path(u): u for u in units}
+    for module in shapes:
+        if module not in by_module:
+            raise EmitError(f"stale shape: {module}")
+    planned: dict[Path, str] = {}
+    for unit in units:
+        module = module_path(unit)
+        shape = shapes.get(module)
+        if shape is None:
+            continue
+        _validate_shape(shape)
+        reasons = mismatch(shape, bps_field_pairs(unit.pkt, resolved))
+        if reasons:
+            raise EmitError(f"{module}: {'; '.join(reasons)}")
+        body = _packet_body(unit, resolved)
+        text = _rustfmt_text(tree_packet(unit, shape, body))
+        path = _packet_output_path(workspace, unit)
+        packet_dir = path.parent
+        _require_extras(workspace, shape, packet_dir)
+        if swap_hand and path.is_file() and not _is_generated(path):
+            if not _hand_matches_ledger(path, shape):
+                raise EmitError(f"hand file changed since its shape was extracted: {module}")
+        planned[path] = text
+    return planned
+
+
 def emit_tree(
     resolved: ResolvedSchema,
     workspace: Path,
@@ -69,7 +151,8 @@ def emit_tree(
     shapes_dir: Path,
     check: bool = False,
 ) -> list[str]:
-    """Write the pin gate (and later, shaped packets). Returns paths written or drift messages."""
+    """Write the pin gate and shaped packets. Returns paths written or drift messages."""
+    shapes = load_ledger(shapes_dir) if shapes_dir.is_dir() else {}
     units = build_units(resolved, classes)
     rows = build_pins(resolved, units)
     tests = workspace / "crates" / "rstom" / "tests"
@@ -81,9 +164,11 @@ def emit_tree(
         rust_path: _rustfmt_text(PINS_TEST_RS),
         json_path: pins_json(rows) + "\n",
     }
+    planned.update(_planned_packets(resolved, workspace, classes, shapes, swap_hand=not check))
 
     if check:
         messages: list[str] = []
+        shaped_modules = set(shapes)
         for path, want in planned.items():
             if not path.is_file():
                 messages.append(f"{path}: missing")
@@ -91,6 +176,14 @@ def emit_tree(
             have = path.read_text(encoding="utf-8")
             if have != want:
                 messages.append(f"{path}: drift")
+        for module, shape in shapes.items():
+            unit = next((u for u in units if module_path(u) == module), None)
+            if unit is None:
+                continue
+            path = _packet_output_path(workspace, unit)
+            if path.is_file() and not _is_generated(path):
+                messages.append(f"{path}: hand-written")
+        messages.extend(_orphan_generated_packets(workspace, shaped_modules))
         return messages
 
     _refuse_hand_files(planned)
@@ -108,3 +201,11 @@ def emit_tree(
 
     _rustfmt_paths(written)
     return [p.relative_to(workspace).as_posix() for p in written]
+
+
+def _tree_packet(unit: Unit, shape: Shape, body) -> str:
+    """Task-6 seam; delegates to :func:`bps.tree_packet.tree_packet`."""
+    return tree_packet(unit, shape, body)
+
+
+__all__ = ["emit_tree", "_tree_packet"]
