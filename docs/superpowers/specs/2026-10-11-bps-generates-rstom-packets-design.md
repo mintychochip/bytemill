@@ -166,6 +166,11 @@ moves off it too.
 Counts are script-derived and approximate. Wave 4 is where cost jumps; it is re-confirmed with
 the user before it starts.
 
+**Frames walkers (waves 2-5):** scan payloads (NBT, slot, id_set, particle, and similar) still
+render as `crate::frames::<walker>(...)` in the in-tree emitter, but rstom has no `frames`
+module yet. `tree_packet` refuses to emit those packets until a wave spec chooses either
+inlining the walker per packet or adding a small private `frames` module under the packet tree.
+
 ## 8. Workflow
 
 - `rstom` work is in the worktree `/home/jlo/dev/rstom-bps`, branch `bps-packets`, based on

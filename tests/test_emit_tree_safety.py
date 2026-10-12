@@ -337,7 +337,7 @@ class GoldenWithoutWorktreeTest(unittest.TestCase):
 @unittest.skipUnless(RSTOM_PACKET.is_dir(), "rstom worktree packet sources not present")
 class UnitWithNewExtractedTest(unittest.TestCase):
     def test_enter_combat_and_low_disk_space_unit_new(self) -> None:
-        from bps.emit_tree import _tree_packet
+        from bps.tree_packet import tree_packet
 
         cases = (
             (
@@ -398,7 +398,7 @@ class UnitWithNewExtractedTest(unittest.TestCase):
                     schema.write_text(schema_src, encoding="utf-8")
                     resolved = analyze(load_schema([str(schema)]))
                 unit = next(u for u in build_units(resolved, table) if u.pkt.name == pkt_name)
-                text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+                text = tree_packet(unit, shape, _packet_body(unit, resolved))
                 self.assertIn("pub fn new() -> Self", text)
                 self.assertIn("ConstantSerializer::new(Self)", text)
                 self.assertIn(f"pub struct {cls};", text)

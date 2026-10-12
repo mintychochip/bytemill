@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from bps.emit_rstom import _PacketBody
@@ -27,6 +28,16 @@ _COPY_TYPES = frozenset(
 )
 
 _MAX_LINES = 400
+_FRAMES_WALKER = re.compile(r"crate::frames::([a-z_]+)")
+
+
+def _guard_frames_walkers(module: str, body: _PacketBody) -> None:
+    for chunk in (body.reads, body.writes):
+        for match in _FRAMES_WALKER.finditer(chunk):
+            name = match.group(1)
+            raise EmitError(
+                f"{module}: packet needs the frames walker {name}, which rstom does not provide yet"
+            )
 
 
 def _validate_shape(shape: Shape) -> None:
@@ -200,7 +211,7 @@ def _inherent_impl(shape: Shape) -> str:
     return f"impl {shape.cls} {{\n{body}\n}}\n\n"
 
 
-def _serializer_impl(unit: Unit, shape: Shape, body: _PacketBody) -> str:
+def _serializer_impl(shape: Shape, body: _PacketBody) -> str:
     if shape.serializer.style == "constant":
         return ""
     ser = shape.serializer.name
@@ -244,6 +255,7 @@ def _extras_tail(shape: Shape) -> str:
 def tree_packet(unit: Unit, shape: Shape, body: _PacketBody) -> str:
     """Render the in-tree packet source for ``unit`` using ``shape`` and ``body``."""
     _validate_shape(shape)
+    _guard_frames_walkers(shape.module, body)
     if shape.cls != unit.cls.name:
         raise EmitError(f"{shape.module}: shape class {shape.cls!r} != unit {unit.cls.name!r}")
 
@@ -262,7 +274,7 @@ def tree_packet(unit: Unit, shape: Shape, body: _PacketBody) -> str:
     _, marker_impls = _marker_imports(unit)
     parts.append(marker_impls)
     parts.append("\n")
-    parts.append(_serializer_impl(unit, shape, body))
+    parts.append(_serializer_impl(shape, body))
     parts.append(_extras_tail(shape))
     text = "".join(parts)
     if text.count("\n") + (0 if text.endswith("\n") else 1) > _MAX_LINES:
@@ -270,7 +282,3 @@ def tree_packet(unit: Unit, shape: Shape, body: _PacketBody) -> str:
     if not text.endswith("\n"):
         text += "\n"
     return text
-
-
-# Brief alias for the task interface name.
-_tree_packet = tree_packet

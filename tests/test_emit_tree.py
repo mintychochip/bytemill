@@ -13,7 +13,7 @@ from bps.analyze import analyze
 from bps.cli import main
 from bps.emit_rstom import _packet_body
 from bps.emit_tree import emit_tree
-from bps.tree_packet import _validate_shape, _tree_packet
+from bps.tree_packet import _validate_shape, tree_packet
 from bps.errors import EmitError
 from bps.load import load_schema
 from bps.minestom import ClassTable, build_units
@@ -248,7 +248,7 @@ class TreePacketGoldenTest(unittest.TestCase):
         resolved, unit = _analyze_keep_alive()
         shape = _keep_alive_shape()
         body = _packet_body(unit, resolved)
-        got = _rustfmt(_tree_packet(unit, shape, body))
+        got = _rustfmt(tree_packet(unit, shape, body))
         want = _rustfmt(GOLDEN_KEEP_ALIVE.read_text(encoding="utf-8"))
         self.assertEqual(got, want)
 
@@ -278,7 +278,7 @@ class TreePacketRenderTest(unittest.TestCase):
             }
         )
         unit = next(u for u in build_units(resolved, table) if u.pkt.name == "clear_dialog")
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertNotIn("pub fn new", text)
         self.assertIn("ConstantSerializer::new(ClearDialogPacket)", text)
         self.assertIn("pub struct ClearDialogPacket;", text)
@@ -286,7 +286,7 @@ class TreePacketRenderTest(unittest.TestCase):
     def test_copy_fields_are_not_cloned(self) -> None:
         resolved, unit = _analyze_keep_alive()
         shape = _keep_alive_shape()
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn("buffer.write(LONG, value.id);", text)
         self.assertNotIn("value.id.clone()", text)
 
@@ -316,12 +316,12 @@ class TreePacketRenderTest(unittest.TestCase):
             schema.write_text(source, encoding="utf-8")
             resolved = analyze(load_schema([str(schema)]))
         unit = next(u for u in build_units(resolved, PROBE_TABLE) if u.pkt.name == "probe")
-        text = _tree_packet(unit, probe_shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, probe_shape, _packet_body(unit, resolved))
         self.assertIn("value.label.clone()", text)
 
     def test_no_rstom_paths_in_a_tree_file(self) -> None:
         resolved, unit = _analyze_keep_alive()
-        text = _tree_packet(unit, _keep_alive_shape(), _packet_body(unit, resolved))
+        text = tree_packet(unit, _keep_alive_shape(), _packet_body(unit, resolved))
         self.assertNotIn("rstom::", text)
         self.assertIn("crate::network::", text)
 
@@ -338,7 +338,7 @@ class TreePacketRenderTest(unittest.TestCase):
                 ('        panic!("validated");', "        Self { id }"),
             ),
         )
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn('panic!("validated");', text)
 
     def test_read_via_new_emits_constructor_call(self) -> None:
@@ -348,7 +348,7 @@ class TreePacketRenderTest(unittest.TestCase):
             fields=(FieldShape("id", "i64", ()),),
             serializer=replace(_keep_alive_shape().serializer, read_via_new=True),
         )
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn("Box::new(ClientKeepAlivePacket::new(id))", text)
         self.assertNotIn("Box::new(ClientKeepAlivePacket {", text)
 
@@ -366,7 +366,7 @@ class TreePacketRenderTest(unittest.TestCase):
     def test_read_without_via_new_uses_struct_literal(self) -> None:
         resolved, unit = _analyze_keep_alive()
         shape = replace(_keep_alive_shape(), serializer=replace(_keep_alive_shape().serializer, read_via_new=False))
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn("Box::new(ClientKeepAlivePacket {", text)
         self.assertNotIn("::new(id)", text)
 
@@ -391,7 +391,7 @@ class TreePacketRenderTest(unittest.TestCase):
             schema.write_text(source, encoding="utf-8")
             resolved = analyze(load_schema([str(schema)]))
         unit = next(u for u in build_units(resolved, PROBE_TABLE) if u.pkt.name == "probe")
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn('#[path = "probe_packet.ext.rs"]', text)
         self.assertIn("mod ext;", text)
         self.assertIn("#[allow(unused_imports)]", text)
@@ -510,7 +510,7 @@ class TreePacketExtractedShapeTest(unittest.TestCase):
             }
         )
         unit = next(u for u in build_units(resolved, table) if u.pkt.name == "recipe_book_settings")
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn("fn_params_excessive_bools", text)
         self.assertIn("too_many_arguments", text)
         self.assertIn("#[must_use]", text)
@@ -547,7 +547,7 @@ class TreePacketExtractedShapeTest(unittest.TestCase):
             }
         )
         unit = next(u for u in build_units(resolved, table) if u.pkt.name == "plugin_message")
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn("pub channel: String", text)
         self.assertIn("pub data: Vec<u8>", text)
         self.assertIn("value.channel.clone()", text)
@@ -588,7 +588,7 @@ class TreePacketExtractedShapeTest(unittest.TestCase):
         unit = next(
             u for u in build_units(resolved, table) if u.pkt.name == "acknowledge_block_change"
         )
-        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        text = tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn("pub const fn new(", text)
         self.assertIn("pub struct AcknowledgeBlockChangeSerializer", text)
 
