@@ -191,6 +191,7 @@ def packet_report(
             path.read_text(encoding="utf-8"),
             unit.cls.name,
             module_path(unit),
+            packet_path=path,
         )
     except ShapeError as err:
         return str(err)

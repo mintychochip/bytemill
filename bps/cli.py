@@ -240,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
                             path.read_text(encoding="utf-8"),
                             unit.cls.name,
                             mod,
+                            packet_path=path,
                         )
                     except ShapeError:
                         continue
