@@ -340,6 +340,24 @@ class TreePacketRenderTest(unittest.TestCase):
         text = _tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn('panic!("validated");', text)
 
+    def test_read_via_new_emits_constructor_call(self) -> None:
+        resolved, unit = _analyze_keep_alive()
+        shape = replace(
+            _keep_alive_shape(),
+            fields=(FieldShape("id", "i64", ()),),
+            serializer=replace(_keep_alive_shape().serializer, read_via_new=True),
+        )
+        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        self.assertIn("Box::new(ClientKeepAlivePacket::new(id))", text)
+        self.assertNotIn("Box::new(ClientKeepAlivePacket {", text)
+
+    def test_read_without_via_new_uses_struct_literal(self) -> None:
+        resolved, unit = _analyze_keep_alive()
+        shape = replace(_keep_alive_shape(), serializer=replace(_keep_alive_shape().serializer, read_via_new=False))
+        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        self.assertIn("Box::new(ClientKeepAlivePacket {", text)
+        self.assertNotIn("::new(id)", text)
+
     def test_extras_adds_the_path_mod_and_reexports_it(self) -> None:
         shape = Shape(
             cls="ProbePacket",

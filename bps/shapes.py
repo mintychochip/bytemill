@@ -46,6 +46,7 @@ class SerializerShape:
     name: str
     public: bool
     docs: tuple[str, ...]
+    read_via_new: bool = False
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ def shape_to_json(s: Shape) -> str:
             "name": s.serializer.name,
             "pub": s.serializer.public,
             "docs": list(s.serializer.docs),
+            "read_via_new": s.serializer.read_via_new,
         },
         "extras": s.extras,
     }
@@ -161,6 +163,7 @@ def shape_from_json(text: str) -> Shape:
             name=obj["serializer_struct"]["name"],
             public=obj["serializer_struct"]["pub"],
             docs=tuple(obj["serializer_struct"]["docs"]),
+            read_via_new=bool(obj["serializer_struct"].get("read_via_new", False)),
         ),
         extras=obj["extras"],
     )
@@ -229,7 +232,9 @@ def extract_shape(
             if name != cls:
                 if name.endswith("Serializer"):
                     docs, _ = _docs_and_attrs_before(src, pos)
-                    serializer_struct = SerializerShape("struct", name, is_pub, docs)
+                    serializer_struct = SerializerShape(
+                        "struct", name, is_pub, docs, read_via_new=False
+                    )
                     end = _skip_trivia(src, after_name)
                     if end < len(src) and src[end] == ";":
                         pos = end + 1
@@ -261,7 +266,7 @@ def extract_shape(
             if trait is None:
                 if target == cls:
                     new_shape, ser_fn_docs, ser_fn_must_use, ser_style, ser_name, extra = (
-                        _parse_inherent_impl(body)
+                        _parse_inherent_impl(body, tuple(f.name for f in fields))
                     )
                     if extra:
                         inherent_extra = True
@@ -271,6 +276,15 @@ def extract_shape(
                     raise ShapeError(f"impl {trait} for {cls}")
                 continue
             if trait == "PacketSerializer" and target.endswith("Serializer"):
+                via_new = _serializer_read_via_new(body, cls)
+                if serializer_struct is not None and serializer_struct.name == target:
+                    serializer_struct = SerializerShape(
+                        serializer_struct.style,
+                        serializer_struct.name,
+                        serializer_struct.public,
+                        serializer_struct.docs,
+                        read_via_new=via_new,
+                    )
                 continue
             if target.endswith("Serializer"):
                 raise ShapeError(f"impl {trait} for {target}")
@@ -561,8 +575,9 @@ def _parse_struct_fields(body: str) -> tuple[FieldShape, ...]:
             break
         if body[pos] == "}":
             break
-        docs, _ = _docs_and_attrs_before(body, pos)
-        pos = _advance_item_start(body, pos)
+        item = _advance_item_start(body, pos)
+        docs, _ = _docs_and_attrs_before(body, item)
+        pos = item
         if not body.startswith("pub ", pos):
             raise ShapeError("non-public struct field")
         pos += 4
@@ -633,39 +648,78 @@ def _lookahead_impl_for(src: str, pos: int) -> bool:
     return src.startswith("for ", after)
 
 
-def _new_body_lines(fn_body: str) -> tuple[str, ...]:
+def _is_trivial_new_body(inner: str, field_names: tuple[str, ...]) -> bool:
+    stripped_lines = [
+        line.strip()
+        for line in inner.splitlines()
+        if line.strip() and not line.strip().startswith("//")
+    ]
+    compact = " ".join(" ".join(stripped_lines).split())
+    if compact == "Self":
+        return len(field_names) == 0
+    if not (compact.startswith("Self {") and compact.endswith("}")):
+        return False
+    inner_part = compact[len("Self {") : -1].strip()
+    if not inner_part:
+        return len(field_names) == 0
+    parts = [part.strip() for part in inner_part.split(",")]
+    if len(parts) != len(field_names):
+        return False
+    for part, name in zip(parts, field_names, strict=True):
+        if part == name or part == f"{name}: {name}":
+            continue
+        return False
+    return True
+
+
+def _verbatim_new_body_lines(inner: str) -> tuple[str, ...]:
+    physical = [ln for ln in inner.splitlines() if ln.strip()]
+    if not physical:
+        return ()
+    min_indent = min(len(ln) - len(ln.lstrip()) for ln in physical)
+    return tuple("        " + ln[min_indent:].rstrip() for ln in physical)
+
+
+def _new_body_lines(fn_body: str, field_names: tuple[str, ...]) -> tuple[str, ...]:
     """Capture a non-trivial `new` body for the shape ledger (8-space indent)."""
     fn_body = fn_body.lstrip()
     if not fn_body.startswith("{"):
         return ()
     end = _matching_brace(fn_body, 0)
     inner = fn_body[1:end]
-    stripped_lines = [
-        line
-        for line in inner.splitlines()
-        if line.strip() and not line.strip().startswith("//")
-    ]
-    logic = "\n".join(stripped_lines)
-    compact = " ".join(logic.split())
-    if compact in ("Self",) or (compact.startswith("Self {") and compact.endswith("}")):
+    if _is_trivial_new_body(inner, field_names):
         return ()
-    first_stmt = logic.lstrip()
-    if "panic!(" not in logic and not (
-        first_stmt.startswith("if ")
-        or first_stmt.startswith("for ")
-        or first_stmt.startswith("while ")
-    ):
-        return ()
-    lines: list[str] = []
-    for raw in inner.splitlines():
-        stripped = raw.strip()
-        if not stripped:
+    return _verbatim_new_body_lines(inner)
+
+
+def _serializer_read_via_new(impl_body: str, cls: str) -> bool:
+    pos = 0
+    while pos < len(impl_body):
+        pos = _skip_trivia(impl_body, pos)
+        if pos >= len(impl_body):
+            break
+        item = _advance_item_start(impl_body, pos)
+        pos = item
+        if not impl_body.startswith("fn ", pos):
+            pos = _skip_item(impl_body, pos)
             continue
-        lines.append(f"        {stripped}")
-    return tuple(lines)
+        pos += 3
+        name, pos = _read_ident(impl_body, pos)
+        if name != "read":
+            sig_end = _find_fn_body_start(impl_body, pos)
+            body_end = _matching_brace(impl_body, sig_end - 1) if sig_end > 0 else len(impl_body)
+            pos = body_end + 1 if body_end < len(impl_body) else len(impl_body)
+            continue
+        sig_end = _find_fn_body_start(impl_body, pos)
+        body_end = _matching_brace(impl_body, sig_end - 1) if sig_end > 0 else len(impl_body)
+        read_body = impl_body[sig_end - 1 : body_end + 1] if sig_end > 0 else ""
+        return bool(re.search(rf"Box::new\(\s*{re.escape(cls)}::new\s*\(", read_body))
+    return False
 
 
-def _parse_inherent_impl(body: str) -> tuple[NewShape, tuple[str, ...], bool, str, str, bool]:
+def _parse_inherent_impl(
+    body: str, field_names: tuple[str, ...]
+) -> tuple[NewShape, tuple[str, ...], bool, str, str, bool]:
     new = NewShape(False, False, False, (), ())
     ser_docs: tuple[str, ...] = ()
     ser_must_use = False
@@ -677,9 +731,10 @@ def _parse_inherent_impl(body: str) -> tuple[NewShape, tuple[str, ...], bool, st
         pos = _skip_trivia(body, pos)
         if pos >= len(body):
             break
-        docs, _ = _docs_and_attrs_before(body, pos)
-        pos = _advance_item_start(body, pos)
-        attrs = _collect_attrs_before(body, pos)
+        item = _advance_item_start(body, pos)
+        docs, _ = _docs_and_attrs_before(body, item)
+        attrs = _collect_attrs_before(body, item)
+        pos = item
         is_const = False
         if body.startswith("pub ", pos):
             pos += 4
@@ -702,7 +757,7 @@ def _parse_inherent_impl(body: str) -> tuple[NewShape, tuple[str, ...], bool, st
                 must_use = any(a.strip().startswith("#[must_use") for a in attrs)
                 other_attrs = tuple(a for a in attrs if not a.strip().startswith("#[must_use"))
                 braced = body[sig_end - 1 : body_end + 1] if sig_end > 0 else ""
-                new_body = _new_body_lines(braced)
+                new_body = _new_body_lines(braced, field_names)
                 new = NewShape(True, is_const, must_use, other_attrs, docs, new_body)
             elif name == "serializer":
                 ser_docs = docs

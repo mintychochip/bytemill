@@ -133,6 +133,183 @@ impl PacketSerializer for ClientNameItemSerializer {
 }
 """
 
+PLUGIN_MESSAGE_ASSERT_NEW = """\
+//! Port of `net.minestom.server.network.packet.client.common.ClientPluginMessagePacket`.
+
+use std::sync::Arc;
+
+use crate::network::buffer::NetworkBuffer;
+use crate::network::packet::client::client_packet::{ClientPacket, ClientPacketGroup};
+use crate::network::packet::packet::Packet;
+use crate::network::packet::serializer::{PacketSerializer, PacketValue, downcast};
+use crate::network::types::{RAW_BYTES, STRING};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientPluginMessagePacket {
+    pub channel: String,
+    pub data: Vec<u8>,
+}
+
+impl ClientPluginMessagePacket {
+    #[must_use]
+    pub fn new(channel: String, data: Vec<u8>) -> Self {
+        assert!(
+            channel.chars().count() <= 256,
+            "Channel cannot be more than 256 characters long"
+        );
+        assert!(
+            data.len() <= i16::MAX as usize,
+            "Data cannot be longer than Short.MAX_VALUE bytes"
+        );
+        Self { channel, data }
+    }
+
+    #[must_use]
+    pub fn serializer() -> Arc<dyn PacketSerializer> {
+        Arc::new(ClientPluginMessageSerializer)
+    }
+}
+
+impl Packet for ClientPluginMessagePacket {}
+impl ClientPacket for ClientPluginMessagePacket {}
+impl ClientPacketGroup for ClientPluginMessagePacket {}
+
+struct ClientPluginMessageSerializer;
+
+impl PacketSerializer for ClientPluginMessageSerializer {
+    fn write(&self, buffer: &mut NetworkBuffer, value: &PacketValue) {
+        let packet = downcast::<ClientPluginMessagePacket>(value);
+        buffer.write(STRING, &packet.channel);
+        buffer.write(RAW_BYTES, packet.data.as_slice());
+    }
+
+    fn read(&self, buffer: &mut NetworkBuffer) -> PacketValue {
+        Box::new(ClientPluginMessagePacket {
+            channel: buffer.read(STRING),
+            data: buffer.read(RAW_BYTES),
+        })
+    }
+}
+"""
+
+VIEW_DISTANCE_CLAMP_NEW = """\
+//! Port.
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct UpdateViewDistancePacket {
+    pub view_distance: i32,
+}
+
+impl UpdateViewDistancePacket {
+    pub fn new(view_distance: i32) -> Self {
+        Self {
+            view_distance: view_distance.clamp(2, 32),
+        }
+    }
+}
+
+impl Packet for UpdateViewDistancePacket {}
+"""
+
+FOR_SCAN_NEW = """\
+//! Port.
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProbePacket {
+    pub total: usize,
+    pub pages: Vec<String>,
+}
+
+impl ProbePacket {
+    pub fn new(pages: Vec<String>) -> Self {
+        let mut total = 0;
+        for page in &pages {
+            total += page.len();
+        }
+        Self { total, pages }
+    }
+}
+
+impl Packet for ProbePacket {}
+"""
+
+NAME_ITEM_PANICS_DOC = """\
+//! Port.
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientNameItemPacket {
+    pub item_name: String,
+}
+
+impl ClientNameItemPacket {
+    /// Java: `ClientNameItemPacket(String itemName)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics with Java's `IllegalArgumentException` message when the name is
+    /// longer than [`i16::MAX`].
+    pub fn new(item_name: String) -> Self {
+        if item_name.chars().count() > i16::MAX as usize {
+            panic!("Item name cannot be longer than Short.MAX_SIZE");
+        }
+        Self { item_name }
+    }
+}
+
+impl Packet for ClientNameItemPacket {}
+"""
+
+WRAPPED_NEW_DOC = """\
+//! Port.
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ClientPunchPacket {
+    pub entity_id: i32,
+}
+
+impl ClientPunchPacket {
+    /// Java: `record ClientPunchPacket(int entityId) implements
+    /// ClientPacket.Play`.
+    /// Java: `entityId()`.
+    pub fn new(entity_id: i32) -> Self {
+        Self { entity_id }
+    }
+}
+
+impl Packet for ClientPunchPacket {}
+"""
+
+READ_VIA_NEW_SNIPPET = """\
+//! Port.
+
+use crate::network::buffer::NetworkBuffer;
+use crate::network::packet::serializer::{PacketSerializer, PacketValue};
+use crate::network::types::STRING;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientNameItemPacket {
+    pub item_name: String,
+}
+
+impl ClientNameItemPacket {
+    pub fn new(item_name: String) -> Self {
+        Self { item_name }
+    }
+}
+
+struct ClientNameItemSerializer;
+
+impl PacketSerializer for ClientNameItemSerializer {
+    fn write(&self, _buffer: &mut NetworkBuffer, _value: &PacketValue) {}
+
+    fn read(&self, buffer: &mut NetworkBuffer) -> PacketValue {
+        Box::new(ClientNameItemPacket::new(buffer.read(STRING)))
+    }
+}
+"""
+
+READ_STRUCT_LITERAL_SNIPPET = PLUGIN_MESSAGE_ASSERT_NEW
+
 EDIT_BOOK_VALIDATION = """\
 //! Port of `net.minestom.server.network.packet.client.play.ClientEditBookPacket`.
 
@@ -519,16 +696,76 @@ class ShapeSnippetTest(unittest.TestCase):
         self.assertIn("panic!(", "\n".join(shape.new.body))
         self.assertIn("Self { item_name }", "\n".join(shape.new.body))
 
-    def test_validating_new_with_for_loop_is_captured(self) -> None:
+    def test_assert_validating_new_body_is_captured(self) -> None:
         shape = extract_shape(
-            EDIT_BOOK_VALIDATION,
-            "ClientEditBookPacket",
-            "client/play/client_edit_book_packet",
+            PLUGIN_MESSAGE_ASSERT_NEW,
+            "ClientPluginMessagePacket",
+            "client/common/client_plugin_message_packet",
         )
         body = "\n".join(shape.new.body)
+        self.assertIn("assert!(", body)
+        self.assertIn("channel.chars().count()", body)
+
+    def test_clamp_transform_new_body_is_captured(self) -> None:
+        shape = extract_shape(
+            VIEW_DISTANCE_CLAMP_NEW,
+            "UpdateViewDistancePacket",
+            "server/play/update_view_distance_packet",
+        )
+        body = "\n".join(shape.new.body)
+        self.assertIn(".clamp(2, 32)", body)
+
+    def test_for_loop_without_panic_new_body_is_captured(self) -> None:
+        shape = extract_shape(
+            FOR_SCAN_NEW,
+            "ProbePacket",
+            "server/play/probe_packet",
+        )
+        body = "\n".join(shape.new.body)
+        self.assertIn("let mut total", body)
         self.assertIn("for page in &pages", body)
-        self.assertIn("MAX_PAGE_LENGTH", body)
-        self.assertIn("Self { slot, pages, title }", body)
+        self.assertNotEqual(shape.new.body, ())
+
+    def test_trivial_new_body_stays_empty(self) -> None:
+        shape = extract_shape(KEEP_ALIVE, "KeepAlivePacket", "server/common/keep_alive_packet")
+        self.assertEqual(shape.new.body, ())
+
+    def test_multiline_new_docs_and_panics_section(self) -> None:
+        shape = extract_shape(
+            NAME_ITEM_PANICS_DOC,
+            "ClientNameItemPacket",
+            "client/play/client_name_item_packet",
+        )
+        joined = "\n".join(shape.new.docs)
+        self.assertIn("# Panics", joined)
+        self.assertIn("IllegalArgumentException", joined)
+        self.assertIn("longer than", joined)
+
+    def test_wrapped_java_doc_on_new(self) -> None:
+        shape = extract_shape(
+            WRAPPED_NEW_DOC,
+            "ClientPunchPacket",
+            "client/play/client_punch_packet",
+        )
+        self.assertEqual(len(shape.new.docs), 2)
+        self.assertIn("ClientPunchPacket", shape.new.docs[0])
+        self.assertIn("Play", shape.new.docs[1])
+
+    def test_read_via_new_detected_from_serializer_read(self) -> None:
+        shape = extract_shape(
+            READ_VIA_NEW_SNIPPET,
+            "ClientNameItemPacket",
+            "client/play/client_name_item_packet",
+        )
+        self.assertTrue(shape.serializer.read_via_new)
+
+    def test_read_struct_literal_does_not_set_read_via_new(self) -> None:
+        shape = extract_shape(
+            READ_STRUCT_LITERAL_SNIPPET,
+            "ClientPluginMessagePacket",
+            "client/common/client_plugin_message_packet",
+        )
+        self.assertFalse(shape.serializer.read_via_new)
 
     def test_multiline_new_attributes(self) -> None:
         shape = extract_shape(

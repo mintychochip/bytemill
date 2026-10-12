@@ -205,7 +205,14 @@ def _serializer_impl(unit: Unit, shape: Shape, body: _PacketBody) -> str:
     vis = "pub " if shape.serializer.public else ""
     docs = _doc_lines("/// ", shape.serializer.docs)
     writes = _adapt_tree_writes(body.writes, shape.fields)
-    read_box = _read_box(shape.cls, shape.form, shape.fields)
+    if shape.serializer.read_via_new:
+        if shape.form == "unit":
+            read_tail = f"        Box::new({shape.cls}::new())"
+        else:
+            args = ", ".join(f.name for f in shape.fields)
+            read_tail = f"        Box::new({shape.cls}::new({args}))"
+    else:
+        read_tail = _read_box(shape.cls, shape.form, shape.fields)
     return (
         f"{docs}{vis}struct {ser};\n\n"
         f"impl PacketSerializer for {ser} {{\n"
@@ -215,7 +222,7 @@ def _serializer_impl(unit: Unit, shape: Shape, body: _PacketBody) -> str:
         f"    }}\n\n"
         f"    fn read(&self, buffer: &mut NetworkBuffer) -> PacketValue {{\n"
         f"{body.reads}\n"
-        f"{read_box}\n"
+        f"{read_tail}\n"
         f"    }}\n"
         f"}}\n"
     )
