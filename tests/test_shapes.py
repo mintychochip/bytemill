@@ -560,7 +560,9 @@ class ShapeRealTreeTest(unittest.TestCase):
             try:
                 source = path.read_text(encoding="utf-8")
                 module = f"{unit.cls.group}/{unit.cls.package}/{unit.cls.stem}"
-                shape = extract_shape(source, unit.cls.name, module)
+                shape = extract_shape(
+                    source, unit.cls.name, module, packet_path=path
+                )
             except ShapeError as err:
                 ineligible[unit.cls.name] = str(err)
                 continue
@@ -590,7 +592,7 @@ class ShapeRealTreeTest(unittest.TestCase):
             path = hand_packet_path(RSTOM, unit)
             mod = f"{unit.cls.group}/{unit.cls.package}/{unit.cls.stem}"
             shapes_by_class[unit.cls.name] = extract_shape(
-                path.read_text(encoding="utf-8"), unit.cls.name, mod
+                path.read_text(encoding="utf-8"), unit.cls.name, mod, packet_path=path
             )
 
         recipe = shapes_by_class["RecipeBookSettingsPacket"]
@@ -613,6 +615,7 @@ class ShapeRealTreeTest(unittest.TestCase):
             keep_path.read_text(encoding="utf-8"),
             "ClientKeepAlivePacket",
             "client/common/client_keep_alive_packet",
+            packet_path=keep_path,
         )
         self.assertEqual(keep.derives, ("Copy", "Clone", "Debug", "PartialEq", "Eq"))
         self.assertEqual(keep.fields[0].docs, ("Java: `id()`.",))

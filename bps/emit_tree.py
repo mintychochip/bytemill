@@ -110,7 +110,9 @@ def _require_extras(workspace: Path, shape: Shape, packet_dir: Path) -> None:
 
 def _hand_matches_ledger(path: Path, shape: Shape) -> bool:
     try:
-        hand = extract_shape(path.read_text(encoding="utf-8"), shape.cls, shape.module)
+        hand = extract_shape(
+            path.read_text(encoding="utf-8"), shape.cls, shape.module, packet_path=path
+        )
     except ShapeError:
         return False
     return hand == shape

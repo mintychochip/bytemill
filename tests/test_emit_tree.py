@@ -152,7 +152,8 @@ class EmitTreeTest(unittest.TestCase):
         schema_path = Path(tmp.name) / "probe.bps"
         schema_path.write_text(probe_source(ROOT), encoding="utf-8")
         self.resolved = analyze(load_schema([str(schema_path)]))
-        self.shapes = ROOT / "targets" / "rstom" / "shapes"
+        self.shapes = Path(tmp.name) / "shapes"
+        self.shapes.mkdir()
 
     def _paths(self) -> dict[str, Path]:
         base = self.workspace / "crates" / "rstom" / "tests"
@@ -490,6 +491,7 @@ class TreePacketExtractedShapeTest(unittest.TestCase):
             path.read_text(encoding="utf-8"),
             "PluginMessagePacket",
             "server/common/plugin_message_packet",
+            packet_path=path,
         )
         self.assertEqual(shape.extras, "plugin_message_packet.ext.rs")
         source = (
