@@ -83,6 +83,56 @@ def _bps_field_pairs(pkt, resolved) -> list[tuple[str, str]]:
     return out
 
 
+NAME_ITEM_VALIDATION = """\
+//! Port of `net.minestom.server.network.packet.client.play.ClientNameItemPacket`.
+
+use std::sync::Arc;
+
+use crate::network::buffer::NetworkBuffer;
+use crate::network::packet::client::client_packet::{ClientPacket, ClientPacketGroup};
+use crate::network::packet::packet::Packet;
+use crate::network::packet::serializer::{PacketSerializer, PacketValue, downcast};
+use crate::network::types::STRING;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientNameItemPacket {
+    pub item_name: String,
+}
+
+impl ClientNameItemPacket {
+    #[must_use]
+    pub fn new(item_name: String) -> Self {
+        if item_name.chars().count() > i16::MAX as usize {
+            panic!("Item name cannot be longer than Short.MAX_SIZE");
+        }
+        Self { item_name }
+    }
+
+    #[must_use]
+    pub fn serializer() -> Arc<dyn PacketSerializer> {
+        Arc::new(ClientNameItemSerializer)
+    }
+}
+
+impl Packet for ClientNameItemPacket {}
+impl ClientPacket for ClientNameItemPacket {}
+impl ClientPacketGroup for ClientNameItemPacket {}
+
+struct ClientNameItemSerializer;
+
+impl PacketSerializer for ClientNameItemSerializer {
+    fn write(&self, buffer: &mut NetworkBuffer, value: &PacketValue) {
+        let packet = downcast::<ClientNameItemPacket>(value);
+        buffer.write(STRING, packet.item_name.clone());
+    }
+
+    fn read(&self, buffer: &mut NetworkBuffer) -> PacketValue {
+        let item_name = buffer.read(STRING);
+        Box::new(ClientNameItemPacket { item_name })
+    }
+}
+"""
+
 KEEP_ALIVE = """\
 //! Port of `net.minestom.server.network.packet.server.common.KeepAlivePacket`.
 
@@ -429,6 +479,15 @@ class ShapeSnippetTest(unittest.TestCase):
         self.assertIn("struct", parsed)
         self.assertIn("serializer_fn", parsed)
         self.assertTrue(text.endswith("\n"))
+
+    def test_validating_new_body_is_captured(self) -> None:
+        shape = extract_shape(
+            NAME_ITEM_VALIDATION,
+            "ClientNameItemPacket",
+            "client/play/client_name_item_packet",
+        )
+        self.assertIn("panic!(", "\n".join(shape.new.body))
+        self.assertIn("Self { item_name }", "\n".join(shape.new.body))
 
     def test_multiline_new_attributes(self) -> None:
         shape = extract_shape(

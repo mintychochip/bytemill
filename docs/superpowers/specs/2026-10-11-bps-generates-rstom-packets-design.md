@@ -96,7 +96,7 @@ module docs from the shape, the struct with the shape's derives and docs, `new()
 `serializer()` as the shape says, `impl Packet` (`CLASS_NAME`), the marker traits, and the
 serializer (`XSerializer` struct or `ConstantSerializer`). `write`/`read` come from the BPS
 schema through the existing emitter. If `extras` is set the file ends with
-`#[path = "<stem>.ext.rs"] mod ext;` and `pub use ext::*;` (so a module-level constant keeps its path); the hand `ext` file holds helpers such as
+`#[path = "<stem>.ext.rs"] mod ext;`, `#[allow(unused_imports)] pub use ext::*;` (so a module-level constant keeps its path and an empty ext module does not trip `-D warnings`); the hand `ext` file holds helpers such as
 `ClientInputPacket::forward()`. Inline hand tests are not carried over: the pin gate replaces them.
 
 ### 4.3 CLI (`protoc`)

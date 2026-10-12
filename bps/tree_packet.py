@@ -168,7 +168,10 @@ def _new_fn(shape: Shape) -> str:
     else:
         body = f"        Self {{ {init} }}"
     lines.append(f"    pub {const_kw}fn new({params}) -> Self {{")
-    lines.append(body)
+    if shape.new.body:
+        lines.extend(shape.new.body)
+    else:
+        lines.append(body)
     lines.append("    }")
     return "\n".join(lines)
 
@@ -222,7 +225,11 @@ def _extras_tail(shape: Shape) -> str:
     if not shape.extras:
         return ""
     stem = shape.module.rsplit("/", 1)[-1]
-    return f'\n#[path = "{stem}.ext.rs"]\nmod ext;\npub use ext::*;\n'
+    return (
+        f'\n#[path = "{stem}.ext.rs"]\nmod ext;\n'
+        f"#[allow(unused_imports)]\n"
+        f"pub use ext::*;\n"
+    )
 
 
 def tree_packet(unit: Unit, shape: Shape, body: _PacketBody) -> str:

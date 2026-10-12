@@ -37,6 +37,7 @@ class NewShape:
     must_use: bool
     attrs: tuple[str, ...]
     docs: tuple[str, ...]
+    body: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,7 @@ def shape_to_json(s: Shape) -> str:
             "const": s.new.const,
             "attrs": list(s.new.attrs),
             "docs": list(s.new.docs),
+            "body": list(s.new.body),
         },
         "serializer_fn": {
             "docs": list(s.serializer_fn_docs),
@@ -150,6 +152,7 @@ def shape_from_json(text: str) -> Shape:
             must_use=obj["new"]["must_use"],
             attrs=tuple(obj["new"]["attrs"]),
             docs=tuple(obj["new"]["docs"]),
+            body=tuple(obj["new"].get("body", ())),
         ),
         serializer_fn_docs=tuple(obj["serializer_fn"]["docs"]),
         serializer_fn_must_use=obj["serializer_fn"]["must_use"],
@@ -622,6 +625,33 @@ def _lookahead_impl_for(src: str, pos: int) -> bool:
     return src.startswith("for ", after)
 
 
+def _new_body_lines(fn_body: str) -> tuple[str, ...]:
+    """Capture a non-trivial `new` body for the shape ledger (8-space indent)."""
+    fn_body = fn_body.lstrip()
+    if not fn_body.startswith("{"):
+        return ()
+    end = _matching_brace(fn_body, 0)
+    inner = fn_body[1:end]
+    stripped_lines = [
+        line
+        for line in inner.splitlines()
+        if line.strip() and not line.strip().startswith("//")
+    ]
+    logic = "\n".join(stripped_lines)
+    compact = " ".join(logic.split())
+    if compact in ("Self",) or (compact.startswith("Self {") and compact.endswith("}")):
+        return ()
+    if "panic!(" not in logic and not logic.lstrip().startswith("if "):
+        return ()
+    lines: list[str] = []
+    for raw in inner.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        lines.append(f"        {stripped}")
+    return tuple(lines)
+
+
 def _parse_inherent_impl(body: str) -> tuple[NewShape, tuple[str, ...], bool, str, str, bool]:
     new = NewShape(False, False, False, (), ())
     ser_docs: tuple[str, ...] = ()
@@ -658,7 +688,9 @@ def _parse_inherent_impl(body: str) -> tuple[NewShape, tuple[str, ...], bool, st
             if name == "new":
                 must_use = any(a.strip().startswith("#[must_use") for a in attrs)
                 other_attrs = tuple(a for a in attrs if not a.strip().startswith("#[must_use"))
-                new = NewShape(True, is_const, must_use, other_attrs, docs)
+                braced = body[sig_end - 1 : body_end + 1] if sig_end > 0 else ""
+                new_body = _new_body_lines(braced)
+                new = NewShape(True, is_const, must_use, other_attrs, docs, new_body)
             elif name == "serializer":
                 ser_docs = docs
                 ser_must_use = any(a.strip().startswith("#[must_use") for a in attrs)

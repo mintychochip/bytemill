@@ -323,6 +323,22 @@ class TreePacketRenderTest(unittest.TestCase):
         self.assertNotIn("rstom::", text)
         self.assertIn("crate::network::", text)
 
+    def test_new_body_from_the_shape_is_emitted(self) -> None:
+        resolved, unit = _analyze_keep_alive()
+        shape = replace(
+            _keep_alive_shape(),
+            new=NewShape(
+                True,
+                False,
+                True,
+                _keep_alive_shape().new.docs,
+                (),
+                ('        panic!("validated");', "        Self { id }"),
+            ),
+        )
+        text = _tree_packet(unit, shape, _packet_body(unit, resolved))
+        self.assertIn('panic!("validated");', text)
+
     def test_extras_adds_the_path_mod_and_reexports_it(self) -> None:
         shape = Shape(
             cls="ProbePacket",
@@ -347,6 +363,7 @@ class TreePacketRenderTest(unittest.TestCase):
         text = _tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn('#[path = "probe_packet.ext.rs"]', text)
         self.assertIn("mod ext;", text)
+        self.assertIn("#[allow(unused_imports)]", text)
         self.assertIn("pub use ext::*;", text)
 
     def test_shape_that_disagrees_with_the_wire_is_an_error(self) -> None:
