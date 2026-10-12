@@ -30,11 +30,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 WORKLIST_SUMMARY = {
     "eligible": 64,
-    "field count mismatch": 47,
-    "field name/type mismatch": 60,
+    "field count mismatch": 48,
+    "field name/type mismatch": 63,
     "extract: extra public type in hand file": 32,
     "extract: nested public type": 25,
-    "extract: missing derive on struct": 5,
+    "extract: missing derive on struct": 1,
     "missing hand file": 1,
     "extract: unsupported trait impl": 1,
     "extract: free function": 1,
@@ -55,8 +55,10 @@ def _worklist_category(status: str) -> str:
         return "extract: unsupported trait impl"
     if status == "free function":
         return "extract: free function"
-    if status.startswith("missing"):
+    if status == "missing derive on struct":
         return "extract: missing derive on struct"
+    if status.startswith("missing serializer struct"):
+        return "extract: missing serializer struct"
     return status
 
 
@@ -259,6 +261,61 @@ impl PacketSerializer for ClientTabCompletePacketSerializer {
 }
 """
 
+MODULE_FN_BEFORE_SERIALIZER = """\
+//! Port of `net.minestom.server.network.packet.server.play.ProbePacket`.
+
+use std::sync::Arc;
+
+use crate::network::packet::packet::Packet;
+use crate::network::packet::serializer::{PacketSerializer, PacketValue, downcast};
+use crate::network::packet::server::server_packet::{ServerPacket, ServerPacketGroup};
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ProbePacket {
+    pub id: i32,
+}
+
+impl ProbePacket {
+    #[must_use]
+    pub fn new(id: i32) -> Self {
+        Self { id }
+    }
+
+    #[must_use]
+    pub fn serializer() -> Arc<dyn PacketSerializer> {
+        Arc::new(ProbePacketSerializer)
+    }
+}
+
+impl Packet for ProbePacket {}
+impl ServerPacket for ProbePacket {}
+impl ServerPacketGroup for ProbePacket {}
+
+fn helper(x: i32) -> i8 {
+    x as i8
+}
+
+const fn k() -> i32 {
+    1
+}
+
+struct ProbePacketSerializer;
+
+impl PacketSerializer for ProbePacketSerializer {
+    fn write(&self, _b: &mut (), _v: &PacketValue) {}
+    fn read(&self, _b: &mut ()) -> PacketValue {
+        Box::new(ProbePacket { id: 0 })
+    }
+}
+"""
+
+REAL_TREE_EXTRACT_PACKETS = (
+    ("EntityRotationPacket", "server/play/entity_rotation_packet"),
+    ("EntityPositionAndRotationPacket", "server/play/entity_position_and_rotation_packet"),
+    ("EntityHeadLookPacket", "server/play/entity_head_look_packet"),
+    ("ClientAdvancementTabPacket", "client/play/client_advancement_tab_packet"),
+)
+
 FORWARD_EXTRA = """\
 //! Port of `net.minestom.server.network.packet.server.common.ProbePacket`.
 
@@ -329,6 +386,15 @@ class ShapeSnippetTest(unittest.TestCase):
         self.assertEqual(shape.serializer.style, "constant")
         self.assertEqual(shape.fields, ())
 
+    def test_module_fn_with_return_type_before_serializer(self) -> None:
+        shape = extract_shape(
+            MODULE_FN_BEFORE_SERIALIZER,
+            "ProbePacket",
+            "server/play/probe_packet",
+        )
+        self.assertEqual(shape.serializer.name, "ProbePacketSerializer")
+        self.assertEqual(shape.extras, "probe_packet.ext.rs")
+
     def test_inherent_helper_sets_extras(self) -> None:
         shape = extract_shape(FORWARD_EXTRA, "ProbePacket", "server/common/probe_packet")
         self.assertEqual(shape.extras, "probe_packet.ext.rs")
@@ -391,6 +457,7 @@ class ShapeSnippetTest(unittest.TestCase):
         self.assertEqual(shape.struct_docs[1], " indented second line")
 
     def test_module_pub_const_sets_extras(self) -> None:
+        """Pins that module-level ``pub const`` sets ``extras`` (not a regression test for ``_skip_item``)."""
         shape = extract_shape(
             TAB_COMPLETE_CONST_EXTRA,
             "ClientTabCompletePacket",
@@ -500,6 +567,13 @@ class ShapeRealTreeTest(unittest.TestCase):
         for name, shape in shapes_by_class.items():
             if name not in EXTRAS_PACKETS:
                 self.assertIsNone(shape.extras, msg=name)
+
+    def test_module_level_fn_packets_extract(self) -> None:
+        for cls, module in REAL_TREE_EXTRACT_PACKETS:
+            path = RSTOM / "crates" / "rstom" / "src" / "network" / "packet" / f"{module}.rs"
+            with self.subTest(cls=cls):
+                shape = extract_shape(path.read_text(encoding="utf-8"), cls, module)
+                self.assertTrue(shape.serializer.name.endswith("Serializer"))
 
 
 class ShapeCliTest(unittest.TestCase):

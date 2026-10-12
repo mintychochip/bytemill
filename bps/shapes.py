@@ -278,6 +278,10 @@ def extract_shape(source: str, cls: str, module: str) -> Shape:
                 module_level_extra = True
                 pos = _skip_item(src, pos)
                 continue
+            if src.startswith("const fn ", pos) or src.startswith("pub const fn ", pos):
+                module_level_extra = True
+                pos = _skip_item(src, pos)
+                continue
             if src.startswith("pub const ", pos):
                 module_level_extra = True
                 pos = _skip_item(src, pos)
@@ -763,12 +767,60 @@ def _skip_item(src: str, pos: int) -> int:
     return pos + 1
 
 
-def _skip_declaration(src: str, pos: int) -> int:
+def _skip_until_semicolon(src: str, pos: int) -> int:
+    depth_paren = 0
+    depth_brace = 0
+    while pos < len(src):
+        ch = src[pos]
+        if ch in "\"'":
+            pos = _skip_rust_string(src, pos)
+            continue
+        if depth_paren == 0 and depth_brace == 0 and ch == ";":
+            return pos
+        if ch == "(":
+            depth_paren += 1
+        elif ch == ")":
+            depth_paren -= 1
+        elif ch == "{":
+            depth_brace += 1
+        elif ch == "}":
+            depth_brace -= 1
+        pos += 1
+    return len(src)
+
+
+def _skip_until_top_level(src: str, pos: int, stop: str) -> int:
+    depth_angle = 0
+    depth_paren = 0
+    depth_brace = 0
+    while pos < len(src):
+        ch = src[pos]
+        if ch in "\"'":
+            pos = _skip_rust_string(src, pos)
+            continue
+        if depth_angle == 0 and depth_paren == 0 and depth_brace == 0 and ch in stop:
+            return pos
+        if ch == "<":
+            depth_angle += 1
+        elif ch == ">" and depth_angle > 0:
+            depth_angle -= 1
+        elif ch == "(":
+            depth_paren += 1
+        elif ch == ")":
+            depth_paren -= 1
+        elif ch == "{":
+            depth_brace += 1
+        elif ch == "}":
+            depth_brace -= 1
+        pos += 1
+    return len(src)
+
+
+def _skip_function_decl(src: str, pos: int) -> int:
     pos = _skip_trivia(src, pos)
-    for kw in ("pub struct ", "struct ", "pub enum ", "pub fn ", "fn ", "pub const ", "const "):
-        if src.startswith(kw, pos):
-            pos += len(kw)
-            break
+    if not src.startswith("fn ", pos):
+        raise ShapeError("malformed function")
+    pos += 3
     _, pos = _read_ident(src, pos)
     pos = _skip_trivia(src, pos)
     if pos < len(src) and src[pos] == "<":
@@ -776,10 +828,91 @@ def _skip_declaration(src: str, pos: int) -> int:
     if pos < len(src) and src[pos] == "(":
         pos = _skip_balanced(src, pos, "(", ")")
     pos = _skip_trivia(src, pos)
+    if pos + 1 < len(src) and src[pos : pos + 2] == "->":
+        pos += 2
+        pos = _skip_trivia(src, pos)
+        pos = _skip_until_top_level(src, pos, "{;")
+    pos = _skip_trivia(src, pos)
     if pos < len(src) and src[pos] == ";":
         return pos + 1
     if pos < len(src) and src[pos] == "{":
         return _skip_balanced(src, pos, "{", "}")
+    semi = src.find(";", pos)
+    return semi + 1 if semi >= 0 else len(src)
+
+
+def _skip_const_item(src: str, pos: int) -> int:
+    pos = _skip_trivia(src, pos)
+    if not src.startswith("const ", pos):
+        raise ShapeError("malformed const")
+    pos += len("const ")
+    _, pos = _read_ident(src, pos)
+    pos = _skip_trivia(src, pos)
+    if pos < len(src) and src[pos] == ":":
+        pos += 1
+        pos = _skip_trivia(src, pos)
+        pos = _skip_until_top_level(src, pos, "=;")
+    pos = _skip_trivia(src, pos)
+    if pos < len(src) and src[pos] == "=":
+        pos += 1
+        pos = _skip_until_semicolon(src, pos)
+    pos = _skip_trivia(src, pos)
+    if pos < len(src) and src[pos] == ";":
+        return pos + 1
+    return len(src)
+
+
+def _skip_type_decl(src: str, pos: int) -> int:
+    pos = _skip_trivia(src, pos)
+    if src.startswith("pub ", pos):
+        pos += 4
+        pos = _skip_trivia(src, pos)
+    if src.startswith("struct ", pos):
+        pos += len("struct ")
+        _, pos = _read_ident(src, pos)
+        pos = _skip_trivia(src, pos)
+        if pos < len(src) and src[pos] == "<":
+            pos = _skip_balanced(src, pos, "<", ">")
+        pos = _skip_trivia(src, pos)
+        if pos < len(src) and src[pos] == ";":
+            return pos + 1
+        if pos < len(src) and src[pos] == "{":
+            return _skip_balanced(src, pos, "{", "}")
+        return pos
+    if src.startswith("enum ", pos):
+        pos += len("enum ")
+        _, pos = _read_ident(src, pos)
+        pos = _skip_trivia(src, pos)
+        if pos < len(src) and src[pos] == "<":
+            pos = _skip_balanced(src, pos, "<", ">")
+        pos = _skip_trivia(src, pos)
+        if pos < len(src) and src[pos] == "{":
+            return _skip_balanced(src, pos, "{", "}")
+        semi = src.find(";", pos)
+        return semi + 1 if semi >= 0 else len(src)
+    raise ShapeError("malformed type declaration")
+
+
+def _skip_declaration(src: str, pos: int) -> int:
+    pos = _skip_trivia(src, pos)
+    if src.startswith("pub ", pos):
+        after_pub = pos + 4
+        if src.startswith("const fn ", after_pub):
+            return _skip_function_decl(src, after_pub + len("const "))
+        if src.startswith("fn ", after_pub):
+            return _skip_function_decl(src, after_pub)
+        if src.startswith("const ", after_pub):
+            return _skip_const_item(src, after_pub)
+        if src.startswith("struct ", after_pub) or src.startswith("enum ", after_pub):
+            return _skip_type_decl(src, pos)
+    if src.startswith("const fn ", pos):
+        return _skip_function_decl(src, pos + len("const "))
+    if src.startswith("const ", pos):
+        return _skip_const_item(src, pos)
+    if src.startswith("fn ", pos):
+        return _skip_function_decl(src, pos)
+    if src.startswith("struct ", pos) or src.startswith("enum ", pos):
+        return _skip_type_decl(src, pos)
     semi = src.find(";", pos)
     return semi + 1 if semi >= 0 else len(src)
 
