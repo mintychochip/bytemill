@@ -27,37 +27,32 @@ from bps.tree_packet import _validate_shape, tree_packet
 _PACKET_SCAN_ROOT = Path("crates") / "rstom" / "src" / "network" / "packet"
 
 
-def _rustfmt_text(
-    text: str,
-    *,
-    parent_dir: Path | None = None,
-    skip_children: bool = False,
-) -> str:
+def _rustfmt_text(text: str) -> str:
     rustfmt = shutil.which("rustfmt")
     if not rustfmt:
         return text
-    parent = parent_dir or Path(tempfile.gettempdir())
-    parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        suffix=".rs",
-        delete=False,
-        dir=parent,
-        encoding="utf-8",
-    ) as f:
-        f.write(text)
-        path = Path(f.name)
-    args = [rustfmt, "--edition", "2024", str(path)]
-    if skip_children:
-        args[1:1] = ["--unstable-features", "--skip-children"]
-    proc = subprocess.run(args, capture_output=True, text=True)
+    skip_children = "mod ext;" in text
+    path: Path | None = None
     try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".rs",
+            delete=False,
+            encoding="utf-8",
+        ) as f:
+            f.write(text)
+            path = Path(f.name)
+        args = [rustfmt, "--edition", "2024", str(path)]
+        if skip_children:
+            args[1:1] = ["--unstable-features", "--skip-children"]
+        proc = subprocess.run(args, capture_output=True, text=True)
         if proc.returncode != 0:
             err = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
             raise EmitError(f"rustfmt failed: {err}")
         return path.read_text(encoding="utf-8")
     finally:
-        path.unlink(missing_ok=True)
+        if path is not None:
+            path.unlink(missing_ok=True)
 
 
 def _rustfmt_paths(paths: list[Path]) -> None:
@@ -106,6 +101,19 @@ def _require_extras(workspace: Path, shape: Shape, packet_dir: Path) -> None:
     ext = packet_dir / shape.extras
     if not ext.is_file():
         raise EmitError(f"create {ext.relative_to(workspace).as_posix()} first")
+
+
+def _refuse_orphan_ext(module: str, shape: Shape, packet_path: Path) -> None:
+    if shape.extras:
+        return
+    if not packet_path.is_file() or not _is_generated(packet_path):
+        return
+    stem = module.rsplit("/", 1)[-1]
+    ext_name = f"{stem}.ext.rs"
+    if (packet_path.parent / ext_name).is_file():
+        raise EmitError(
+            f"{module}: ext file {ext_name} would be orphaned: set extras in the shape"
+        )
 
 
 def _hand_prefix_markers(hand_text: str) -> list[str]:
@@ -214,12 +222,9 @@ def _planned_packets(
         path = _packet_output_path(workspace, unit)
         packet_dir = path.parent
         _require_extras(workspace, shape, packet_dir)
+        _refuse_orphan_ext(module, shape, path)
         raw = tree_packet(unit, shape, body)
-        text = _rustfmt_text(
-            raw,
-            parent_dir=packet_dir,
-            skip_children=shape.extras is not None,
-        )
+        text = _rustfmt_text(raw)
         if swap_hand and path.is_file() and not _is_generated(path):
             if not _hand_matches_ledger(path, shape):
                 raise EmitError(f"hand file changed since its shape was extracted: {module}")
@@ -294,9 +299,4 @@ def emit_tree(
     return [p.relative_to(workspace).as_posix() for p in written]
 
 
-def _tree_packet(unit: Unit, shape: Shape, body) -> str:
-    """Task-6 seam; delegates to :func:`bps.tree_packet.tree_packet`."""
-    return tree_packet(unit, shape, body)
-
-
-__all__ = ["emit_tree", "_tree_packet"]
+__all__ = ["emit_tree"]
