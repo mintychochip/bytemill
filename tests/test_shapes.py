@@ -133,6 +133,36 @@ impl PacketSerializer for ClientNameItemSerializer {
 }
 """
 
+EDIT_BOOK_VALIDATION = """\
+//! Port of `net.minestom.server.network.packet.client.play.ClientEditBookPacket`.
+
+pub const MAX_PAGE_LENGTH: i32 = 1024;
+pub const MAX_TITLE_LENGTH: i32 = 32;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientEditBookPacket {
+    pub slot: i32,
+    pub pages: Vec<String>,
+    pub title: Option<String>,
+}
+
+impl ClientEditBookPacket {
+    pub fn new(slot: i32, pages: Vec<String>, title: Option<String>) -> Self {
+        for page in &pages {
+            if page.chars().count() > MAX_PAGE_LENGTH as usize {
+                panic!("Page length cannot be greater than {MAX_PAGE_LENGTH}");
+            }
+        }
+        if let Some(value) = &title {
+            if value.chars().count() > MAX_TITLE_LENGTH as usize {
+                panic!("Title length cannot be greater than {MAX_TITLE_LENGTH}");
+            }
+        }
+        Self { slot, pages, title }
+    }
+}
+"""
+
 KEEP_ALIVE = """\
 //! Port of `net.minestom.server.network.packet.server.common.KeepAlivePacket`.
 
@@ -488,6 +518,17 @@ class ShapeSnippetTest(unittest.TestCase):
         )
         self.assertIn("panic!(", "\n".join(shape.new.body))
         self.assertIn("Self { item_name }", "\n".join(shape.new.body))
+
+    def test_validating_new_with_for_loop_is_captured(self) -> None:
+        shape = extract_shape(
+            EDIT_BOOK_VALIDATION,
+            "ClientEditBookPacket",
+            "client/play/client_edit_book_packet",
+        )
+        body = "\n".join(shape.new.body)
+        self.assertIn("for page in &pages", body)
+        self.assertIn("MAX_PAGE_LENGTH", body)
+        self.assertIn("Self { slot, pages, title }", body)
 
     def test_multiline_new_attributes(self) -> None:
         shape = extract_shape(

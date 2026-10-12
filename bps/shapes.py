@@ -649,7 +649,12 @@ def _new_body_lines(fn_body: str) -> tuple[str, ...]:
     compact = " ".join(logic.split())
     if compact in ("Self",) or (compact.startswith("Self {") and compact.endswith("}")):
         return ()
-    if "panic!(" not in logic and not logic.lstrip().startswith("if "):
+    first_stmt = logic.lstrip()
+    if "panic!(" not in logic and not (
+        first_stmt.startswith("if ")
+        or first_stmt.startswith("for ")
+        or first_stmt.startswith("while ")
+    ):
         return ()
     lines: list[str] = []
     for raw in inner.splitlines():
