@@ -272,25 +272,44 @@ messages). `bps.cli emit rstom-tree <schemas> --rstom WS [--packets-json P] [--s
   listing the hand-vs-BPS differences. Save the output to `/tmp/pins/first_run.txt`; this is the
   triage worklist. Do not commit `rstom-bps` yet.
 
-### Task 4: Triage every non-passing row
+### Task 4: Valid synthetic values, then triage what is left
 
-**Files:** Create `rstom-bps:crates/rstom/tests/bps/wire_pins_known.json`; fix `protoc` schemas where
-BPS is wrong (with a ground-truth test in `tests/test_java_ground_truth.py` or a layout test).
+The first gate run (260 rows) failed 74. Of those, 55 vanish when the synthetic scalars are small
+(varint/varlong/i8/u8 = 1 instead of 300/42): the hand serializers rightly reject enum ordinals and
+registry ids that vanilla rejects too. The pin gate is meant to compare layouts on VALID values,
+so the synthesizer is wrong, not the packets.
 
-**Interfaces:** Known entry: `{"side","state","id","class","category","reason"}`.
+**Files:** modify `bps/synth.py`; create `tests/test_synth_domains.py`; create
+`rstom-bps:crates/rstom/tests/bps/wire_pins_known.json`; fix `protoc` schemas where BPS is wrong
+(with a ground-truth test in `tests/test_java_ground_truth.py` or a layout test).
 
-- [ ] **Step 1:** group the worklist by packet. For each, decide with vanilla's source
-  (`/home/jlo/dev/mc-ref/server-26.3/net/minecraft/network/protocol/**`) which side is right
-  (the hand port, Minestom and BPS are all suspects). Subagents may investigate in parallel;
-  each reports class, row, the hand serializer path, the BPS packet, the vanilla codec lines, the
-  verdict and a category. **Verify each verdict yourself before adopting it.**
-- [ ] **Step 2:** `bps-bug` => fix the schema, add the test that fails first, regenerate the pins,
-  re-run Task 3 step 4 for that row. `synth-artifact` => adjust `bps/synth.py` (test first).
-  `hand-bug` / `minestom-deviation` / `domain-limit` => a known entry with the reason (and for
-  `minestom-deviation`, the fixture case named).
-- [ ] **Step 3:** `bps_wire_pins` passes with only triaged entries. Commit in `rstom-bps`:
-  `test(network): pin every id-table entry to BPS reference bytes` (the gate, `wire_pins.json`,
-  `wire_pins_known.json`). Commit schema fixes in `protoc` one per finding.
+**Interfaces:** Known entry: `{"side","state","id","class","category","reason"}`. Synthetic
+overrides: `SYNTH_OVERRIDES: dict[tuple[str, str], object]` keyed `(bps packet name, field name)`,
+each entry with a comment naming the domain it satisfies.
+
+**4a Valid synthetic values** (test first, `tests/test_synth_domains.py`):
+- [ ] `test_scalars_default_to_the_smallest_valid_id`: a probe packet `{a: varint, b: varlong, c: i8, d: u8}`
+  synthesizes to 1 each (the interpreter's own varint tests keep covering multi-byte varints).
+- [ ] `test_require_equality_pins_the_field`: `packet p { n: varint  require n == 777 }` synthesizes
+  `n == 777`; then DELETE the `pkt.name == "handshake"` special case in `synthesize_packet`
+  (deferred minor from Task 2) and keep `test_every_row_round_trips_in_the_interpreter` green.
+- [ ] `test_nbt_defaults_are_valid_for_vanilla`: `nbt` synthesizes an empty compound (tag 10),
+  `text_component` a string tag (tag 8, "abc"): both are what vanilla's network codecs accept.
+- [ ] `test_overrides_apply_by_packet_and_field`: a probe override replaces a field's value after
+  synthesis; an override naming a missing packet or field is an error (a stale table must not pass).
+- [ ] Implement; regenerate with `emit rstom-tree`; run the gate in `rstom-bps`; report the failing
+  rows (expected: about 19, the scratch experiment's list is in `/tmp/pins/exp1_run.txt`).
+
+**4b Triage** the remaining rows: dossiers (`/tmp/pins/dossier.py`), read-only research agents, each
+verdict verified by the controller against vanilla's source (`/home/jlo/dev/mc-ref/server-26.3/net/minecraft/network/protocol/**`;
+the hand port, Minestom and BPS are all suspects).
+
+**4c Apply** the verdicts (implementer): `synth-artifact` => an entry in `SYNTH_OVERRIDES` with a
+domain comment (test first); `bps-bug` => fix the schema with a failing test first; `hand-bug` /
+`minestom-deviation` / `domain-limit` => a known entry with the reason (for `minestom-deviation`
+the fixture case is named). Regenerate and run the gate until it passes with only known entries.
+Commit in `rstom-bps`: `test(network): pin every id-table entry to BPS reference bytes` (the gate,
+`wire_pins.json`, `wire_pins_known.json`). Commit schema fixes in `protoc`, one per finding.
 
 ### Task 5: Shape model, extractor and report
 
