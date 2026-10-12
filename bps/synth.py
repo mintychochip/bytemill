@@ -19,10 +19,13 @@ from bps.errors import BpsError
 from bps.interp.engine import select_match_arm
 from bps.interp.evalexpr import eval_expr, truthy
 
+# Per-packet field overrides for domains the generic synthesizer cannot infer (Task 4c).
+SYNTH_OVERRIDES: dict[tuple[str, str], object] = {}
+
 # Value per primitive, small enough to satisfy the schema's own constraints.
 _PRIM: dict[str, object] = {
-    "u8": 0x2A,
-    "i8": 42,
+    "u8": 1,
+    "i8": 1,
     "u16be": 0x1234,
     "i16be": 0x1234,
     "u32be": 0x01020304,
@@ -31,16 +34,16 @@ _PRIM: dict[str, object] = {
     "i64be": 0x0102030405060708,
     "f32be": 1.5,
     "f64be": 2.25,
-    "varint": 300,
-    "varlong": 300,
+    "varint": 1,
+    "varlong": 1,
     "boolean": True,
     "angle": 64,
     "string": "abc",
     "identifier": "minecraft:stone",
     "uuid": {"msb": 1, "lsb": 2},
     "position": {"raw": 0x4607632C15B4833F},
-    "nbt": {"tag_type": 0, "value": {}},
-    "text_component": {"tag_type": 0, "value": {}},
+    "nbt": {"tag_type": 10, "value": {"entries": []}},
+    "text_component": {"tag_type": 8, "value": "abc"},
     "nbt_string": "abc",
     "slot": {"item_count": 0},
     "hashed_slot": {"has_item": False},
@@ -303,11 +306,68 @@ def _count_driver(expr) -> str | None:
     return expr.name if expr.kind == "ident" else None
 
 
+def _equality_pin(expr: ast.Expr) -> tuple[str, object] | None:
+    if expr.kind != "binop" or expr.value != "==":
+        return None
+    left, right = expr.left, expr.right
+    if left is not None and left.kind == "ident" and right is not None and right.kind == "int":
+        return left.name, int(right.value)
+    if right is not None and right.kind == "ident" and left is not None and left.kind == "int":
+        return right.name, int(left.value)
+    return None
+
+
+def _require_equalities(items: tuple[ast.BlockItem, ...]) -> list[tuple[str, object]]:
+    pins: list[tuple[str, object]] = []
+    for item in items:
+        if item.kind == "require" and item.require_expr is not None:
+            pin = _equality_pin(item.require_expr)
+            if pin is not None:
+                pins.append(pin)
+        elif item.kind == "group" and item.group_items:
+            pins.extend(_require_equalities(item.group_items))
+        elif item.kind == "match" and item.match is not None:
+            for arm in item.match.arms:
+                if isinstance(arm.type_ref, ast.BlockType):
+                    pins.extend(_require_equalities(arm.type_ref.items))
+    return pins
+
+
+def _declared_wire_fields(items: tuple[ast.BlockItem, ...]) -> set[str]:
+    names: set[str] = set()
+    for item in items:
+        if item.kind == "field" and item.wire is not None:
+            names.add(item.wire.name)
+        elif item.kind == "group" and item.group_items:
+            names |= _declared_wire_fields(item.group_items)
+        elif item.kind == "match" and item.match is not None:
+            for arm in item.match.arms:
+                if isinstance(arm.type_ref, ast.BlockType):
+                    names |= _declared_wire_fields(arm.type_ref.items)
+    return names
+
+
+def _validate_synth_overrides(resolved: ast.ResolvedSchema) -> None:
+    for (pkt_name, field_name), _ in SYNTH_OVERRIDES.items():
+        pkt = resolved.packets.get(pkt_name)
+        if pkt is None:
+            raise BpsError(f"SYNTH_OVERRIDES references unknown packet {pkt_name!r}")
+        if field_name not in _declared_wire_fields(pkt.items):
+            raise BpsError(
+                f"SYNTH_OVERRIDES references unknown field {field_name!r} on packet {pkt_name!r}"
+            )
+
+
 def synthesize_packet(resolved: ast.ResolvedSchema, pkt: ast.PacketDecl) -> dict:
     """A decoded-shape value for `pkt` that the interpreter encodes cleanly."""
+    if SYNTH_OVERRIDES:
+        _validate_synth_overrides(resolved)
     out = _block_value(pkt.items, {}, _Env(resolved))
-    if pkt.name == "handshake":
-        out["protocol_version"] = 777
+    for name, val in _require_equalities(pkt.items):
+        out[name] = val
+    for (pkt_name, field_name), val in SYNTH_OVERRIDES.items():
+        if pkt_name == pkt.name:
+            out[field_name] = val
     return out
 
 
