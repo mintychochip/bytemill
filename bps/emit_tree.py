@@ -27,19 +27,34 @@ from bps.tree_packet import _validate_shape, tree_packet
 _PACKET_SCAN_ROOT = Path("crates") / "rstom" / "src" / "network" / "packet"
 
 
-def _rustfmt_text(text: str) -> str:
+def _rustfmt_text(
+    text: str,
+    *,
+    parent_dir: Path | None = None,
+    skip_children: bool = False,
+) -> str:
     rustfmt = shutil.which("rustfmt")
     if not rustfmt:
         return text
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".rs", delete=False, encoding="utf-8") as f:
+    parent = parent_dir or Path(tempfile.gettempdir())
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".rs",
+        delete=False,
+        dir=parent,
+        encoding="utf-8",
+    ) as f:
         f.write(text)
         path = Path(f.name)
+    args = [rustfmt, "--edition", "2024", str(path)]
+    if skip_children:
+        args[1:1] = ["--unstable-features", "--skip-children"]
+    proc = subprocess.run(args, capture_output=True, text=True)
     try:
-        subprocess.run(
-            [rustfmt, "--edition", "2024", str(path)],
-            check=False,
-            capture_output=True,
-        )
+        if proc.returncode != 0:
+            err = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
+            raise EmitError(f"rustfmt failed: {err}")
         return path.read_text(encoding="utf-8")
     finally:
         path.unlink(missing_ok=True)
@@ -50,12 +65,16 @@ def _rustfmt_paths(paths: list[Path]) -> None:
     if not rustfmt:
         return
     for f in paths:
-        if f.suffix == ".rs" and f.is_file():
-            subprocess.run(
-                [rustfmt, "--edition", "2024", str(f)],
-                check=False,
-                capture_output=True,
-            )
+        if f.suffix != ".rs" or not f.is_file():
+            continue
+        skip = "mod ext;" in f.read_text(encoding="utf-8")
+        args = [rustfmt, "--edition", "2024", str(f)]
+        if skip:
+            args[1:1] = ["--unstable-features", "--skip-children"]
+        proc = subprocess.run(args, capture_output=True, text=True)
+        if proc.returncode != 0:
+            err = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
+            raise EmitError(f"rustfmt failed on {f}: {err}")
 
 
 def _is_owned_output(path: Path) -> bool:
@@ -69,8 +88,10 @@ def _is_owned_output(path: Path) -> bool:
     return False
 
 
-def _refuse_hand_files(planned: dict[Path, str]) -> None:
+def _refuse_hand_files(planned: dict[Path, str], hand_swaps: set[Path]) -> None:
     for path in planned:
+        if path in hand_swaps:
+            continue
         if not _is_owned_output(path):
             raise EmitError(f"refusing to overwrite hand file {path}")
 
@@ -116,13 +137,14 @@ def _planned_packets(
     shapes: dict[str, Shape],
     *,
     swap_hand: bool,
-) -> dict[Path, str]:
+) -> tuple[dict[Path, str], set[Path]]:
     units = build_units(resolved, classes)
     by_module = {module_path(u): u for u in units}
     for module in shapes:
         if module not in by_module:
             raise EmitError(f"stale shape: {module}")
     planned: dict[Path, str] = {}
+    hand_swaps: set[Path] = set()
     for unit in units:
         module = module_path(unit)
         shape = shapes.get(module)
@@ -133,15 +155,21 @@ def _planned_packets(
         if reasons:
             raise EmitError(f"{module}: {'; '.join(reasons)}")
         body = _packet_body(unit, resolved)
-        text = _rustfmt_text(tree_packet(unit, shape, body))
         path = _packet_output_path(workspace, unit)
         packet_dir = path.parent
         _require_extras(workspace, shape, packet_dir)
+        raw = tree_packet(unit, shape, body)
+        text = _rustfmt_text(
+            raw,
+            parent_dir=packet_dir,
+            skip_children=shape.extras is not None,
+        )
         if swap_hand and path.is_file() and not _is_generated(path):
             if not _hand_matches_ledger(path, shape):
                 raise EmitError(f"hand file changed since its shape was extracted: {module}")
+            hand_swaps.add(path)
         planned[path] = text
-    return planned
+    return planned, hand_swaps
 
 
 def emit_tree(
@@ -164,7 +192,10 @@ def emit_tree(
         rust_path: _rustfmt_text(PINS_TEST_RS),
         json_path: pins_json(rows) + "\n",
     }
-    planned.update(_planned_packets(resolved, workspace, classes, shapes, swap_hand=not check))
+    packet_planned, hand_swaps = _planned_packets(
+        resolved, workspace, classes, shapes, swap_hand=not check
+    )
+    planned.update(packet_planned)
 
     if check:
         messages: list[str] = []
@@ -186,7 +217,7 @@ def emit_tree(
         messages.extend(_orphan_generated_packets(workspace, shaped_modules))
         return messages
 
-    _refuse_hand_files(planned)
+    _refuse_hand_files(planned, hand_swaps)
 
     written: list[Path] = []
     for path, text in planned.items():

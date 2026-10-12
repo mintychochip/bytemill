@@ -86,6 +86,16 @@ def _analyze_keep_alive():
     return resolved, next(u for u in units if u.pkt.name == "keep_alive")
 
 
+def _struct_docs_from_golden() -> tuple[str, ...]:
+    docs: list[str] = []
+    for line in GOLDEN_KEEP_ALIVE.read_text(encoding="utf-8").splitlines():
+        if line.startswith("/// "):
+            docs.append(line[4:])
+        elif line.startswith("#[derive"):
+            break
+    return tuple(docs)
+
+
 def _keep_alive_shape() -> Shape:
     hand = RSTOM / "crates/rstom/src/network/packet/client/common/client_keep_alive_packet.rs"
     if hand.is_file():
@@ -100,11 +110,7 @@ def _keep_alive_shape() -> Shape:
         module_docs=(
             "Port of `net.minestom.server.network.packet.client.common.ClientKeepAlivePacket`.",
         ),
-        struct_docs=(
-            "Java: `record ClientKeepAlivePacket(long id) implements\n"
-            "ClientPacket.Configuration, Play` — the answer to\n"
-            "`[`KeepAlivePacket`](crate::network::packet::server::common::keep_alive_packet::KeepAlivePacket)`.",
-        ),
+        struct_docs=_struct_docs_from_golden(),
         derives=("Copy", "Clone", "Debug", "PartialEq", "Eq"),
         form="braced",
         fields=(FieldShape("id", "i64", ("Java: `id()`.",)),),

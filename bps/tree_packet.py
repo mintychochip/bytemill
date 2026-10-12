@@ -30,11 +30,8 @@ _MAX_LINES = 400
 
 
 def _validate_shape(shape: Shape) -> None:
-    if shape.form == "unit":
-        if shape.fields:
-            raise EmitError(f"{shape.module}: unit shape must have no fields")
-        if shape.new.present:
-            raise EmitError(f"{shape.module}: unit shape must not have new")
+    if shape.form == "unit" and shape.fields:
+        raise EmitError(f"{shape.module}: unit shape must have no fields")
     if shape.serializer.style == "constant" and shape.form != "unit":
         raise EmitError(f"{shape.module}: constant serializer requires unit form")
 
@@ -126,7 +123,10 @@ def _use_block(
             "use crate::network::packet::serializer::{PacketSerializer, PacketValue, downcast};\n"
         )
     if body.used_wires:
-        lines.append(f"use crate::network::types::{{{', '.join(body.used_wires)}}};\n")
+        if len(body.used_wires) == 1:
+            lines.append(f"use crate::network::types::{body.used_wires[0]};\n")
+        else:
+            lines.append(f"use crate::network::types::{{{', '.join(body.used_wires)}}};\n")
     if body.needs_fixed_raw_bytes:
         lines.append("use crate::network::types::fixed_raw_bytes;\n")
     if "Uuid" in body.rtypes:

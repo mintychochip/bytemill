@@ -932,7 +932,12 @@ def extract_shapes_for_units(
         path = hand_packet_path(workspace, unit)
         if not path.is_file():
             continue
-        shape = extract_shape(path.read_text(encoding="utf-8"), unit.cls.name, module_path(unit))
+        try:
+            shape = extract_shape(path.read_text(encoding="utf-8"), unit.cls.name, module_path(unit))
+        except ShapeError:
+            if eligible_only:
+                continue
+            raise
         if eligible_only and mismatch(shape, bps_field_pairs(unit.pkt, resolved)):
             continue
         out.append((unit, shape))
