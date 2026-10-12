@@ -7,11 +7,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from bps.emit_rstom import _is_generated
-from bps.minestom import ClassTable, build_units
-from bps.pins import PINS_TEST_RS, build_pins, pins_json
 from bps.ast import ResolvedSchema
+from bps.emit_rstom import _is_generated
 from bps.errors import EmitError
+from bps.minestom import ClassTable, build_units
+from bps.pins import PINS_TEST_RS, build_pins, pins_json, pins_json_is_owned
 
 
 def _rustfmt_text(text: str) -> str:
@@ -45,6 +45,23 @@ def _rustfmt_paths(paths: list[Path]) -> None:
             )
 
 
+def _is_owned_output(path: Path) -> bool:
+    """Whether the emitter may replace an existing file at ``path``."""
+    if not path.is_file():
+        return True
+    if path.suffix == ".rs":
+        return _is_generated(path)
+    if path.name == "wire_pins.json":
+        return pins_json_is_owned(path.read_text(encoding="utf-8"))
+    return False
+
+
+def _refuse_hand_files(planned: dict[Path, str]) -> None:
+    for path in planned:
+        if not _is_owned_output(path):
+            raise EmitError(f"refusing to overwrite hand file {path}")
+
+
 def emit_tree(
     resolved: ResolvedSchema,
     workspace: Path,
@@ -76,10 +93,10 @@ def emit_tree(
                 messages.append(f"{path}: drift")
         return messages
 
+    _refuse_hand_files(planned)
+
     written: list[Path] = []
     for path, text in planned.items():
-        if path.is_file() and not _is_generated(path):
-            raise EmitError(f"refusing to overwrite hand file {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
         written.append(path)

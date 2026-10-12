@@ -10,6 +10,7 @@ from pathlib import Path
 from bps.analyze import analyze
 from bps.cli import main
 from bps.emit_tree import emit_tree
+from bps.errors import EmitError
 from bps.load import load_schema
 
 from tests.rstom_tables import PROBE_SCHEMA, PROBE_TABLE, probe_source
@@ -79,6 +80,42 @@ class EmitTreeTest(unittest.TestCase):
         drift = emit_tree(self.resolved, self.workspace, PROBE_TABLE, self.shapes, check=True)
         self.assertEqual(len(drift), 1)
         self.assertIn("wire_pins.json", drift[0])
+
+    def test_a_second_emit_is_a_no_op(self) -> None:
+        paths = self._paths()
+        paths["known"].parent.mkdir(parents=True, exist_ok=True)
+        paths["known"].write_text('[{"side":"CLIENT","state":"PLAY","id":0,"category":"x","reason":"y"}]\n')
+        emit_tree(self.resolved, self.workspace, PROBE_TABLE, self.shapes)
+        first = {k: p.read_bytes() for k, p in paths.items()}
+        emit_tree(self.resolved, self.workspace, PROBE_TABLE, self.shapes)
+        for key, path in paths.items():
+            self.assertEqual(path.read_bytes(), first[key], msg=key)
+
+    def test_a_refused_emit_writes_nothing(self) -> None:
+        paths = self._paths()
+        paths["gate"].parent.mkdir(parents=True, exist_ok=True)
+        paths["gate"].write_text("// hand-maintained gate\n", encoding="utf-8")
+        paths["pins"].parent.mkdir(parents=True, exist_ok=True)
+        paths["pins"].write_text('{"rows":[]}\n', encoding="utf-8")
+        before = {k: p.read_bytes() for k, p in paths.items() if p.is_file()}
+        with self.assertRaises(EmitError):
+            emit_tree(self.resolved, self.workspace, PROBE_TABLE, self.shapes)
+        for key, data in before.items():
+            self.assertEqual(paths[key].read_bytes(), data, msg=key)
+        self.assertFalse(paths["known"].exists())
+
+    def test_cli_check_on_rust_exits_3(self) -> None:
+        schema = self.workspace.parent / "probe.bps"
+        code, err = _run(
+            "emit",
+            "rust",
+            str(schema),
+            "--out",
+            str(self.workspace / "out"),
+            "--check",
+        )
+        self.assertEqual(code, 3)
+        self.assertIn("--check", err)
 
     def test_cli_without_rstom_exits_3(self) -> None:
         schema = Path(tempfile.mkdtemp()) / "probe.bps"

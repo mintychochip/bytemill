@@ -25,7 +25,16 @@ def _load_schema(paths: list[str]):
     return analyze(load_schema(paths))
 
 
-def _class_table(given: str | None, anchor: Path) -> ClassTable:
+def _default_packets_json_hint(target: str, anchor: Path) -> str:
+    resolved = anchor.resolve()
+    if target == "rstom-tree":
+        return f"<workspace>/{PACKETS_GEN_SCHEMA.as_posix()}"
+    if (resolved / PACKETS_GEN_SCHEMA).is_file():
+        return f"<workspace>/{PACKETS_GEN_SCHEMA.as_posix()}"
+    return f"<out>/../../{PACKETS_GEN_SCHEMA.as_posix()}"
+
+
+def _class_table(given: str | None, anchor: Path, target: str) -> ClassTable:
     """rstom's class table: the one named, or the one beside an rstom workspace / crate."""
     if given is not None:
         path = Path(given)
@@ -37,10 +46,10 @@ def _class_table(given: str | None, anchor: Path) -> ClassTable:
             else resolved.parent.parent / PACKETS_GEN_SCHEMA
         )
     if not path.is_file():
+        default = _default_packets_json_hint(target, anchor)
         raise EmitError(
-            f"emit rstom needs rstom's packets_gen schema, which names each packet's Minestom "
-            f"class: {path} is not a file (pass --packets-json; by default it is "
-            f"<out>/../../{PACKETS_GEN_SCHEMA.as_posix()})"
+            f"emit {target} needs rstom's packets_gen schema, which names each packet's Minestom "
+            f"class: {path} is not a file (pass --packets-json; by default it is {default})"
         )
     return ClassTable.load(path)
 
@@ -140,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
                     raise EmitError("emit rstom-tree needs --rstom <workspace>")
                 workspace = Path(args.rstom)
                 shapes = Path(args.shapes) if args.shapes else DEFAULT_SHAPES
-                classes = _class_table(args.packets_json, workspace)
+                classes = _class_table(args.packets_json, workspace, "rstom-tree")
                 drift = emit_tree(resolved, workspace, classes, shapes, check=args.check)
                 if args.check:
                     if drift:
@@ -150,12 +159,18 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
                 print(f"emitted rstom-tree into {workspace}")
                 return 0
+            if args.check:
+                raise EmitError(f"emit {args.target} does not support --check (only emit rstom-tree does)")
             if args.out is None:
                 raise EmitError(f"emit {args.target} needs --out <directory>")
             if args.target == "rust":
                 emit_rust(resolved, Path(args.out))
             else:
-                emit_rstom(resolved, Path(args.out), _class_table(args.packets_json, Path(args.out)))
+                emit_rstom(
+                    resolved,
+                    Path(args.out),
+                    _class_table(args.packets_json, Path(args.out), "rstom"),
+                )
             print(f"emitted {args.target} crate to {args.out}")
             return 0
     except BpsError as e:
