@@ -11,7 +11,7 @@ from pathlib import Path
 
 from bps.analyze import analyze
 from bps.emit_rstom import _packet_body
-from bps.emit_tree import emit_tree
+from bps.emit_tree import _assert_hand_content_preserved, _missing_hand_markers, emit_tree
 from bps.errors import EmitError
 from bps.load import load_schema
 from bps.minestom import ClassTable, build_units
@@ -23,7 +23,7 @@ from bps.shapes import (
     extract_shape,
     shape_to_json,
 )
-from bps.tree_packet import tree_packet
+from bps.tree_packet import _validate_shape, tree_packet
 
 from tests.rstom_tables import PROBE_SCHEMA, PROBE_TABLE, RSTOM, class_entry, probe_source
 from tests.test_emit_tree import (
@@ -36,6 +36,30 @@ from tests.test_emit_tree import (
 )
 
 RSTOM_PACKET = RSTOM / "crates" / "rstom" / "src" / "network" / "packet"
+
+
+class HandContentGuardTest(unittest.TestCase):
+    def test_missing_doc_in_generated_raises(self) -> None:
+        hand = "//! top\n/// keep me\npub struct X;\n"
+        generated = "//! top\npub struct X;\n"
+        self.assertEqual(_missing_hand_markers(hand, generated, ""), ["/// keep me"])
+
+    def test_doc_only_in_ext_is_accepted(self) -> None:
+        hand = "/// only in ext\npub struct X;\n"
+        generated = "pub struct X;\n"
+        ext = "/// only in ext\n"
+        self.assertEqual(_missing_hand_markers(hand, generated, ext), [])
+
+    def test_cfg_test_doc_is_ignored(self) -> None:
+        hand = "/// real\n#[cfg(test)]\n/// test only\nmod t {}\n"
+        generated = "/// real\n"
+        self.assertEqual(_missing_hand_markers(hand, generated, ""), [])
+
+    def test_assert_hand_content_preserved_names_module(self) -> None:
+        with self.assertRaises(EmitError) as ctx:
+            _assert_hand_content_preserved("m/a/x", "/// lost\n", "", None)
+        self.assertIn("m/a/x", str(ctx.exception))
+        self.assertIn("hand content lost", str(ctx.exception))
 
 
 class EmitTreeSafetyTest(unittest.TestCase):

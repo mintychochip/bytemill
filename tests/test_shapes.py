@@ -310,36 +310,6 @@ impl PacketSerializer for ClientNameItemSerializer {
 
 READ_STRUCT_LITERAL_SNIPPET = PLUGIN_MESSAGE_ASSERT_NEW
 
-EDIT_BOOK_VALIDATION = """\
-//! Port of `net.minestom.server.network.packet.client.play.ClientEditBookPacket`.
-
-pub const MAX_PAGE_LENGTH: i32 = 1024;
-pub const MAX_TITLE_LENGTH: i32 = 32;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ClientEditBookPacket {
-    pub slot: i32,
-    pub pages: Vec<String>,
-    pub title: Option<String>,
-}
-
-impl ClientEditBookPacket {
-    pub fn new(slot: i32, pages: Vec<String>, title: Option<String>) -> Self {
-        for page in &pages {
-            if page.chars().count() > MAX_PAGE_LENGTH as usize {
-                panic!("Page length cannot be greater than {MAX_PAGE_LENGTH}");
-            }
-        }
-        if let Some(value) = &title {
-            if value.chars().count() > MAX_TITLE_LENGTH as usize {
-                panic!("Title length cannot be greater than {MAX_TITLE_LENGTH}");
-            }
-        }
-        Self { slot, pages, title }
-    }
-}
-"""
-
 KEEP_ALIVE = """\
 //! Port of `net.minestom.server.network.packet.server.common.KeepAlivePacket`.
 
@@ -427,6 +397,7 @@ impl ClearDialogPacket {
 """
 
 RECIPE_NEW_ATTRS = """\
+    /// Java: `new RecipeBookSettingsPacket(boolean × 8)`.
     #[must_use]
     #[allow(clippy::fn_params_excessive_bools)]
     #[allow(
@@ -747,10 +718,14 @@ class ShapeSnippetTest(unittest.TestCase):
             "ClientPunchPacket",
             "client/play/client_punch_packet",
         )
-        self.assertGreaterEqual(len(shape.new.docs), 2)
-        joined = "\n".join(shape.new.docs)
-        self.assertIn("ClientPunchPacket", joined)
-        self.assertIn("Play", joined)
+        self.assertEqual(
+            shape.new.docs,
+            (
+                "Java: `record ClientPunchPacket(int entityId) implements",
+                "ClientPacket.Play`.",
+                "Java: `entityId()`.",
+            ),
+        )
 
     def test_read_via_new_detected_from_serializer_read(self) -> None:
         shape = extract_shape(
@@ -774,6 +749,10 @@ class ShapeSnippetTest(unittest.TestCase):
             "RecipeBookSettingsPacket",
             "server/play/recipe_book_settings_packet",
         )
+        self.assertIn(
+            "Java: `new RecipeBookSettingsPacket(boolean × 8)`.",
+            shape.new.docs,
+        )
         self.assertTrue(shape.new.must_use)
         self.assertEqual(
             shape.new.attrs,
@@ -782,6 +761,31 @@ class ShapeSnippetTest(unittest.TestCase):
                 "#[allow(\n        clippy::too_many_arguments,\n        reason = \"1:1 port of Java's RecipeBookSettingsPacket(boolean x 8)\"\n    )]",
             ),
         )
+
+    def test_attr_reason_with_bracket_does_not_truncate_docs(self) -> None:
+        from bps.shapes import _advance_item_start, _docs_and_attrs_before
+
+        body = (
+            "    /// above attr\n"
+            '    #[allow(foo, reason = "has ] bracket")]\n'
+            "    pub fn new() -> Self { Self }\n"
+        )
+        item = _advance_item_start(body, 0)
+        docs, _ = _docs_and_attrs_before(body, item)
+        self.assertIn("above attr", docs)
+
+    def test_doc_between_attributes_is_captured(self) -> None:
+        from bps.shapes import _advance_item_start, _docs_and_attrs_before
+
+        body = (
+            "    #[allow(a)]\n"
+            "    /// between attrs\n"
+            "    #[must_use]\n"
+            "    pub fn new() -> Self { Self }\n"
+        )
+        item = _advance_item_start(body, 0)
+        docs, _ = _docs_and_attrs_before(body, item)
+        self.assertEqual(docs, ("between attrs",))
 
     def test_doc_line_preserves_markdown_indent(self) -> None:
         src = (

@@ -108,6 +108,60 @@ def _require_extras(workspace: Path, shape: Shape, packet_dir: Path) -> None:
         raise EmitError(f"create {ext.relative_to(workspace).as_posix()} first")
 
 
+def _hand_prefix_markers(hand_text: str) -> list[str]:
+    """Doc and attribute-opening lines before the first ``#[cfg(test)]``, trimmed."""
+    lines = hand_text.splitlines()
+    markers: list[str] = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("#[cfg(test)]"):
+            break
+        if stripped.startswith("///") or stripped.startswith("//!"):
+            markers.append(stripped)
+            continue
+        if stripped.startswith("#["):
+            if stripped == "#[must_use]":
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines):
+                    nxt = lines[j].strip()
+                    if "fn new" in nxt or "fn serializer" in nxt:
+                        markers.append(stripped)
+                continue
+            markers.append(stripped)
+    return markers
+
+
+def _missing_hand_markers(hand_text: str, generated_text: str, ext_text: str) -> list[str]:
+    gen_lines = [ln.strip() for ln in generated_text.splitlines()]
+    ext_lines = [ln.strip() for ln in ext_text.splitlines()] if ext_text else []
+    gi = 0
+    ei = 0
+    missing: list[str] = []
+    for marker in _hand_prefix_markers(hand_text):
+        gpos = next((j for j in range(gi, len(gen_lines)) if gen_lines[j] == marker), None)
+        epos = next((j for j in range(ei, len(ext_lines)) if ext_lines[j] == marker), None)
+        if gpos is not None:
+            gi = gpos + 1
+        elif epos is not None:
+            ei = epos + 1
+        else:
+            missing.append(marker)
+    return missing
+
+
+def _assert_hand_content_preserved(
+    module: str, hand_text: str, generated_text: str, ext_path: Path | None
+) -> None:
+    ext_text = ext_path.read_text(encoding="utf-8") if ext_path and ext_path.is_file() else ""
+    missing = _missing_hand_markers(hand_text, generated_text, ext_text)
+    if missing:
+        preview = "; ".join(missing[:3])
+        extra = f" (+{len(missing) - 3} more)" if len(missing) > 3 else ""
+        raise EmitError(f"{module}: hand content lost: {preview}{extra}")
+
+
 def _hand_matches_ledger(path: Path, shape: Shape) -> bool:
     try:
         hand = extract_shape(
@@ -169,6 +223,10 @@ def _planned_packets(
         if swap_hand and path.is_file() and not _is_generated(path):
             if not _hand_matches_ledger(path, shape):
                 raise EmitError(f"hand file changed since its shape was extracted: {module}")
+            ext_path = packet_dir / shape.extras if shape.extras else None
+            _assert_hand_content_preserved(
+                module, path.read_text(encoding="utf-8"), text, ext_path
+            )
             hand_swaps.add(path)
         planned[path] = text
     return planned, hand_swaps

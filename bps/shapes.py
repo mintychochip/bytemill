@@ -396,17 +396,51 @@ def _line_start(src: str, pos: int) -> int:
     return 0 if nl < 0 else nl + 1
 
 
+def _attr_block_end(src: str, hash_pos: int) -> int:
+    """Index after the `]` that closes `#[` at ``hash_pos``."""
+    if not src.startswith("#[", hash_pos):
+        raise ShapeError("expected #[")
+    depth = 0
+    i = hash_pos + 1
+    while i < len(src):
+        if src[i] in "\"'":
+            i = _skip_rust_string(src, i)
+            continue
+        ch = src[i]
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return len(src)
+
+
+def _line_in_attr_prefix(src: str, line_begin: int, item_line: int) -> bool:
+    i = 0
+    while i < item_line:
+        if src.startswith("#[", i):
+            end = _attr_block_end(src, i)
+            if line_begin < end and line_begin >= _line_start(src, i):
+                return True
+            i = end
+            continue
+        i += 1
+    return False
+
+
 def _docs_and_attrs_before(src: str, item_pos: int) -> tuple[tuple[str, ...], int]:
+    item = _advance_item_start(src, item_pos)
+    item_line = _line_start(src, item)
+    attr_start = item
     doc_lines: list[str] = []
-    attr_start = item_pos
-    item_line = _line_start(src, item_pos)
     line_begin = item_line
-    first_end = src.find("\n", line_begin)
-    if first_end < 0:
-        first_end = len(src)
-    if not src[line_begin:first_end].strip().startswith(("///", "#[")) and line_begin > 0:
+    if line_begin > 0:
         line_begin = _line_start(src, line_begin - 1)
-    while True:
+    else:
+        return (), item
+    while line_begin >= 0:
         line_end = src.find("\n", line_begin)
         if line_end < 0:
             line_end = len(src)
@@ -414,12 +448,13 @@ def _docs_and_attrs_before(src: str, item_pos: int) -> tuple[tuple[str, ...], in
         if stripped.startswith("///"):
             doc_lines.insert(0, _doc_line_text(stripped))
         elif stripped.startswith("#["):
-            attr_start = line_begin
+            attr_start = min(attr_start, line_begin)
         elif stripped == "":
             pass
+        elif _line_in_attr_prefix(src, line_begin, item_line):
+            pass
         else:
-            if line_begin < item_line or line_begin == item_line:
-                break
+            break
         if line_begin == 0:
             break
         line_begin = _line_start(src, line_begin - 1)
@@ -662,7 +697,7 @@ def _is_trivial_new_body(inner: str, field_names: tuple[str, ...]) -> bool:
     inner_part = compact[len("Self {") : -1].strip()
     if not inner_part:
         return len(field_names) == 0
-    parts = [part.strip() for part in inner_part.split(",")]
+    parts = [part.strip() for part in inner_part.split(",") if part.strip()]
     if len(parts) != len(field_names):
         return False
     for part, name in zip(parts, field_names, strict=True):

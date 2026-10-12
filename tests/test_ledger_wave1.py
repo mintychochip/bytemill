@@ -12,26 +12,8 @@ SHAPES = ROOT / "targets" / "rstom" / "shapes"
 
 WAVE1_NEW_BODY_PACKETS = frozenset(
     {
-        "AttachEntityPacket",
-        "ClientClickWindowButtonPacket",
         "ClientNameItemPacket",
-        "ClientPickItemFromEntityPacket",
         "ClientPluginMessagePacket",
-        "ClientQueryEntityNbtPacket",
-        "ClientSteerBoatPacket",
-        "ClientTabCompletePacket",
-        "ClientUpdateCommandBlockMinecartPacket",
-        "CollectItemPacket",
-        "LoginPluginRequestPacket",
-        "PlayerRotationPacket",
-        "RecipeBookSettingsPacket",
-        "SetCooldownPacket",
-        "SetTickStatePacket",
-        "SetTitleTimePacket",
-        "UpdateHealthPacket",
-        "UpdateSimulationDistancePacket",
-        "WindowPropertyPacket",
-        "WorldBorderLerpSizePacket",
     }
 )
 

@@ -12,7 +12,8 @@ from pathlib import Path
 from bps.analyze import analyze
 from bps.cli import main
 from bps.emit_rstom import _packet_body
-from bps.emit_tree import _tree_packet, emit_tree
+from bps.emit_tree import emit_tree
+from bps.tree_packet import _validate_shape, _tree_packet
 from bps.errors import EmitError
 from bps.load import load_schema
 from bps.minestom import ClassTable, build_units
@@ -350,6 +351,17 @@ class TreePacketRenderTest(unittest.TestCase):
         text = _tree_packet(unit, shape, _packet_body(unit, resolved))
         self.assertIn("Box::new(ClientKeepAlivePacket::new(id))", text)
         self.assertNotIn("Box::new(ClientKeepAlivePacket {", text)
+
+    def test_unit_read_via_new_is_rejected(self) -> None:
+        shape = replace(
+            _keep_alive_shape(),
+            form="unit",
+            fields=(),
+            serializer=replace(_keep_alive_shape().serializer, read_via_new=True),
+        )
+        with self.assertRaises(EmitError) as ctx:
+            _validate_shape(shape)
+        self.assertIn("unit packet cannot use read_via_new", str(ctx.exception))
 
     def test_read_without_via_new_uses_struct_literal(self) -> None:
         resolved, unit = _analyze_keep_alive()

@@ -34,6 +34,8 @@ def _validate_shape(shape: Shape) -> None:
         raise EmitError(f"{shape.module}: unit shape must have no fields")
     if shape.serializer.style == "constant" and shape.form != "unit":
         raise EmitError(f"{shape.module}: constant serializer requires unit form")
+    if shape.form == "unit" and shape.serializer.read_via_new:
+        raise EmitError(f"{shape.module}: unit packet cannot use read_via_new")
 
 
 def _is_copy_field(rust_type: str) -> bool:
