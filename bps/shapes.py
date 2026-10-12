@@ -278,9 +278,12 @@ def extract_shape(source: str, cls: str, module: str) -> Shape:
                 module_level_extra = True
                 pos = _skip_item(src, pos)
                 continue
-            if src.startswith("pub const ", pos) or src.startswith("const ", pos):
-                if not src.startswith("pub const ", pos):
-                    module_level_extra = True
+            if src.startswith("pub const ", pos):
+                module_level_extra = True
+                pos = _skip_item(src, pos)
+                continue
+            if src.startswith("const ", pos) and not (pos >= 4 and src[pos - 4 : pos] == "pub "):
+                module_level_extra = True
                 pos = _skip_item(src, pos)
                 continue
             if src.startswith("pub enum ", pos) or src.startswith("pub type ", pos):
@@ -318,9 +321,11 @@ def _before_cfg_test(source: str) -> str:
 
 def _doc_line_text(line: str) -> str:
     if line.startswith("//!"):
-        return line[3:].lstrip()
+        rest = line[3:]
+        return rest[1:] if rest.startswith(" ") else rest
     if line.startswith("///"):
-        return line[3:].lstrip()
+        rest = line[3:]
+        return rest[1:] if rest.startswith(" ") else rest
     return line
 
 
@@ -662,27 +667,46 @@ def _parse_inherent_impl(body: str) -> tuple[NewShape, tuple[str, ...], bool, st
     return new, ser_docs, ser_must_use, style, ser_name, extra
 
 
+def _rskip_trivia(src: str, pos: int) -> int:
+    while pos > 0 and src[pos - 1] in " \t\r\n":
+        pos -= 1
+    return pos
+
+
 def _collect_attrs_before(src: str, item_pos: int) -> list[str]:
     attrs: list[str] = []
-    item_line = _line_start(src, item_pos)
-    line_begin = item_line
-    if line_begin > 0:
-        line_begin = _line_start(src, line_begin - 1)
-    while line_begin >= 0 and line_begin < item_line:
-        line_end = src.find("\n", line_begin)
-        if line_end < 0:
-            line_end = len(src)
-        stripped = src[line_begin:line_end].strip()
-        pos = _skip_trivia(src, line_begin)
-        if src.startswith("#[", pos):
-            attrs.insert(0, src[pos : _matching_attr(src, pos)])
-        elif stripped.startswith("///") or stripped == "":
-            pass
-        else:
+    pos = _rskip_trivia(src, item_pos)
+    while pos > 0:
+        pos = _rskip_trivia(src, pos)
+        if pos <= 0:
             break
-        if line_begin == 0:
+        if src[pos - 1] != "]":
+            line_begin = _line_start(src, pos - 1)
+            stripped = src[line_begin:pos].strip()
+            if stripped.startswith("///"):
+                break
+            if stripped.startswith("pub ") or stripped.startswith("fn "):
+                break
+            pos = line_begin
+            continue
+        close = pos - 1
+        depth = 0
+        open_idx = None
+        i = close
+        while i >= 0:
+            if src[i] == "]":
+                depth += 1
+            elif src[i] == "[":
+                depth -= 1
+                if depth == 0:
+                    open_idx = i
+                    break
+            i -= 1
+        if open_idx is None or open_idx == 0 or src[open_idx - 1] != "#":
             break
-        line_begin = _line_start(src, line_begin - 1)
+        start = open_idx - 1
+        attrs.insert(0, src[start : close + 1])
+        pos = start
     return attrs
 
 
@@ -734,7 +758,7 @@ def _skip_item(src: str, pos: int) -> int:
     if src.startswith("impl ", pos):
         _, _, _, _, end = _parse_impl_header(src, pos)
         return end
-    if src.startswith(("pub struct ", "struct ", "pub enum ", "pub fn ", "fn ", "pub const ", "const ")):
+    if src.startswith(("pub struct ", "struct ", "pub enum ", "pub fn ", "fn ", "pub const ", "const "), pos):
         return _skip_declaration(src, pos)
     return pos + 1
 

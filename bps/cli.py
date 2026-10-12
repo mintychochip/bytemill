@@ -235,11 +235,14 @@ def main(argv: list[str] | None = None) -> int:
                     if not path.is_file():
                         continue
                     mod = module_path(unit)
-                    shape = extract_shape(
-                        path.read_text(encoding="utf-8"),
-                        unit.cls.name,
-                        mod,
-                    )
+                    try:
+                        shape = extract_shape(
+                            path.read_text(encoding="utf-8"),
+                            unit.cls.name,
+                            mod,
+                        )
+                    except ShapeError:
+                        continue
                     if args.eligible and mismatch(shape, bps_field_pairs(unit.pkt, resolved)):
                         continue
                     dest = out / f"{mod}.json"
