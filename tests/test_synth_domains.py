@@ -159,13 +159,48 @@ class SynthProductionOverridesTest(unittest.TestCase):
         value = synthesize_packet(resolved, resolved.packets["level_particles"])
         self.assertEqual(value["particle"], {"particle_type": 0, "value": {}})
 
-    def test_update_recipes_property_set_uses_hand_known_key(self) -> None:
+    def test_update_recipes_property_set_uses_vanilla_namespaced_key(self) -> None:
         resolved = load_minecraft()
         value = synthesize_packet(resolved, resolved.packets["update_recipes"])
         self.assertEqual(
             value["property_sets"],
-            [{"property_set_id": "smithing_base", "items_count": 1, "items": [1]}],
+            [{"property_set_id": "minecraft:smithing_base", "items_count": 1, "items": [1]}],
         )
+
+    def test_update_advancements_override_omits_display_only(self) -> None:
+        resolved = load_minecraft()
+        original = dict(SYNTH_OVERRIDES)
+        try:
+            SYNTH_OVERRIDES.clear()
+            SYNTH_OVERRIDES.update(
+                {k: v for k, v in original.items() if k[0] != "update_advancements"}
+            )
+            default = synthesize_packet(resolved, resolved.packets["update_advancements"])
+        finally:
+            SYNTH_OVERRIDES.clear()
+            SYNTH_OVERRIDES.update(original)
+
+        value = synthesize_packet(resolved, resolved.packets["update_advancements"])
+        self.assertGreater(value["identifiers_to_remove_count"], 0)
+        self.assertGreater(len(value["identifiers_to_remove"]), 0)
+        self.assertGreater(value["progress_mappings_count"], 0)
+        self.assertGreater(len(value["progress_mappings"]), 0)
+        self.assertEqual(
+            value["identifiers_to_remove"],
+            default["identifiers_to_remove"],
+        )
+        self.assertEqual(value["progress_mappings"], default["progress_mappings"])
+
+        default_mapping = default["advancement_mappings"][0]
+        actual_mapping = value["advancement_mappings"][0]
+        self.assertEqual(actual_mapping["key"], default_mapping["key"])
+        self.assertEqual(actual_mapping["x"], default_mapping["x"])
+        self.assertEqual(actual_mapping["y"], default_mapping["y"])
+        default_value = dict(default_mapping["value"])
+        default_value.pop("display_data", None)
+        default_value["has_display_data"] = False
+        self.assertEqual(actual_mapping["value"], default_value)
+        self.assertNotIn("display_data", actual_mapping["value"])
 
     def test_custom_click_action_payload_size_matches_nbt_bytes(self) -> None:
         resolved = load_minecraft()

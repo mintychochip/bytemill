@@ -70,10 +70,6 @@ def emit_tree(
     check: bool = False,
 ) -> list[str]:
     """Write the pin gate (and later, shaped packets). Returns paths written or drift messages."""
-    from bps.synth import SYNTH_OVERRIDES, validate_all_synth_overrides
-
-    if {name for name, _ in SYNTH_OVERRIDES} <= resolved.packets.keys():
-        validate_all_synth_overrides(resolved)
     units = build_units(resolved, classes)
     rows = build_pins(resolved, units)
     tests = workspace / "crates" / "rstom" / "tests"

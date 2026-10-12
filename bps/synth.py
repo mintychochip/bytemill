@@ -27,16 +27,14 @@ SYNTH_OVERRIDES: dict[tuple[str, str], object] = {
     ("login_disconnect", "reason"): '"abc"',
     # RemoteDebugSampleType has one constant TICK_TIME (ordinal 0).
     ("debug_sample", "sample_type"): 0,
-    # Recipe property sets: hand port keys are short names (DeclareRecipesPacket / RecipeProperty).
+    # Recipe property sets: vanilla keys are namespaced identifiers (ClientboundUpdateRecipesPacket).
     (
         "update_recipes",
         "property_sets",
-    ): [{"property_set_id": "smithing_base", "items_count": 1, "items": [1]}],
-    # Advancement icon uses ItemStackTemplate; empty DataComponentPatch only (Advancement.java:51-63).
-    ("update_advancements", "identifiers_to_remove_count"): 0,
-    ("update_advancements", "identifiers_to_remove"): [],
-    ("update_advancements", "progress_mappings_count"): 0,
-    ("update_advancements", "progress_mappings"): [],
+    ): [{"property_set_id": "minecraft:smithing_base", "items_count": 1, "items": [1]}],
+    # Display is omitted: the hand ItemStackTemplate codec writes a resolved component map where
+    # vanilla writes a plain patch (DisplayInfo.java:40-60), so an icon pin would be 228 vs 121
+    # bytes; parent, requirements, progress/remove lists stay on the default synthetic layout.
     (
         "update_advancements",
         "advancement_mappings",
@@ -44,14 +42,15 @@ SYNTH_OVERRIDES: dict[tuple[str, str], object] = {
         {
             "key": "minecraft:stone",
             "value": {
-                "has_parent_id": False,
+                "has_parent_id": True,
+                "parent_id": "minecraft:stone",
                 "has_display_data": False,
-                "requirements_count": 0,
-                "requirements": [],
-                "sends_telemetry_data": False,
+                "requirements_count": 1,
+                "requirements": [{"criteria_count": 1, "criteria": ["abc"]}],
+                "sends_telemetry_data": True,
             },
-            "x": 0.0,
-            "y": 0.0,
+            "x": 1.5,
+            "y": 1.5,
         }
     ],
     # Length-prefixed optional tag: byte length must match the following network NBT
