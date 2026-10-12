@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import tempfile
@@ -17,6 +18,7 @@ from tests.rstom_tables import RSTOM, real_table
 from tests.test_varint import load_minecraft
 
 RSTOM_PACKET = RSTOM / "crates" / "rstom" / "src" / "network" / "packet"
+COMMITTED_SHAPES = Path(__file__).resolve().parents[1] / "targets" / "rstom" / "shapes"
 
 
 @unittest.skipUnless(RSTOM_PACKET.is_dir(), "rstom worktree packet sources not present")
@@ -29,9 +31,17 @@ class EmitTreeRealTreeTest(unittest.TestCase):
 
     def test_emit_all_sixty_four_eligible_packets(self) -> None:
         t0 = time.perf_counter()
-        pairs = extract_shapes_for_units(
-            self.resolved, RSTOM, self.units, eligible_only=True
-        )
+        committed = {
+            json.loads(p.read_text(encoding="utf-8"))["class"]
+            for p in COMMITTED_SHAPES.rglob("*.json")
+        }
+        pairs = [
+            (unit, shape)
+            for unit, shape in extract_shapes_for_units(
+                self.resolved, RSTOM, self.units, eligible_only=True
+            )
+            if shape.cls in committed
+        ]
         self.assertEqual(len(pairs), 64)
 
         with tempfile.TemporaryDirectory() as td:

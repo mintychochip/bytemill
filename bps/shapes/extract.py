@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
+from bps.shapes.items import impl_body_bounds, scan_items
 from bps.shapes.model import FieldShape, NewShape, SerializerShape, Shape, ShapeError
 from bps.shapes.scan import (
     _advance_item_start,
-    _before_cfg_test,
     _collect_attrs_before,
     _docs_and_attrs_before,
     _find_fn_body_start,
-    _is_module_level_item,
     _leading_module_docs,
     _matching_brace,
-    _parse_impl_header,
     _parse_struct_attrs,
     _read_ident,
     _read_type,
@@ -33,135 +32,128 @@ _ALLOWED_TRAITS_FOR_CLS = frozenset(
 )
 
 
+_COORD_VEC_USE = re.compile(r"^use crate::coordinate::Vec;[ \t]*$", re.MULTILINE)
+_STRUCT_HEAD = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?struct\s+(\w+)", re.MULTILINE)
+_USE_HEAD = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?use\s", re.MULTILINE)
+_WIRE_CONST = re.compile(r"[A-Z][A-Z0-9_]*$")
+_GENERATOR_NAMES = frozenset(
+    {
+        "Arc",
+        "ConstantSerializer",
+        "NetworkBuffer",
+        "Packet",
+        "PacketSerializer",
+        "PacketValue",
+        "ClientPacket",
+        "ServerPacket",
+        "ClientPacketGroup",
+        "ServerPacketGroup",
+        "downcast",
+    }
+)
+
+
 def extract_shape(
     source: str, cls: str, module: str, *, packet_path: Path | None = None
 ) -> Shape:
     stem = module.rsplit("/", 1)[-1]
-    src = _before_cfg_test(source)
-    module_docs = _leading_module_docs(src)
-    pos = _skip_trivia(src, 0)
-    struct_docs: tuple[str, ...] = ()
-    derives: tuple[str, ...] = ()
-    fields: tuple[FieldShape, ...] = ()
-    form = "braced"
-    serializer_struct: SerializerShape | None = None
+    coord = _COORD_VEC_USE.search(source) is not None
+    items = scan_items(source)
+    packet = [it for it in items if it.kind == "struct" and it.name == cls]
+    if not packet:
+        raise ShapeError(f"missing struct {cls}")
+    struct_docs, derives, form, raw_fields = _packet_struct(packet[0].text, cls)
+    fields = tuple(FieldShape(f.name, _normalise_types(f.type, coord), f.docs) for f in raw_fields)
+    field_names = tuple(f.name for f in fields)
     new_shape = NewShape(False, False, False, (), ())
     ser_fn_docs: tuple[str, ...] = ()
     ser_fn_must_use = False
     ser_style = "constant"
     ser_name = ""
-    extras: str | None = None
+    serializer_struct: SerializerShape | None = None
+    serializer_impls: list[tuple[str, str]] = []
+    use_texts: list[str] = []
+    main_impl_seen = False
     inherent_extra = False
-    module_level_extra = False
+    module_extra = False
+    inline_tests = False
 
-    while pos < len(src):
-        pos = _skip_trivia(src, pos)
-        if pos >= len(src):
-            break
-        if src.startswith("pub struct ", pos) or src.startswith("struct ", pos):
-            is_pub = src.startswith("pub struct ", pos)
-            kw_len = len("pub struct ") if is_pub else len("struct ")
-            name, after_name = _read_ident(src, pos + kw_len)
-            if name != cls:
-                if name.endswith("Serializer"):
-                    docs, _ = _docs_and_attrs_before(src, pos)
-                    serializer_struct = SerializerShape(
-                        "struct", name, is_pub, docs, read_via_new=False
-                    )
-                    end = _skip_trivia(src, after_name)
-                    if end < len(src) and src[end] == ";":
-                        pos = end + 1
-                    elif end < len(src) and src[end] == "{":
-                        pos = _skip_balanced(src, end, "{", "}")
+    for item in items:
+        if item.kind == "use":
+            use_texts.append(item.text)
+        elif item.kind == "struct" and item.name == cls:
+            pass
+        elif item.kind == "struct" and serializer_struct is None and (item.name or "").endswith(
+            "Serializer"
+        ):
+            head = _STRUCT_HEAD.search(item.text)
+            docs, _ = _docs_and_attrs_before(item.text, head.start())
+            serializer_struct = SerializerShape(
+                "struct", item.name or "", head.group(0).startswith("pub"), docs
+            )
+        elif item.kind == "impl":
+            body_start, body_end = impl_body_bounds(item.text)
+            body = item.text[body_start:body_end]
+            if item.name == cls and item.trait is None:
+                new, ser_docs, ser_must_use, style, sname, extra = _parse_inherent_impl(
+                    body, field_names
+                )
+                if new.present or sname:
+                    if main_impl_seen:
+                        module_extra = True
                     else:
-                        pos = after_name
-                    continue
-                raise ShapeError(f"unexpected public type {name!r}")
-            docs, attr_pos = _docs_and_attrs_before(src, pos)
-            struct_docs, derives = docs, _parse_struct_attrs(src, attr_pos, pos)
-            pos = _skip_trivia(src, after_name)
-            if pos < len(src) and src[pos] == ";":
-                form = "unit"
-                fields = ()
-                pos += 1
-            elif pos < len(src) and src[pos] == "{":
-                form = "braced"
-                body_end = _matching_brace(src, pos)
-                fields = _parse_struct_fields(src[pos + 1 : body_end])
-                pos = body_end + 1
+                        main_impl_seen = True
+                        new_shape, ser_fn_docs, ser_fn_must_use = new, ser_docs, ser_must_use
+                        ser_style, ser_name, inherent_extra = style, sname, extra
+                else:
+                    module_extra = True
+            elif item.name == cls and item.trait in _ALLOWED_TRAITS_FOR_CLS:
+                pass
+            elif item.trait == "PacketSerializer" and (item.name or "").endswith("Serializer"):
+                serializer_impls.append((item.name or "", body))
             else:
-                raise ShapeError(f"malformed struct {cls}")
-            continue
-
-        if src.startswith("impl ", pos):
-            trait, target, body_start, body_end, pos = _parse_impl_header(src, pos)
-            body = src[body_start:body_end]
-            if trait is None:
-                if target == cls:
-                    new_shape, ser_fn_docs, ser_fn_must_use, ser_style, ser_name, extra = (
-                        _parse_inherent_impl(body, tuple(f.name for f in fields))
-                    )
-                    if extra:
-                        inherent_extra = True
-                continue
-            if target == cls:
-                if trait not in _ALLOWED_TRAITS_FOR_CLS:
-                    raise ShapeError(f"impl {trait} for {cls}")
-                continue
-            if trait == "PacketSerializer" and target.endswith("Serializer"):
-                via_new = _serializer_read_via_new(body, cls)
-                if serializer_struct is not None and serializer_struct.name == target:
-                    serializer_struct = SerializerShape(
-                        serializer_struct.style,
-                        serializer_struct.name,
-                        serializer_struct.public,
-                        serializer_struct.docs,
-                        read_via_new=via_new,
-                    )
-                continue
-            if target.endswith("Serializer"):
-                raise ShapeError(f"impl {trait} for {target}")
-            continue
-
-        if _is_module_level_item(src, pos):
-            if src.startswith("pub fn ", pos) or src.startswith("fn ", pos):
-                if src.startswith("pub fn ", pos):
-                    raise ShapeError("free function")
-                module_level_extra = True
-                pos = _skip_item(src, pos)
-                continue
-            if src.startswith("const fn ", pos) or src.startswith("pub const fn ", pos):
-                module_level_extra = True
-                pos = _skip_item(src, pos)
-                continue
-            if src.startswith("pub const ", pos):
-                module_level_extra = True
-                pos = _skip_item(src, pos)
-                continue
-            if src.startswith("const ", pos) and not (pos >= 4 and src[pos - 4 : pos] == "pub "):
-                module_level_extra = True
-                pos = _skip_item(src, pos)
-                continue
-            if src.startswith("pub enum ", pos) or src.startswith("pub type ", pos):
-                raise ShapeError("unexpected public type")
-        pos = _skip_item(src, pos)
+                module_extra = True
+        elif item.kind == "mod":
+            has_block = item.text.rstrip().endswith("}")
+            if has_block and item.cfg_test:
+                inline_tests = True
+            elif not has_block and (item.name == "ext" or (item.name == "tests" and item.cfg_test)):
+                pass
+            else:
+                module_extra = True
+        else:
+            module_extra = True
 
     if serializer_struct is None and ser_style == "struct":
         raise ShapeError(f"missing serializer struct for {cls}")
-    if serializer_struct is not None:
-        ser = serializer_struct
-    else:
-        ser = SerializerShape(ser_style, ser_name, False, ())
-    if inherent_extra or module_level_extra:
-        extras = f"{stem}.ext.rs"
-    elif packet_path is not None:
-        ext_path = packet_path.parent / f"{stem}.ext.rs"
-        if ext_path.is_file():
-            extras = f"{stem}.ext.rs"
+    for target, body in serializer_impls:
+        if serializer_struct is not None and target == serializer_struct.name:
+            serializer_struct = replace(
+                serializer_struct, read_via_new=_serializer_read_via_new(body, cls)
+            )
+        else:
+            module_extra = True
+    ser = (
+        serializer_struct
+        if serializer_struct is not None
+        else SerializerShape(ser_style, ser_name, False, ())
+    )
+
+    raw_params = _normalise_types(new_shape.params or "", coord)
+    default_params = ", ".join(f"{f.name}: {f.type}" for f in fields)
+    params = raw_params if new_shape.present and raw_params != default_params else None
+    new_shape = replace(new_shape, params=params)
+    haystack = " ".join([*(f.type for f in fields), raw_params, *new_shape.body])
+    imports = _hand_imports(use_texts, coord, haystack)
+
+    sibling = packet_path.parent if packet_path is not None else None
+    tests_name = f"{stem}.tests.rs"
+    tests = tests_name if inline_tests or _sibling_exists(sibling, tests_name) else None
+    has_extra = module_extra or inherent_extra or _sibling_exists(sibling, f"{stem}.ext.rs")
     return Shape(
         cls=cls,
         module=module,
-        module_docs=module_docs,
+        module_docs=_leading_module_docs(source),
         struct_docs=struct_docs,
         derives=derives,
         form=form,
@@ -170,8 +162,80 @@ def extract_shape(
         serializer_fn_docs=ser_fn_docs,
         serializer_fn_must_use=ser_fn_must_use,
         serializer=ser,
-        extras=extras,
+        extras=f"{stem}.ext.rs" if has_extra else None,
+        imports=imports,
+        tests=tests,
     )
+
+
+def _sibling_exists(directory: Path | None, name: str) -> bool:
+    return directory is not None and (directory / name).is_file()
+
+
+def _packet_struct(
+    text: str, cls: str
+) -> tuple[tuple[str, ...], tuple[str, ...], str, tuple[FieldShape, ...]]:
+    head = _STRUCT_HEAD.search(text)
+    if head is None:
+        raise ShapeError(f"malformed struct {cls}")
+    docs, attr_pos = _docs_and_attrs_before(text, head.start())
+    derives = _parse_struct_attrs(text, attr_pos, head.start())
+    pos = _skip_trivia(text, head.end())
+    if pos < len(text) and text[pos] == ";":
+        return docs, derives, "unit", ()
+    if pos < len(text) and text[pos] == "{":
+        body_end = _matching_brace(text, pos)
+        return docs, derives, "braced", _parse_struct_fields(text[pos + 1 : body_end])
+    raise ShapeError(f"malformed struct {cls}")
+
+
+def _normalise_types(text: str, coord: bool) -> str:
+    """`std::vec::Vec` becomes `Vec`; the coordinate `Vec` becomes `CoordVec`."""
+    text = text.replace("std::vec::Vec", "Vec")
+    if coord:
+        text = re.sub(r"(?<![\w:])Vec(?!\s*<)", "CoordVec", text)
+    return text
+
+
+def _hand_imports(use_texts: list[str], coord: bool, haystack: str) -> tuple[str, ...]:
+    kept: list[str] = []
+    for text in use_texts:
+        statement = _use_statement(text)
+        if coord and statement == "use crate::coordinate::Vec;":
+            statement = "use crate::coordinate::Vec as CoordVec;"
+        if any(re.search(rf"\b{re.escape(n)}\b", haystack) for n in _use_names(statement)):
+            kept.append(statement)
+    return tuple(kept)
+
+
+def _use_statement(text: str) -> str:
+    head = _USE_HEAD.search(text)
+    statement = " ".join(text[head.start() :].split())
+    return statement.replace("{ ", "{").replace(" }", "}").replace(",}", "}")
+
+
+def _use_names(statement: str) -> tuple[str, ...]:
+    """Names a `use` brings in; empty for globs; generator and wire-constant names excluded."""
+    path = re.sub(r"^(?:pub(?:\([^)]*\))?\s+)?use\s+", "", statement).rstrip(";").strip()
+    if "*" in path:
+        return ()
+    parent = ""
+    parts = [path]
+    if "{" in path:
+        prefix, inner = path.split("{", 1)
+        parent = prefix.rstrip(":").rsplit("::", 1)[-1]
+        parts = inner.rsplit("}", 1)[0].split(",")
+    names: list[str] = []
+    for part in (p.strip() for p in parts):
+        if not part:
+            continue
+        if part == "self":
+            names.append(parent)
+        elif " as " in part:
+            names.append(part.rsplit(" as ", 1)[1].strip())
+        else:
+            names.append(part.rsplit("::", 1)[-1])
+    return tuple(n for n in names if n not in _GENERATOR_NAMES and not _WIRE_CONST.match(n))
 
 
 def _parse_struct_fields(body: str) -> tuple[FieldShape, ...]:
@@ -312,7 +376,9 @@ def _parse_inherent_impl(
                 other_attrs = tuple(a for a in attrs if not a.strip().startswith("#[must_use"))
                 braced = body[sig_end - 1 : body_end + 1] if sig_end > 0 else ""
                 new_body = _new_body_lines(braced, field_names)
-                new = NewShape(True, is_const, must_use, other_attrs, docs, new_body)
+                new = NewShape(
+                    True, is_const, must_use, other_attrs, docs, new_body, _raw_params(body, pos)
+                )
             elif name == "serializer":
                 ser_docs = docs
                 ser_must_use = any(a.strip().startswith("#[must_use") for a in attrs)
@@ -334,3 +400,10 @@ def _parse_serializer_body(body: str) -> tuple[str, str]:
     if m and m.group(1) != "ConstantSerializer":
         return "struct", m.group(1)
     raise ShapeError("unrecognized serializer() body")
+
+
+def _raw_params(body: str, after_name: int) -> str:
+    """The `fn new(...)` parameter list, whitespace collapsed, without a trailing comma."""
+    open_paren = body.index("(", after_name)
+    close = _skip_balanced(body, open_paren, "(", ")") - 1
+    return " ".join(body[open_paren + 1 : close].split()).rstrip(",").rstrip()

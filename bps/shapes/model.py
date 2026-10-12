@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class ShapeError(Exception):
@@ -15,6 +15,7 @@ class FieldShape:
     name: str
     type: str
     docs: tuple[str, ...]
+    wire: str | None = None
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class NewShape:
     attrs: tuple[str, ...]
     docs: tuple[str, ...]
     body: tuple[str, ...] = ()
+    params: str | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,14 @@ class SerializerShape:
     public: bool
     docs: tuple[str, ...]
     read_via_new: bool = False
+
+
+@dataclass(frozen=True)
+class Accepted:
+    """A hand item the shape keeps verbatim instead of generating it."""
+
+    construct: str
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -50,6 +60,18 @@ class Shape:
     serializer_fn_must_use: bool
     serializer: SerializerShape
     extras: str | None
+    imports: tuple[str, ...] = ()
+    tests: str | None = None
+    hooks: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    accepted: tuple[Accepted, ...] = ()
+    drops: tuple[str, ...] = ()
+
+
+def _field_json(f: FieldShape) -> dict[str, object]:
+    obj: dict[str, object] = {"name": f.name, "type": f.type, "docs": list(f.docs)}
+    if f.wire is not None:
+        obj["wire"] = f.wire
+    return obj
 
 
 def shape_to_json(s: Shape) -> str:
@@ -62,7 +84,7 @@ def shape_to_json(s: Shape) -> str:
             "derives": list(s.derives),
             "form": s.form,
         },
-        "fields": [{"name": f.name, "type": f.type, "docs": list(f.docs)} for f in s.fields],
+        "fields": [_field_json(f) for f in s.fields],
         "new": {
             "present": s.new.present,
             "must_use": s.new.must_use,
@@ -84,6 +106,18 @@ def shape_to_json(s: Shape) -> str:
         },
         "extras": s.extras,
     }
+    if s.new.params is not None:
+        obj["new"]["params"] = s.new.params
+    if s.imports:
+        obj["imports"] = list(s.imports)
+    if s.tests is not None:
+        obj["tests"] = s.tests
+    if s.hooks:
+        obj["hooks"] = {k: list(v) for k, v in s.hooks.items()}
+    if s.accepted:
+        obj["accepted"] = [{"construct": a.construct, "reason": a.reason} for a in s.accepted]
+    if s.drops:
+        obj["drops"] = list(s.drops)
     return json.dumps(obj, indent=2) + "\n"
 
 
@@ -97,7 +131,10 @@ def shape_from_json(text: str) -> Shape:
         derives=tuple(obj["struct"]["derives"]),
         form=obj["struct"]["form"],
         fields=tuple(
-            FieldShape(name=f["name"], type=f["type"], docs=tuple(f["docs"])) for f in obj["fields"]
+            FieldShape(
+                name=f["name"], type=f["type"], docs=tuple(f["docs"]), wire=f.get("wire")
+            )
+            for f in obj["fields"]
         ),
         new=NewShape(
             present=obj["new"]["present"],
@@ -106,6 +143,7 @@ def shape_from_json(text: str) -> Shape:
             attrs=tuple(obj["new"]["attrs"]),
             docs=tuple(obj["new"]["docs"]),
             body=tuple(obj["new"].get("body", ())),
+            params=obj["new"].get("params"),
         ),
         serializer_fn_docs=tuple(obj["serializer_fn"]["docs"]),
         serializer_fn_must_use=obj["serializer_fn"]["must_use"],
@@ -117,4 +155,9 @@ def shape_from_json(text: str) -> Shape:
             read_via_new=bool(obj["serializer_struct"].get("read_via_new", False)),
         ),
         extras=obj["extras"],
+        imports=tuple(obj.get("imports", ())),
+        tests=obj.get("tests"),
+        hooks={k: tuple(v) for k, v in obj.get("hooks", {}).items()},
+        accepted=tuple(Accepted(a["construct"], a["reason"]) for a in obj.get("accepted", ())),
+        drops=tuple(obj.get("drops", ())),
     )

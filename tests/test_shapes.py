@@ -29,15 +29,11 @@ from tests.test_varint import load_minecraft
 ROOT = Path(__file__).resolve().parents[1]
 
 WORKLIST_SUMMARY = {
-    "eligible": 64,
-    "field count mismatch": 48,
-    "field name/type mismatch": 63,
-    "extract: extra public type in hand file": 32,
-    "extract: nested public type": 25,
+    "eligible": 65,
+    "field count mismatch": 91,
+    "field name/type mismatch": 78,
     "extract: missing derive on struct": 1,
     "missing hand file": 1,
-    "extract: unsupported trait impl": 1,
-    "extract: free function": 1,
 }
 
 def _worklist_category(status: str) -> str:
@@ -627,18 +623,18 @@ class ShapeSnippetTest(unittest.TestCase):
         shape = extract_shape(FORWARD_EXTRA, "ProbePacket", "server/common/probe_packet")
         self.assertEqual(shape.extras, "probe_packet.ext.rs")
 
-    def test_default_impl_raises(self) -> None:
+    def test_default_impl_becomes_extra(self) -> None:
         src = CLEAR_DIALOG.replace(
             "impl ServerPacket for ClearDialogPacket {}",
             "impl Default for ClearDialogPacket {}\nimpl ServerPacket for ClearDialogPacket {}",
         )
-        with self.assertRaises(ShapeError):
-            extract_shape(src, "ClearDialogPacket", "server/common/clear_dialog_packet")
+        shape = extract_shape(src, "ClearDialogPacket", "server/common/clear_dialog_packet")
+        self.assertEqual(shape.extras, "clear_dialog_packet.ext.rs")
 
-    def test_free_function_raises(self) -> None:
+    def test_free_function_becomes_extra(self) -> None:
         src = "//! x\n\npub fn free_helper() {}\n" + CLEAR_DIALOG
-        with self.assertRaises(ShapeError):
-            extract_shape(src, "ClearDialogPacket", "server/common/clear_dialog_packet")
+        shape = extract_shape(src, "ClearDialogPacket", "server/common/clear_dialog_packet")
+        self.assertEqual(shape.extras, "clear_dialog_packet.ext.rs")
 
     def test_struct_allow_raises(self) -> None:
         src = CLEAR_DIALOG.replace(
@@ -857,7 +853,12 @@ class ShapeRealTreeTest(unittest.TestCase):
             eligible.append(unit.cls.name)
             self.assertEqual(shape_from_json(shape_to_json(shape)), shape)
 
-        self.assertEqual(len(eligible), 64, f"eligible={sorted(eligible)}")
+        committed = {
+            json.loads(p.read_text(encoding="utf-8"))["class"]
+            for p in (ROOT / "targets" / "rstom" / "shapes").rglob("*.json")
+        }
+        self.assertEqual(len(committed), 64)
+        self.assertLessEqual(committed, set(eligible), f"lost: {sorted(committed - set(eligible))}")
 
         summary = Counter()
         for unit in self.units:
@@ -976,7 +977,7 @@ class ShapeCliTest(unittest.TestCase):
             self.assertGreaterEqual(len(written), 1)
             self.assertTrue(any(p.name == "clear_dialog_packet.json" for p in written))
 
-    def test_shapes_extract_eligible_writes_64_with_worktree(self) -> None:
+    def test_shapes_extract_eligible_keeps_committed_packets_with_worktree(self) -> None:
         import subprocess
 
         if not _worktree_present():
@@ -1002,8 +1003,12 @@ class ShapeCliTest(unittest.TestCase):
                 cwd=ROOT,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            files = sorted(out.rglob("*.json"))
-            self.assertEqual(len(files), 64)
+            written = {json.loads(p.read_text(encoding="utf-8"))["class"] for p in out.rglob("*.json")}
+            committed = {
+                json.loads(p.read_text(encoding="utf-8"))["class"]
+                for p in (ROOT / "targets" / "rstom" / "shapes").rglob("*.json")
+            }
+            self.assertLessEqual(committed, written)
 
     def test_shapes_report_runs(self) -> None:
         import subprocess

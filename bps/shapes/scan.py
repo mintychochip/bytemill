@@ -7,11 +7,6 @@ import re
 from bps.shapes.model import ShapeError
 
 
-def _before_cfg_test(source: str) -> str:
-    idx = source.find("#[cfg(test)]")
-    return source[:idx] if idx >= 0 else source
-
-
 def _doc_line_text(line: str) -> str:
     if line.startswith("//!"):
         rest = line[3:]
@@ -139,19 +134,40 @@ def _matching_brace(src: str, open_pos: int) -> int:
     return _skip_balanced(src, open_pos, "{", "}") - 1
 
 
+def _raw_string_hashes(src: str, pos: int) -> int | None:
+    """Hash count of the raw string whose opening quote is at ``pos``, else None."""
+    j = pos - 1
+    while j >= 0 and src[j] == "#":
+        j -= 1
+    if j < 0 or src[j] != "r":
+        return None
+    prev = j - 1
+    if prev >= 0 and src[prev] == "b":
+        prev -= 1
+    if prev >= 0 and (src[prev].isalnum() or src[prev] == "_"):
+        return None
+    return pos - 1 - j
+
+
 def _skip_rust_string(src: str, pos: int) -> int:
     if pos >= len(src):
         return pos
     if src[pos] == '"':
-        return _skip_string(src, pos)
+        hashes = _raw_string_hashes(src, pos)
+        if hashes is None:
+            return _skip_string(src, pos)
+        close = '"' + "#" * hashes
+        end = src.find(close, pos + 1)
+        return len(src) if end < 0 else end + len(close)
     if src[pos] == "'":
+        if pos + 2 < len(src) and src[pos + 1] != "\\" and src[pos + 2] == "'":
+            return pos + 3
+        if pos + 1 < len(src) and src[pos + 1] == "\\":
+            return _skip_string(src, pos)
         nxt = pos + 1
-        if nxt < len(src) and (src[nxt].isalnum() or src[nxt] == "_"):
+        while nxt < len(src) and (src[nxt].isalnum() or src[nxt] == "_"):
             nxt += 1
-            while nxt < len(src) and (src[nxt].isalnum() or src[nxt] == "_"):
-                nxt += 1
-            return nxt
-        return _skip_string(src, pos)
+        return nxt
     return pos + 1
 
 
@@ -385,10 +401,6 @@ def _find_fn_body_start(src: str, pos: int) -> int:
             return i + 1
         i += 1
     return len(src)
-
-
-def _is_module_level_item(src: str, pos: int) -> bool:
-    return src.startswith(("pub ", "fn ", "const ", "use ", "impl ", "struct ", "#["), pos)
 
 
 def _skip_item(src: str, pos: int) -> int:
