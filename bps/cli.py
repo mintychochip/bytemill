@@ -9,6 +9,7 @@ from bps.analyze import analyze
 from bps.emit_json import schema_to_json
 from bps.emit_rust import emit_rust
 from bps.emit_rstom import emit_rstom
+from bps.emit_tree import emit_tree
 from bps.errors import BpsError, EmitError
 from bps.interp.engine import decode_frame_payload, decode_packet, encode_packet
 from bps.load import load_schema
@@ -16,18 +17,25 @@ from bps.minestom import ClassTable
 
 # Where `packets_gen`'s schema is in an rstom workspace, relative to the workspace.
 PACKETS_GEN_SCHEMA = Path("tools") / "packets_gen" / "schema" / "packets.json"
+PROTOC_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SHAPES = PROTOC_ROOT / "targets" / "rstom" / "shapes"
 
 
 def _load_schema(paths: list[str]):
     return analyze(load_schema(paths))
 
 
-def _class_table(given: str | None, out: Path) -> ClassTable:
-    """rstom's class table: the one named, or the one of the workspace `out` is a crate of."""
+def _class_table(given: str | None, anchor: Path) -> ClassTable:
+    """rstom's class table: the one named, or the one beside an rstom workspace / crate."""
     if given is not None:
         path = Path(given)
     else:
-        path = out.resolve().parent.parent / PACKETS_GEN_SCHEMA
+        resolved = anchor.resolve()
+        path = (
+            resolved / PACKETS_GEN_SCHEMA
+            if (resolved / PACKETS_GEN_SCHEMA).is_file()
+            else resolved.parent.parent / PACKETS_GEN_SCHEMA
+        )
     if not path.is_file():
         raise EmitError(
             f"emit rstom needs rstom's packets_gen schema, which names each packet's Minestom "
@@ -63,9 +71,22 @@ def main(argv: list[str] | None = None) -> int:
     enc_p.add_argument("json_value")
 
     emit_p = sub.add_parser("emit")
-    emit_p.add_argument("target", choices=["rust", "rstom"])
+    emit_p.add_argument("target", choices=["rust", "rstom", "rstom-tree"])
     emit_p.add_argument("schemas", nargs="+")
-    emit_p.add_argument("--out", required=True)
+    emit_p.add_argument("--out")
+    emit_p.add_argument(
+        "--rstom",
+        help="rstom workspace root (emit rstom-tree)",
+    )
+    emit_p.add_argument(
+        "--shapes",
+        help=f"shape ledger directory (emit rstom-tree), default: {DEFAULT_SHAPES.as_posix()}",
+    )
+    emit_p.add_argument(
+        "--check",
+        action="store_true",
+        help="report drift instead of writing (emit rstom-tree)",
+    )
     emit_p.add_argument(
         "--packets-json",
         help="rstom's packets_gen schema (emit rstom), default: the one of the rstom "
@@ -114,6 +135,23 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "emit":
             resolved = _load_schema(args.schemas)
+            if args.target == "rstom-tree":
+                if args.rstom is None:
+                    raise EmitError("emit rstom-tree needs --rstom <workspace>")
+                workspace = Path(args.rstom)
+                shapes = Path(args.shapes) if args.shapes else DEFAULT_SHAPES
+                classes = _class_table(args.packets_json, workspace)
+                drift = emit_tree(resolved, workspace, classes, shapes, check=args.check)
+                if args.check:
+                    if drift:
+                        print("\n".join(drift), file=sys.stderr)
+                        return 3
+                    print("ok")
+                    return 0
+                print(f"emitted rstom-tree into {workspace}")
+                return 0
+            if args.out is None:
+                raise EmitError(f"emit {args.target} needs --out <directory>")
             if args.target == "rust":
                 emit_rust(resolved, Path(args.out))
             else:
