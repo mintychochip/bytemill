@@ -13,7 +13,17 @@ from bps.emit_tree import emit_tree
 from bps.errors import BpsError, EmitError
 from bps.interp.engine import decode_frame_payload, decode_packet, encode_packet
 from bps.load import load_schema
-from bps.minestom import ClassTable
+from bps.minestom import ClassTable, build_units
+from bps.shapes import (
+    ShapeError,
+    bps_field_pairs,
+    extract_shape,
+    hand_packet_path,
+    mismatch,
+    module_path,
+    packet_report,
+    shape_to_json,
+)
 
 # Where `packets_gen`'s schema is in an rstom workspace, relative to the workspace.
 PACKETS_GEN_SCHEMA = Path("tools") / "packets_gen" / "schema" / "packets.json"
@@ -102,6 +112,38 @@ def main(argv: list[str] | None = None) -> int:
         "workspace the crate is written into",
     )
 
+    shapes_p = sub.add_parser("shapes")
+    shapes_sub = shapes_p.add_subparsers(dest="shapes_cmd", required=True)
+
+    shapes_extract_p = shapes_sub.add_parser("extract")
+    shapes_extract_p.add_argument("schemas", nargs="+")
+    shapes_extract_p.add_argument("--rstom", required=True, help="rstom workspace root")
+    shapes_extract_p.add_argument("--out", required=True, help="shape ledger output directory")
+    shapes_extract_p.add_argument(
+        "--eligible",
+        action="store_true",
+        help="only packets whose BPS fields match the hand shape",
+    )
+    shapes_extract_p.add_argument(
+        "--class",
+        action="append",
+        dest="classes",
+        metavar="Name",
+        help="Minestom class name to extract (repeatable)",
+    )
+    shapes_extract_p.add_argument(
+        "--packets-json",
+        help="rstom packets_gen schema (default: beside --rstom workspace)",
+    )
+
+    shapes_report_p = shapes_sub.add_parser("report")
+    shapes_report_p.add_argument("schemas", nargs="+")
+    shapes_report_p.add_argument("--rstom", required=True, help="rstom workspace root")
+    shapes_report_p.add_argument(
+        "--packets-json",
+        help="rstom packets_gen schema (default: beside --rstom workspace)",
+    )
+
     args = parser.parse_args(argv)
     try:
         if args.cmd == "check":
@@ -173,7 +215,38 @@ def main(argv: list[str] | None = None) -> int:
                 )
             print(f"emitted {args.target} crate to {args.out}")
             return 0
-    except BpsError as e:
+        if args.cmd == "shapes":
+            resolved = _load_schema(args.schemas)
+            workspace = Path(args.rstom)
+            classes = _class_table(args.packets_json, workspace, "rstom-tree")
+            units = build_units(resolved, classes)
+            if args.shapes_cmd == "report":
+                for unit in units:
+                    status = packet_report(unit, resolved, workspace)
+                    print(f"{unit.cls.name}\t{status}")
+                return 0
+            if args.shapes_cmd == "extract":
+                out = Path(args.out)
+                class_filter = set(args.classes) if args.classes else None
+                for unit in units:
+                    if class_filter is not None and unit.cls.name not in class_filter:
+                        continue
+                    path = hand_packet_path(workspace, unit)
+                    if not path.is_file():
+                        continue
+                    mod = module_path(unit)
+                    shape = extract_shape(
+                        path.read_text(encoding="utf-8"),
+                        unit.cls.name,
+                        mod,
+                    )
+                    if args.eligible and mismatch(shape, bps_field_pairs(unit.pkt, resolved)):
+                        continue
+                    dest = out / f"{mod}.json"
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_text(shape_to_json(shape), encoding="utf-8")
+                return 0
+    except (BpsError, ShapeError) as e:
         print(str(e), file=sys.stderr)
         return 3
     return 0
