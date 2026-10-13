@@ -1,0 +1,19 @@
+[package]
+name = "bps"
+version = "0.1.0"
+description = "Binary Protocol Schema compiler and interpreter"
+edition = "2024"
+
+[dependencies]
+
+[[bin]]
+name = "bpsc"
+path = "src/main.rs"
+
+[[bin]]
+name = "scrape_wiki_routes"
+path = "src/bin/scrape_wiki_routes.rs"
+
+[[bin]]
+name = "java_probe_samples"
+path = "src/bin/java_probe_samples.rs"
