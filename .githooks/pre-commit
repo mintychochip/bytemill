@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# pre-commit: a commit that touches Rust or Cargo files must leave clippy clean.
+#
+# Enable once per clone:   git config core.hooksPath .githooks
+#
+# The gate is the same one CI runs (.github/workflows/clippy.yml), through the memory-capped
+# runner. It checks the working tree, so stage whole files. `git commit --no-verify` skips
+# this hook; CI does not skip.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+changed=$(git diff --cached --name-only --diff-filter=ACMRD)
+if ! grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$' <<<"$changed"; then
+  exit 0
+fi
+
+echo "pre-commit: cargo clippy --workspace --all-targets -- -D warnings" >&2
+if ! scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings; then
+  echo "pre-commit: clippy is not clean. Fix the findings above; if one truly cannot be fixed," >&2
+  echo "pre-commit: silence it narrowly with #[allow(clippy::lint, reason = \"...\")] and say why." >&2
+  exit 1
+fi

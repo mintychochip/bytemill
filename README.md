@@ -101,6 +101,7 @@ file that declares packets.
 
 ```bash
 scripts/bps_cargo.sh test --no-fail-fast    # 256 tests, memory-capped (see below); the rstom tests read ../rstom-bps
+scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings   # the lint gate: prints nothing, exits 0
 cargo build --release                       # once: target/release/bpsc (the examples below call it `bpsc`)
 ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file
 bpsc check $ROOT                                 # parse + resolve + check
@@ -230,6 +231,31 @@ than a RAM-backed `/tmp`, and prints the scope's peak memory when cargo exits. A
 killed by the kernel inside its own scope instead of pushing the desktop into reclaim until
 `systemd-oomd` kills the terminal, which is what an unbounded test did once. Run the suite and any
 one-off build through it (`BPS_MEM_MAX=3G scripts/bps_cargo.sh test` catches a runaway sooner).
+
+### Clippy is a hard gate
+
+`[workspace.lints.clippy] all = "deny"` in `Cargo.toml` makes any clippy finding a compile error, so
+plain `cargo clippy` fails with no flags. The gate adds `-D warnings`, so a rustc warning fails too:
+
+```bash
+scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings   # prints nothing, exits 0
+```
+
+It runs in three places:
+
+- **CI**: `.github/workflows/clippy.yml`, on every push to `master` and every pull request. The
+  toolchain is pinned there to the nightly the tree was cleaned with, so a lint a newer clippy adds
+  cannot fail code nobody touched; bump it with the local default and fix what the newer clippy
+  finds in the same change.
+- **Pre-commit hook**: `.githooks/pre-commit` rejects a commit that touches `*.rs` or `Cargo.*`
+  while the gate fails. Enable it once per clone with `git config core.hooksPath .githooks`. It
+  checks the working tree, so stage whole files; `git commit --no-verify` skips it, CI does not.
+- **By hand**, before handing work back.
+
+Fix a finding instead of silencing it. One that cannot be fixed gets the narrowest
+`#[allow(clippy::lint, reason = "...")]`, never a crate-level allow. The tree has eight such
+suppressions: `too_many_arguments` on six `emit_rstom.rs` functions (ports of Python helpers) and
+on one test helper, and `excessive_precision` in `test_json_floats.rs`.
 
 ## Docs
 

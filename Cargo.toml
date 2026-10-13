@@ -2,5 +2,11 @@
 members = ["crates/bps"]
 resolver = "2"
 
+# Hard gate: a clippy finding is a compile error under `cargo clippy`, with no flags needed. The
+# gate adds `-- -D warnings` so a rustc warning fails too (see README, "Clippy is a hard gate").
+# `priority = -1` keeps a per-lint setting stronger than the group.
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+
 [profile.release]
 debug = true

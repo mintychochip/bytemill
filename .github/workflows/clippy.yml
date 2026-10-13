@@ -1,0 +1,27 @@
+# Clippy is a hard gate: a finding, or any rustc warning, fails the build.
+#
+# The toolchain is pinned to the nightly the tree was cleaned with, so a lint a newer clippy
+# adds cannot fail the build for code nobody touched. Bump it together with the local default
+# (`rustup show`), fixing whatever the new clippy finds in the same change.
+name: clippy
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  TOOLCHAIN: nightly-2026-07-23
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install the pinned toolchain
+        run: rustup toolchain install "$TOOLCHAIN" --profile minimal --component clippy --no-self-update
+      - name: cargo clippy (deny warnings)
+        run: cargo "+$TOOLCHAIN" clippy --workspace --all-targets -- -D warnings
