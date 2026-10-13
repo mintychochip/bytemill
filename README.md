@@ -88,7 +88,7 @@ open ones (data-component patches, chunk section data) stop at a self-delimiting
 Regenerate the route table:
 
 ```bash
-python scripts/scrape_wiki_routes.py -o schemas/minecraft_26_3_wiki.bps \
+cargo run -q -p bps --bin scrape_wiki_routes -- -o schemas/minecraft_26_3_wiki.bps \
   --manual-replace schemas/minecraft_core.bps schemas/minecraft_26_3.bps \
   schemas/minecraft_26_3_login.bps schemas/minecraft_26_3_play.bps \
   schemas/minecraft_26_3_play_serverbound.bps schemas/minecraft_26_3_remaining.bps
@@ -100,22 +100,23 @@ file that declares packets.
 ## Quick start
 
 ```bash
-BPS_RSTOM_DIR=../rstom-bps python -m pytest -q -p no:cacheprovider  # 193 tests (+ 29 subtests); one cargo build via rstom_cargo.sh
+scripts/bps_cargo.sh test --no-fail-fast    # 256 tests, memory-capped (see below); the rstom tests read ../rstom-bps
+cargo build --release                       # once: target/release/bpsc (the examples below call it `bpsc`)
 ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file
-python -m bps.cli check $ROOT                    # parse + resolve + check
-python -m bps.cli routes $ROOT                   # routing table (261 routes)
-python -m bps.cli dump-json $ROOT                # schema.json
-python -m bps.cli shapes report $ROOT --rstom ../rstom-bps   # eligible vs blocked packets (worklist)
-python -m bps.cli emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
-python -m bps.cli emit rstom $ROOT --out ../rstom/crates/bps_rstom  # drop-in for `rstom-packets`
-python -m bps.cli emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
-python scripts/java_probe_samples.py             # packets whose layout disagrees with real Minestom bytes
+bpsc check $ROOT                                 # parse + resolve + check
+bpsc routes $ROOT                                # routing table (261 routes)
+bpsc dump-json $ROOT                             # schema.json
+bpsc shapes report $ROOT --rstom ../rstom-bps    # eligible vs blocked packets (worklist)
+bpsc emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
+bpsc emit rstom $ROOT --out ../rstom/crates/bps_rstom  # drop-in for `rstom-packets`
+bpsc emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
+cargo run -q -p bps --bin java_probe_samples     # packets whose layout disagrees with real Minestom bytes
 ```
 
 Decode a handshake **frame** (hex):
 
 ```bash
-echo '10008906096c6f63616c686f737463dd01' | python -m bps.cli decode $ROOT \
+echo '10008906096c6f63616c686f737463dd01' | bpsc decode $ROOT \
   --state handshaking --direction serverbound --hex
 # {"id": 0, "packet": "handshake", "fields": {"intent": 1, "protocol_version": 777, ...}}
 ```
@@ -123,9 +124,9 @@ echo '10008906096c6f63616c686f737463dd01' | python -m bps.cli decode $ROOT \
 VarInt in both directions (300 is `ac 02`; see `schemas/std/varint.bps`):
 
 ```bash
-echo 'ac0202' | python -m bps.cli decode schemas/minecraft_26_3_play.bps --packet animate --hex
+echo 'ac0202' | bpsc decode schemas/minecraft_26_3_play.bps --packet animate --hex
 # {"animation": 2, "entity_id": 300}
-python -m bps.cli encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
+bpsc encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
 # ac0202
 ```
 
@@ -133,8 +134,8 @@ python -m bps.cli encode --packet animate schemas/minecraft_26_3_play.bps '{"ent
 
 `bpsc emit rust` emits a dependency-free crate (`src/runtime.rs` cursor + VarInt, NBT,
 Slot; `src/packets.rs` one decoder per packet; `src/lib.rs` dispatch by state × direction ×
-id). `tests/golden.rs` carries the same vectors as the Python side, so Python and Rust must
-agree.
+id). `tests/golden.rs` carries the same vectors as the interpreter's tests, so the emitted
+decoders and the interpreter must agree.
 
 `bpsc emit rstom` writes a drop-in for rstom's `rstom-packets` crate: the same module tree
 (`client/` is what the client sends, `server/` what the server sends; below each, the
@@ -143,8 +144,8 @@ struct for each Minestom class under its Minestom name and `CLASS_NAME`, the ten
 `packet_vanilla::*_registry` tables, `ported::all()`, and the same re-exports at the crate
 root. The class of a route is the class at that id in rstom's
 `tools/packets_gen/schema/packets.json`, which the emit finds in the rstom workspace it
-writes into (`--packets-json` names another); `tests/test_minestom.py` checks that mapping
-against the id tables recorded from Minestom itself.
+writes into (`--packets-json` names another); `crates/bps/tests/test_minestom.rs` checks that
+mapping against the id tables recorded from Minestom itself.
 
 What is not drop-in: a struct's fields are the schema's wire fields, not the Java record's,
 so constructors differ (the handshake `intent` is an `i32`, not an enum) and the shared
@@ -156,16 +157,18 @@ extra module, `server/configuration/show_dialog_packet`.
 The output is rustfmt-canonical, and each emit drops the generated files the current schema
 no longer declares (a file without the emitter marker is left alone), so the tree always
 matches its `lib.rs`. Every struct's `roundtrip_*.rs` pins the Rust encoder against the
-Python interpreter's bytes for the same synthetic value (`bps/synth.py`), and
-`tests/test_emit_rstom.py` fails if any packet stops pinning. `tests/registry_tables.rs`
-builds all ten id tables and checks their class names and order.
+interpreter's bytes for the same synthetic value (`crates/bps/src/synth.rs`; the generated
+comment still names the Python interpreter and `bps/synth.py`, text the emitter keeps
+byte-for-byte), and `crates/bps/tests/test_emit_rstom.rs` fails if any packet stops pinning.
+`tests/registry_tables.rs` builds all ten id tables and checks their class names and order.
 
 A payload with no length prefix (a recipe display, a particle, an advancement) is carried
 as raw bytes, so a reader has to scan the structure to find its end. `src/frames.rs` holds
 those scanners: NBT and slots are hand-written, every other one is compiled from its own
-encoding (`bps/frames_gen.py`) and checked against the interpreter on random valid payloads
-(`tests/test_frames_gen.py`). The generated struct has one namespace per packet, so using
-the same encoding twice in one packet is an `EmitError`; give the fields distinct names.
+encoding (`crates/bps/src/frames_gen.rs`) and checked against the interpreter on random valid
+payloads (`crates/bps/tests/test_frames_gen.rs`). The generated struct has one namespace per
+packet, so using the same encoding twice in one packet is an `EmitError`; give the fields
+distinct names.
 
 ## Generating rstom's packets in place
 
@@ -175,10 +178,10 @@ types, `new`, serializer layout, module docs) extracted once and kept in the led
 the wire layout from the schemas. Where Minestom or the hand port disagrees with vanilla, BPS wins.
 
 ```bash
-python -m bps.cli shapes extract $ROOT --rstom ../rstom-bps --eligible --out targets/rstom/shapes
-python -m bps.cli shapes report $ROOT --rstom ../rstom-bps
-python -m bps.cli emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes
-python -m bps.cli emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes --check
+bpsc shapes extract $ROOT --rstom ../rstom-bps --eligible --out targets/rstom/shapes
+bpsc shapes report $ROOT --rstom ../rstom-bps
+bpsc emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes
+bpsc emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes --check
 ```
 
 The ledger is `targets/rstom/shapes/` (**64** JSON files at
@@ -191,7 +194,7 @@ the packet re-exports it via `#[path = "<stem>.ext.rs"] mod ext` and
 
 Every emit also refreshes the **wire pin gate** in the worktree:
 `crates/rstom/tests/bps_wire_pins.rs`, `crates/rstom/tests/bps/wire_pins.json` (**260** rows,
-one per id-table slot, bytes from `bps/synth.py`), and `wire_pins_known.json` (triaged failures;
+one per id-table slot, bytes from `crates/bps/src/synth.rs`), and `wire_pins_known.json` (triaged failures;
 **9** entries in three categories: `minestom-deviation`, `hand-bug`, `domain-limit` — the list
 only shrinks). Swapped packets must not appear in the known file.
 
@@ -217,6 +220,16 @@ a private target dir (`/dev/shm/rstom-bps-target` by default). Point it at the w
 `BPS_RSTOM_DIR` and override the target with `BPS_CARGO_TARGET_DIR`; never share one target dir
 between two checkouts (the suite asserts it never writes into `rstom`'s own `target/`). For a full
 `rstom` test run use `cargo test --no-fail-fast` so every failure is reported.
+
+### Running this crate's cargo politely
+
+`scripts/bps_cargo.sh <cargo args>` is the same idea for `crates/bps`, plus a hard memory cap: cargo
+runs in a transient systemd user scope (`MemoryMax`, default 8G via `BPS_MEM_MAX`; swap off;
+`CPUQuota` 400%; 4 jobs and 4 test threads), with scratch files under `~/.cache/bps-scratch` rather
+than a RAM-backed `/tmp`, and prints the scope's peak memory when cargo exits. A runaway test is then
+killed by the kernel inside its own scope instead of pushing the desktop into reclaim until
+`systemd-oomd` kills the terminal, which is what an unbounded test did once. Run the suite and any
+one-off build through it (`BPS_MEM_MAX=3G scripts/bps_cargo.sh test` catches a runaway sooner).
 
 ## Docs
 

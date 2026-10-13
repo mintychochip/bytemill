@@ -3,7 +3,7 @@
 //
 // The interpreter runs this definition. The Rust emitters do not translate it:
 // they recognise the names `varint` and `varlong` and use hand-written helpers,
-// and tests/test_emit_rstom.py compares their bytes with what this file produces.
+// and crates/bps/tests/test_emit_rstom.rs compares their bytes with what this file produces.
 //
 // The bytes: each byte carries 7 bits of the number, lowest group first, and its
 // top bit (0x80) means "another byte follows". 300 is 0b1_0010_1100, so it is

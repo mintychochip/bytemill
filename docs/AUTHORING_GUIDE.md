@@ -101,16 +101,16 @@ Imports decide what a *schema* may use. Two tool behaviors still depend on a std
 name directly, because they are not generated from the schema:
 
 - The interpreter reads a frame's length and packet id as `varint`
-  (`decode_frame_payload` in `bps/interp/engine.py`), whatever the `frame`
+  (`decode_frame_payload` in `crates/bps/src/interp/engine.rs`), whatever the `frame`
   declaration says. It also writes the length of a `string`, `identifier` or
-  `nbt_string` given as a Python `str` with `varint` (`u16be` for `nbt_string`).
+  `nbt_string` given as a string value with `varint` (`u16be` for `nbt_string`).
 - `emit rust` and `emit rstom` recognise the std scalar names (`PRIMITIVES` in
-  `bps/emit_rust.py`, `WIRE_TYPES` in `bps/emit_rstom.py`) and emit hand-written
+  `crates/bps/src/emit_rust.rs`, `WIRE_TYPES` in `crates/bps/src/emit_rstom.rs`) and emit hand-written
   helpers instead of translating the definition. A scalar encoding outside that
   set is an `EmitError`, not wrong code.
 
 So editing `std/varint.bps` changes the interpreter; emitted Rust follows only
-when its helpers change too. `tests/test_emit_rstom.py` compares the two.
+when its helpers change too. `crates/bps/tests/test_emit_rstom.rs` compares the two.
 
 Rules that bite:
 
@@ -298,37 +298,37 @@ sound = { sound_event_id: varint, if sound_event_id == 0 { ... sound_event }, ..
 ## 7. Verify as you write
 
 ```bash
-python -m bps.cli check schemas/your.bps          # parse + resolve + type-check
-python -m bps.cli routes schemas/your.bps         # the routing table
-python -m bps.cli dump-json schemas/your.bps      # schema.json for other tools
+bpsc check schemas/your.bps          # parse + resolve + type-check
+bpsc routes schemas/your.bps         # the routing table
+bpsc dump-json schemas/your.bps      # schema.json for other tools
 ```
 
-Then prove a value round-trips (`--packet` precedes the schema list so argparse can
-tell the flag from the trailing JSON):
+Then prove a value round-trips (`--packet` precedes the schema list, so the flag is not
+mistaken for the trailing JSON):
 
 ```bash
-python -m bps.cli encode --packet handshake schemas/your.bps \
+bpsc encode --packet handshake schemas/your.bps \
   '{"protocol_version":777,"server_address":"localhost","server_port":25565,"intent":1}'
 ```
 
 And decode a frame:
 
 ```bash
-echo '10008906096c6f63616c686f737463dd01' | python -m bps.cli decode schemas/your.bps \
+echo '10008906096c6f63616c686f737463dd01' | bpsc decode schemas/your.bps \
   --state handshaking --direction serverbound --hex
 ```
 
-The gates that must stay green (see `tests/`):
+The gates that must stay green (see `crates/bps/tests/`):
 
 | Gate | Asserts |
 | --- | --- |
-| `test_parser.ParserSmoke.test_parse_all_schemas` | every `.bps` file parses |
-| `test_routes.test_every_route_resolves_to_its_packet` | every route binds to a declared packet |
-| `test_routes.test_rest_fallback_set_is_explicit` | no packet silently regresses to `body: rest` |
-| `test_routes.test_non_stub_packets_smoke_decode` | every packet decodes a zero buffer cleanly |
-| `test_roundtrip_all.RoundTripAllTest` | every packet's synthetic value round-trips |
+| `test_parser::parse_all_schemas` | every `.bps` file parses |
+| `test_routes::every_route_resolves_to_its_packet` | every route binds to a declared packet |
+| `test_routes::rest_fallback_set_is_explicit` | no packet silently regresses to `body: rest` |
+| `test_routes::non_stub_packets_smoke_decode` | every packet decodes a zero buffer cleanly |
+| `test_roundtrip_all::every_packet_round_trips` | every packet's synthetic value round-trips |
 | `test_emit_rust` | the generated Rust crate compiles and passes goldens |
-| `test_decode_strict` | `decode_packet(strict=True)` fails when bytes are left unread |
+| `test_decode_strict` | `decode_packet(strict=true)` fails when bytes are left unread |
 | `test_java_ground_truth` | the bytes real Minestom writes decode strictly and re-encode identically |
 | `test_frames_gen` | the generated Rust frame walkers measure what the interpreter reads |
 
@@ -338,18 +338,18 @@ A round trip only proves a layout agrees with itself. To check one against a rea
 implementation:
 
 ```bash
-python scripts/java_probe_samples.py                  # packets the schema cannot reproduce
-python scripts/java_probe_samples.py set_objective    # every recorded sample for a packet
+cargo run -q -p bps --bin java_probe_samples                  # packets the schema cannot reproduce
+cargo run -q -p bps --bin java_probe_samples -- set_objective # every recorded sample for a packet
 ```
 
 The samples are the bytes Minestom wrote, from rstom's `probes/expected/`. Minestom
 is an implementation, not the protocol: vanilla's decompiled
 `net/minecraft/network/protocol/**` is. Where Minestom's bytes differ from
 vanilla's wire format, follow vanilla and list the packet in `KNOWN_MISMATCHES` in
-`tests/test_java_ground_truth.py` with the reason. Packets without a recorded
+`crates/bps/tests/test_java_ground_truth.rs` with the reason. Packets without a recorded
 sample (96 of 232) are checked only against vanilla's source.
 
-The route table gets the same treatment: `tests/test_vanilla_routes.py` reads the
+The route table gets the same treatment: `crates/bps/tests/test_vanilla_routes.rs` reads the
 packet order out of vanilla's `*Protocols.java` builder chains and requires the
 packet at every id to be the one vanilla registers there. The few names that differ
 (the wiki's `login_start` is vanilla's `hello`) are listed in `ALIASES` with the reason.

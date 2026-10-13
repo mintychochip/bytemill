@@ -130,4 +130,4 @@ encoding nbt_payload = {
 
 Authoring rules and the per-packet workflow live in `docs/AUTHORING_GUIDE.md`.
 
-Run: `python -m bps.cli check schemas/minecraft_26_3_wiki.bps`
+Run: `bpsc check schemas/minecraft_26_3_wiki.bps`

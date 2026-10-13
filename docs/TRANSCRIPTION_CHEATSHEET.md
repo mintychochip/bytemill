@@ -8,7 +8,7 @@ The wiki is not the authority: it is wrong in places (see "Where the wiki is wro
 below). What real clients speak is vanilla's own codec, in the decompiled
 `net/minecraft/network/protocol/**` (`StreamCodec.composite(...)` lists a packet's
 fields in wire order). Check a packet there before trusting a wiki row, and
-`python scripts/java_probe_samples.py <packet>` for the bytes Minestom writes.
+`cargo run -q -p bps --bin java_probe_samples -- <packet>` for the bytes Minestom writes.
 
 Output: a file that starts with the imports below and then contains **only**
 `packet NAME { ... }` declarations. A file can use only names it declares or
@@ -128,7 +128,7 @@ Found by checking packets against vanilla's source and Minestom's recorded bytes
 ## Verification
 
 ```
-python -m bps.cli check <your file>
+bpsc check <your file>
 ```
 
 must print `ok`. If it instead says a name is not declared, it prints the `import`
