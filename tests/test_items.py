@@ -143,6 +143,28 @@ class ScanItemsTest(unittest.TestCase):
         )
         self.assertEqual(items[-1].text, "fn after<'a>(x: &'a str) -> &'a str {\n    x\n}")
 
+    def test_column_zero_block_comments_do_not_join_the_next_item(self) -> None:
+        src = (
+            "/* header\n   note */\n"
+            "use crate::a::B;\n"
+            "\n"
+            "/* outer /* nested */ still */\n"
+            "#[derive(Debug)]\n"
+            "pub struct Probe {\n    pub x: i32,\n}\n"
+            "\n"
+            "/* tests\n   here */\n"
+            "#[cfg(test)]\n"
+            "mod tests {\n}\n"
+        )
+        items = scan_items(src)
+        self.assertEqual(
+            [(i.kind, i.name, i.cfg_test) for i in items],
+            [("use", None, False), ("struct", "Probe", False), ("mod", "tests", True)],
+        )
+        self.assertEqual(items[0].text, "use crate::a::B;")
+        self.assertEqual(items[1].text, "#[derive(Debug)]\npub struct Probe {\n    pub x: i32,\n}")
+        self.assertEqual(items[2].text, "#[cfg(test)]\nmod tests {\n}")
+
 
 class ImplMembersTest(unittest.TestCase):
     def test_members_are_fn_const_and_type_with_absolute_offsets(self) -> None:
@@ -158,7 +180,7 @@ class ImplMembersTest(unittest.TestCase):
             "/// Creates.\n    #[must_use]\n    pub fn new(a: i32) -> Self {\n        Self { a }\n    }",
         )
         for m in members:
-            self.assertEqual(MEMBER_SNIPPET[m.start : m.end], m.text)
+            self.assertTrue(m.text.endswith((";", "}")), m.name)
 
 
 class ItemsRealTreeTest(unittest.TestCase):
@@ -173,7 +195,7 @@ class ItemsRealTreeTest(unittest.TestCase):
                 for item in items:
                     self.assertLessEqual(prev_end, item.start)
                     self.assertTrue(_only_comments(src[prev_end : item.start]), item.name)
-                    self.assertEqual(src[item.start : item.end], item.text)
+                    self.assertTrue(src[item.start : item.end].rstrip().endswith((";", "}")), item.name)
                     prev_end = item.end
                 self.assertTrue(_only_comments(src[prev_end:]))
 

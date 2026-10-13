@@ -223,6 +223,9 @@ class GeneratedTailTest(unittest.TestCase):
             (Path(tmp) / "probe_packet.ext.rs").write_text("", encoding="utf-8")
             self.assertEqual(_extract(source, path).extras, "probe_packet.ext.rs")
 
+    def test_generated_tail_is_not_a_hand_import(self) -> None:
+        self.assertEqual(_extract(_packet(tail=GENERATED_TAIL)).imports, ())
+
 
 class NewParamsTest(unittest.TestCase):
     def test_params_are_recorded_verbatim_when_they_differ_from_fields(self) -> None:
@@ -255,7 +258,40 @@ class CoordinateVecTest(unittest.TestCase):
             [(f.name, f.type) for f in shape.fields],
             [("location", "CoordVec"), ("history", "Vec<String>")],
         )
-        self.assertEqual(shape.imports, ("use crate::coordinate::Vec as CoordVec;",))
+        self.assertEqual(shape.imports, ())
+
+    def test_every_coordinate_vec_spelling_becomes_coord_vec(self) -> None:
+        cases = (
+            ("use crate::coordinate::{Point, Vec};", "Vec"),
+            ("use crate::coordinate::{Pos, Vec};", "Vec"),
+            ("use crate::coordinate::vec::Vec;", "Vec"),
+            ("use crate::coordinate::{Pos, Vec as Location};", "Location"),
+        )
+        for head, spelling in cases:
+            with self.subTest(head=head):
+                source = _packet(
+                    head=head + "\n",
+                    struct_decl="#[derive(Clone, Debug)]\npub struct ProbePacket {\n"
+                    f"    pub location: {spelling},\n}}\n",
+                    new_sig=f"location: {spelling}",
+                    new_body="Self { location }",
+                )
+                shape = _extract(source)
+                self.assertEqual([f.type for f in shape.fields], ["CoordVec"])
+                self.assertEqual(shape.imports, ())
+
+    def test_coordinate_vec_is_normalised_inside_generic_types(self) -> None:
+        source = _packet(
+            head="use crate::coordinate::{Point, Vec};\n",
+            struct_decl="#[derive(Clone, Debug)]\npub struct ProbePacket {\n"
+            "    pub around: Option<Vec>,\n    pub pairs: Vec<(Vec, i32)>,\n}\n",
+            new_sig="around: Option<Vec>, pairs: Vec<(Vec, i32)>",
+            new_body="Self { around, pairs }",
+        )
+        self.assertEqual(
+            [f.type for f in _extract(source).fields],
+            ["Option<CoordVec>", "Vec<(CoordVec, i32)>"],
+        )
 
     def test_params_use_the_same_normalised_types(self) -> None:
         source = _packet(
@@ -292,8 +328,55 @@ class ImportsTest(unittest.TestCase):
         )
         self.assertEqual(
             _extract(source).imports,
-            ("use crate::text::Component;", "use uuid::Uuid;"),
+            ("use crate::text::Component;",),
         )
+
+    def test_grouped_use_keeps_only_the_names_the_hand_packet_mentions(self) -> None:
+        source = _packet(
+            head="use crate::network::types::{BOOLEAN, BitSet, message_format_int};\n",
+            struct_decl="#[derive(Clone, Debug)]\npub struct ProbePacket {\n"
+            "    pub bits: BitSet,\n}\n",
+            new_sig="bits: BitSet",
+            new_body="Self { bits }",
+        )
+        self.assertEqual(_extract(source).imports, ("use crate::network::types::BitSet;",))
+
+    def test_aliases_keep_their_alias_and_generator_owned_names_are_dropped(self) -> None:
+        source = _packet(
+            head="use crate::text::{Component as Text, Style};\n"
+            "use crate::network::uuid::Uuid;\n",
+            struct_decl="#[derive(Clone, Debug)]\npub struct ProbePacket {\n"
+            "    pub text: Text,\n    pub id: Uuid,\n}\n",
+            new_sig="text: Text, id: Uuid",
+            new_body="Self { text, id }",
+        )
+        self.assertEqual(_extract(source).imports, ("use crate::text::Component as Text;",))
+
+    def test_names_used_only_by_the_sibling_tests_file_are_kept(self) -> None:
+        source = _packet(head="use crate::text::Component;\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "probe_packet.tests.rs").write_text(
+                "fn check(_: Component) {}\n", encoding="utf-8"
+            )
+            shape = _extract(source, Path(tmp, "probe_packet.rs"))
+        self.assertEqual(shape.imports, ("use crate::text::Component;",))
+
+    def test_pub_reexports_are_kept_verbatim_even_when_unused(self) -> None:
+        source = _packet(head="pub use super::data::WorldPos;\n")
+        self.assertEqual(_extract(source).imports, ("pub use super::data::WorldPos;",))
+
+
+class SerializerSelectionTest(unittest.TestCase):
+    def test_the_serializer_is_the_struct_named_in_the_serializer_fn(self) -> None:
+        source = _packet(head="pub struct HelperSerializer;\n")
+        self.assertEqual(_extract(source).serializer.name, "ProbePacketSerializer")
+
+    def test_a_serializer_fn_naming_no_declared_struct_is_refused(self) -> None:
+        source = _packet().replace(
+            "Arc::new(ProbePacketSerializer)", "Arc::new(MissingSerializer)"
+        )
+        with self.assertRaises(ShapeError):
+            _extract(source)
 
 
 class UnrepresentableTest(unittest.TestCase):

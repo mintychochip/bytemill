@@ -6,6 +6,7 @@ import re
 from dataclasses import replace
 from pathlib import Path
 
+from bps.emit_rstom import WIRE_TYPES
 from bps.shapes.items import impl_body_bounds, scan_items
 from bps.shapes.model import FieldShape, NewShape, SerializerShape, Shape, ShapeError
 from bps.shapes.scan import (
@@ -32,45 +33,53 @@ _ALLOWED_TRAITS_FOR_CLS = frozenset(
 )
 
 
-_COORD_VEC_USE = re.compile(r"^use crate::coordinate::Vec;[ \t]*$", re.MULTILINE)
 _STRUCT_HEAD = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?struct\s+(\w+)", re.MULTILINE)
 _USE_HEAD = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?use\s", re.MULTILINE)
-_WIRE_CONST = re.compile(r"[A-Z][A-Z0-9_]*$")
+_WIRE_CONSTS = frozenset(
+    {wire for wire, _ in WIRE_TYPES.values()} | {"VAR_INT", "RAW_BYTES", "FIXED_BYTES"}
+)
 _GENERATOR_NAMES = frozenset(
     {
         "Arc",
+        "ClientPacket",
+        "ClientPacketGroup",
         "ConstantSerializer",
+        "CoordVec",
         "NetworkBuffer",
         "Packet",
         "PacketSerializer",
         "PacketValue",
-        "ClientPacket",
         "ServerPacket",
-        "ClientPacketGroup",
         "ServerPacketGroup",
+        "Uuid",
         "downcast",
+        "fixed_raw_bytes",
     }
-)
+) | _WIRE_CONSTS
+_COORD_VEC_PATHS = frozenset({"crate::coordinate::Vec", "crate::coordinate::vec::Vec"})
+_GENERATED_TAIL_USE = "pub use ext::*;"
 
 
 def extract_shape(
     source: str, cls: str, module: str, *, packet_path: Path | None = None
 ) -> Shape:
     stem = module.rsplit("/", 1)[-1]
-    coord = _COORD_VEC_USE.search(source) is not None
     items = scan_items(source)
+    coord_names = _coordinate_names([it.text for it in items if it.kind == "use"])
     packet = [it for it in items if it.kind == "struct" and it.name == cls]
     if not packet:
         raise ShapeError(f"missing struct {cls}")
     struct_docs, derives, form, raw_fields = _packet_struct(packet[0].text, cls)
-    fields = tuple(FieldShape(f.name, _normalise_types(f.type, coord), f.docs) for f in raw_fields)
+    fields = tuple(
+        FieldShape(f.name, _normalise_types(f.type, coord_names), f.docs) for f in raw_fields
+    )
     field_names = tuple(f.name for f in fields)
     new_shape = NewShape(False, False, False, (), ())
     ser_fn_docs: tuple[str, ...] = ()
     ser_fn_must_use = False
     ser_style = "constant"
     ser_name = ""
-    serializer_struct: SerializerShape | None = None
+    serializer_structs: list[SerializerShape] = []
     serializer_impls: list[tuple[str, str]] = []
     use_texts: list[str] = []
     main_impl_seen = False
@@ -83,13 +92,11 @@ def extract_shape(
             use_texts.append(item.text)
         elif item.kind == "struct" and item.name == cls:
             pass
-        elif item.kind == "struct" and serializer_struct is None and (item.name or "").endswith(
-            "Serializer"
-        ):
+        elif item.kind == "struct" and (item.name or "").endswith("Serializer"):
             head = _STRUCT_HEAD.search(item.text)
             docs, _ = _docs_and_attrs_before(item.text, head.start())
-            serializer_struct = SerializerShape(
-                "struct", item.name or "", head.group(0).startswith("pub"), docs
+            serializer_structs.append(
+                SerializerShape("struct", item.name or "", head.group(0).startswith("pub"), docs)
             )
         elif item.kind == "impl":
             body_start, body_end = impl_body_bounds(item.text)
@@ -124,8 +131,14 @@ def extract_shape(
         else:
             module_extra = True
 
-    if serializer_struct is None and ser_style == "struct":
-        raise ShapeError(f"missing serializer struct for {cls}")
+    if ser_style == "struct":
+        chosen = [s for s in serializer_structs if s.name == ser_name]
+        if not chosen:
+            raise ShapeError(f"missing serializer struct for {cls}")
+    else:
+        chosen = serializer_structs[:1]
+    serializer_struct: SerializerShape | None = chosen[0] if chosen else None
+    module_extra = module_extra or len(serializer_structs) > len(chosen)
     for target, body in serializer_impls:
         if serializer_struct is not None and target == serializer_struct.name:
             serializer_struct = replace(
@@ -139,14 +152,14 @@ def extract_shape(
         else SerializerShape(ser_style, ser_name, False, ())
     )
 
-    raw_params = _normalise_types(new_shape.params or "", coord)
+    raw_params = _normalise_types(new_shape.params or "", coord_names)
     default_params = ", ".join(f"{f.name}: {f.type}" for f in fields)
     params = raw_params if new_shape.present and raw_params != default_params else None
     new_shape = replace(new_shape, params=params)
     haystack = " ".join([*(f.type for f in fields), raw_params, *new_shape.body])
-    imports = _hand_imports(use_texts, coord, haystack)
-
     sibling = packet_path.parent if packet_path is not None else None
+    imports = _hand_imports(use_texts, haystack + _sibling_text(sibling, stem))
+
     tests_name = f"{stem}.tests.rs"
     tests = tests_name if inline_tests or _sibling_exists(sibling, tests_name) else None
     has_extra = module_extra or inherent_extra or _sibling_exists(sibling, f"{stem}.ext.rs")
@@ -172,6 +185,13 @@ def _sibling_exists(directory: Path | None, name: str) -> bool:
     return directory is not None and (directory / name).is_file()
 
 
+def _sibling_text(directory: Path | None, stem: str) -> str:
+    """Text of the packet's sibling files (`<stem>.*.rs`); their names count as uses."""
+    if directory is None:
+        return ""
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(directory.glob(f"{stem}.*.rs")))
+
+
 def _packet_struct(
     text: str, cls: str
 ) -> tuple[tuple[str, ...], tuple[str, ...], str, tuple[FieldShape, ...]]:
@@ -189,23 +209,12 @@ def _packet_struct(
     raise ShapeError(f"malformed struct {cls}")
 
 
-def _normalise_types(text: str, coord: bool) -> str:
-    """`std::vec::Vec` becomes `Vec`; the coordinate `Vec` becomes `CoordVec`."""
-    text = text.replace("std::vec::Vec", "Vec")
-    if coord:
-        text = re.sub(r"(?<![\w:])Vec(?!\s*<)", "CoordVec", text)
-    return text
-
-
-def _hand_imports(use_texts: list[str], coord: bool, haystack: str) -> tuple[str, ...]:
-    kept: list[str] = []
-    for text in use_texts:
-        statement = _use_statement(text)
-        if coord and statement == "use crate::coordinate::Vec;":
-            statement = "use crate::coordinate::Vec as CoordVec;"
-        if any(re.search(rf"\b{re.escape(n)}\b", haystack) for n in _use_names(statement)):
-            kept.append(statement)
-    return tuple(kept)
+def _normalise_types(text: str, coord_names: frozenset[str]) -> str:
+    """The coordinate `Vec` under any bound name becomes `CoordVec`; `std::vec::Vec` becomes `Vec`."""
+    if coord_names:
+        alts = "|".join(re.escape(n) for n in sorted(coord_names))
+        text = re.sub(rf"(?<![\w:])(?:{alts})(?!\w|\s*<)", "CoordVec", text)
+    return text.replace("std::vec::Vec", "Vec")
 
 
 def _use_statement(text: str) -> str:
@@ -214,28 +223,78 @@ def _use_statement(text: str) -> str:
     return statement.replace("{ ", "{").replace(" }", "}").replace(",}", "}")
 
 
-def _use_names(statement: str) -> tuple[str, ...]:
-    """Names a `use` brings in; empty for globs; generator and wire-constant names excluded."""
-    path = re.sub(r"^(?:pub(?:\([^)]*\))?\s+)?use\s+", "", statement).rstrip(";").strip()
-    if "*" in path:
-        return ()
-    parent = ""
-    parts = [path]
-    if "{" in path:
-        prefix, inner = path.split("{", 1)
-        parent = prefix.rstrip(":").rsplit("::", 1)[-1]
-        parts = inner.rsplit("}", 1)[0].split(",")
-    names: list[str] = []
-    for part in (p.strip() for p in parts):
-        if not part:
+def _split_use(statement: str) -> tuple[str, tuple[str, ...]]:
+    """`use a::{b, c as d};` gives (`use a::`, (`b`, `c as d`)); a leading `pub` stays in the head."""
+    body = statement.removesuffix(";")
+    if "{" in body:
+        head, inner = body.split("{", 1)
+        leaves = tuple(p.strip() for p in inner.removesuffix("}").split(",") if p.strip())
+        return head, leaves
+    if "::" in body:
+        head, leaf = body.rsplit("::", 1)
+        return head + "::", (leaf,)
+    head, leaf = body.rsplit(" ", 1)
+    return head + " ", (leaf,)
+
+
+def _leaf_binding(head: str, leaf: str) -> tuple[str, str]:
+    """Full path and bound name of one `use` leaf; `self` binds the module named by the head."""
+    module = re.sub(r"^(?:pub(?:\([^)]*\))?\s+)?use\s+", "", head).removesuffix("::").strip()
+    name, _, alias = leaf.partition(" as ")
+    name = name.strip()
+    if name == "self":
+        return module, module.rsplit("::", 1)[-1]
+    path = f"{module}::{name}" if module else name
+    return path, alias.strip() or name
+
+
+def _use_bindings(text: str) -> list[tuple[str, str]]:
+    head, leaves = _split_use(_use_statement(text))
+    return [_leaf_binding(head, leaf) for leaf in leaves]
+
+
+def _coordinate_names(use_texts: list[str]) -> frozenset[str]:
+    """Names the coordinate `Vec` is bound to in this file: `Vec`, or its `as` alias."""
+    return frozenset(
+        bound
+        for text in use_texts
+        for path, bound in _use_bindings(text)
+        if path in _COORD_VEC_PATHS
+    )
+
+
+def _rebuild_use(head: str, leaves: list[str]) -> str | None:
+    if not leaves:
+        return None
+    if len(leaves) == 1:
+        if leaves[0] == "self":
+            return head.removesuffix("::") + ";"
+        return f"{head}{leaves[0]};"
+    return f"{head}{{{', '.join(leaves)}}};"
+
+
+def _hand_imports(use_texts: list[str], needed: str) -> tuple[str, ...]:
+    """Hand `use` lines pruned to the names the packet mentions; `pub use` lines verbatim."""
+    kept: list[str] = []
+    for text in use_texts:
+        statement = _use_statement(text)
+        if statement == _GENERATED_TAIL_USE:
             continue
-        if part == "self":
-            names.append(parent)
-        elif " as " in part:
-            names.append(part.rsplit(" as ", 1)[1].strip())
-        else:
-            names.append(part.rsplit("::", 1)[-1])
-    return tuple(n for n in names if n not in _GENERATOR_NAMES and not _WIRE_CONST.match(n))
+        if statement.startswith("pub"):
+            kept.append(statement)
+            continue
+        head, leaves = _split_use(statement)
+        survivors: list[str] = []
+        for leaf in leaves:
+            path, bound = _leaf_binding(head, leaf)
+            if leaf == "*" or path in _COORD_VEC_PATHS or bound in _GENERATOR_NAMES:
+                continue
+            if bound == "_" or re.search(rf"\b{re.escape(bound)}\b", needed):
+                survivors.append(leaf)
+        rebuilt = _rebuild_use(head, survivors)
+        if rebuilt is not None:
+            kept.append(rebuilt)
+    return tuple(kept)
 
 
 def _parse_struct_fields(body: str) -> tuple[FieldShape, ...]:

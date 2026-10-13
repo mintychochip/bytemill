@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from bps.shapes.scan import _attr_block_end, _skip_rust_string
+from bps.shapes.scan import _attr_block_end, _skip_block_comment, _skip_rust_string
 
 _TOP_KINDS: tuple[tuple[str, str, bool], ...] = (
     (r"use\b", "use", False),
@@ -103,6 +103,13 @@ def _entries(src: str, pos: int, limit: int, indent: str) -> list[tuple[int, int
             pending = first if pending is None else pending
             pos = eol + 1
             continue
+        if stripped.startswith("/*"):
+            if stripped.startswith("/**") and not stripped.startswith("/**/"):
+                pending = first if pending is None else pending
+            pos = _skip_block_comment(src, first)
+            while pos < limit and src[pos] in " \t":
+                pos += 1
+            continue
         if stripped.startswith("#["):
             pending = first if pending is None else pending
             pos = _next_line(src, _attr_block_end(src, first), limit)
@@ -134,8 +141,7 @@ def _item_end(src: str, pos: int) -> int:
             i = n if nl < 0 else nl
             continue
         if src.startswith("/*", i):
-            close = src.find("*/", i + 2)
-            i = n if close < 0 else close + 2
+            i = _skip_block_comment(src, i)
             continue
         if ch in "([{":
             depth += 1

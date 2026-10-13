@@ -35,6 +35,24 @@ def _leading_module_docs(src: str) -> tuple[str, ...]:
     return tuple(lines)
 
 
+def _skip_block_comment(src: str, pos: int) -> int:
+    """Offset just past the block comment opening at ``pos``; Rust block comments nest."""
+    depth = 0
+    i = pos
+    while i < len(src):
+        if src.startswith("/*", i):
+            depth += 1
+            i += 2
+        elif src.startswith("*/", i):
+            depth -= 1
+            i += 2
+            if depth == 0:
+                return i
+        else:
+            i += 1
+    return len(src)
+
+
 def _skip_trivia(src: str, pos: int) -> int:
     while pos < len(src):
         if src.startswith("//", pos) and not src.startswith("///", pos):
@@ -42,8 +60,7 @@ def _skip_trivia(src: str, pos: int) -> int:
             pos = len(src) if nl < 0 else nl + 1
             continue
         if src.startswith("/*", pos):
-            end = src.find("*/", pos + 2)
-            pos = end + 2 if end >= 0 else len(src)
+            pos = _skip_block_comment(src, pos)
             continue
         if src[pos] in " \t\r\n":
             pos += 1
