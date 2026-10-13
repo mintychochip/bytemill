@@ -220,7 +220,7 @@ fn expand_items(
                 });
             }
             BlockItem::Field(wf) => {
-                out.push(ExpandedItem::Field { wf: wf.clone() });
+                out.push(ExpandedItem::Field { wf: (**wf).clone() });
             }
             BlockItem::Computed { name, expr } => {
                 out.push(ExpandedItem::Computed { name: name.clone(), expr: expr.clone() });
@@ -329,10 +329,10 @@ fn decode_expanded(
                 }
             }
             ExpandedItem::Field { wf, .. } => {
-                if let Some(cond) = &wf.if_expr {
-                    if !eval_expr(cond, &env)?.truthy() {
-                        continue;
-                    }
+                if let Some(cond) = &wf.if_expr
+                    && !eval_expr(cond, &env)?.truthy()
+                {
+                    continue;
                 }
                 let v = match &wf.repeat {
                     Some(rep) => decode_repeat(wf, rep, cur, resolved, &env)?,
@@ -362,10 +362,10 @@ fn select_match_arm_tags(arms: &[ExpandedArm], tag: i128) -> Option<&ExpandedArm
             std::slice::from_ref(arm.tag.as_ref().unwrap())
         };
         for t in tags {
-            if let Tag::Int(v) = t {
-                if *v == tag {
-                    return Some(arm);
-                }
+            if let Tag::Int(v) = t
+                && *v == tag
+            {
+                return Some(arm);
             }
         }
     }
@@ -619,10 +619,10 @@ fn encode_expanded(
                     // Primitive spread: no caller-visible value, nothing to encode.
                     continue;
                 }
-                if let Some(cond) = &wf.if_expr {
-                    if !eval_expr(cond, value)?.truthy() {
-                        continue;
-                    }
+                if let Some(cond) = &wf.if_expr
+                    && !eval_expr(cond, value)?.truthy()
+                {
+                    continue;
                 }
                 let v = value.get(&wf.name).cloned().unwrap_or(Value::Null);
                 match &wf.repeat {
@@ -737,32 +737,32 @@ fn encode_type_ref(
         if let Some(yield_expr) = &enc.yield_expr {
             return encode_scalar(body, w, resolved, &bind, val, yield_expr);
         }
-        if let Value::Str(s) = val {
-            if matches!(enc.name.as_str(), "string" | "identifier" | "nbt_string") {
-                let raw = s.as_bytes();
-                let len_name = if enc.name == "nbt_string" { "u16be" } else { "varint" };
-                let len = TypeRef {
-                    name: len_name.to_string(),
-                    args: Vec::new(),
-                    transforms: Vec::new(),
-                };
-                encode_type_ref(&len, w, resolved, &Env::new(), &Value::Int(raw.len() as i128))?;
-                w.emit(raw);
-                return Ok(());
-            }
+        if let Value::Str(s) = val
+            && matches!(enc.name.as_str(), "string" | "identifier" | "nbt_string")
+        {
+            let raw = s.as_bytes();
+            let len_name = if enc.name == "nbt_string" { "u16be" } else { "varint" };
+            let len = TypeRef {
+                name: len_name.to_string(),
+                args: Vec::new(),
+                transforms: Vec::new(),
+            };
+            encode_type_ref(&len, w, resolved, &Env::new(), &Value::Int(raw.len() as i128))?;
+            w.emit(raw);
+            return Ok(());
         }
-        if enc.name == "uuid" {
-            if let Value::Map(m) = val {
-                let msb = m.get("msb").ok_or_else(|| encode("uuid needs msb"))?;
-                let lsb = m.get("lsb").ok_or_else(|| encode("uuid needs lsb"))?;
-                let msb = u64::try_from(int_of(msb)?)
-                    .map_err(|_| encode("uuid msb out of range"))?;
-                let lsb = u64::try_from(int_of(lsb)?)
-                    .map_err(|_| encode("uuid lsb out of range"))?;
-                w.emit(&msb.to_be_bytes());
-                w.emit(&lsb.to_be_bytes());
-                return Ok(());
-            }
+        if enc.name == "uuid"
+            && let Value::Map(m) = val
+        {
+            let msb = m.get("msb").ok_or_else(|| encode("uuid needs msb"))?;
+            let lsb = m.get("lsb").ok_or_else(|| encode("uuid needs lsb"))?;
+            let msb = u64::try_from(int_of(msb)?)
+                .map_err(|_| encode("uuid msb out of range"))?;
+            let lsb = u64::try_from(int_of(lsb)?)
+                .map_err(|_| encode("uuid lsb out of range"))?;
+            w.emit(&msb.to_be_bytes());
+            w.emit(&lsb.to_be_bytes());
+            return Ok(());
         }
         if enc.name == "fixed_bitset" {
             let raw = raw_bytes(val)
@@ -901,10 +901,10 @@ fn encode_scalar_items(
                 env.insert(name, v);
             }
             BlockItem::Group { cond, items } => {
-                if let Some(c) = cond {
-                    if !eval_expr(c, env)?.truthy() {
-                        continue;
-                    }
+                if let Some(c) = cond
+                    && !eval_expr(c, env)?.truthy()
+                {
+                    continue;
                 }
                 encode_scalar_items(items, w, resolved, env)?;
             }
@@ -917,10 +917,10 @@ fn encode_scalar_items(
                 }
             }
             BlockItem::Field(wf) => {
-                if let Some(cond) = &wf.if_expr {
-                    if !eval_expr(cond, env)?.truthy() {
-                        continue;
-                    }
+                if let Some(cond) = &wf.if_expr
+                    && !eval_expr(cond, env)?.truthy()
+                {
+                    continue;
                 }
                 let written = match &wf.encode_expr {
                     Some(e) => eval_expr(e, env)?,
@@ -956,10 +956,10 @@ fn raw_bytes(val: &Value) -> Option<Vec<u8>> {
         }
         Value::Map(m) => {
             for key in ["value", "data", "longs"] {
-                if let Some(v) = m.get(key) {
-                    if let Some(got) = raw_bytes(v) {
-                        return Some(got);
-                    }
+                if let Some(v) = m.get(key)
+                    && let Some(got) = raw_bytes(v)
+                {
+                    return Some(got);
                 }
             }
             None

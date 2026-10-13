@@ -193,16 +193,16 @@ fn classify_member(header_text: &str) -> (String, Option<String>) {
     let head = vis_strip(header_text);
     let h = head.as_str();
     let fn_at = skip_fn_qualifiers(h, 0);
-    if let Some(j) = kw_ws(h, fn_at, "fn") {
-        if let Some(e) = word_run(h, j) {
-            return ("fn".to_string(), Some(sub(h, j, e).to_string()));
-        }
+    if let Some(j) = kw_ws(h, fn_at, "fn")
+        && let Some(e) = word_run(h, j)
+    {
+        return ("fn".to_string(), Some(sub(h, j, e).to_string()));
     }
     for kw in ["const", "type"] {
-        if let Some(j) = kw_ws(h, 0, kw) {
-            if let Some(e) = word_run(h, j) {
-                return (kw.to_string(), Some(sub(h, j, e).to_string()));
-            }
+        if let Some(j) = kw_ws(h, 0, kw)
+            && let Some(e) = word_run(h, j)
+        {
+            return (kw.to_string(), Some(sub(h, j, e).to_string()));
         }
     }
     ("other".to_string(), None)
@@ -362,10 +362,7 @@ fn impl_header_line(text: &str) -> Option<usize> {
         if impl_at(sub(text, p, text.len())).is_some() {
             return Some(p);
         }
-        match find_from(text, p, "\n") {
-            Some(nl) => p = nl + 1,
-            None => return None,
-        }
+        p = find_from(text, p, "\n")? + 1;
     }
 }
 

@@ -75,6 +75,7 @@ fn class_table(given: Option<&str>, anchor: &Path, target: &str) -> BpsResult<Cl
     ClassTable::load(&path)
 }
 
+#[derive(Default)]
 struct Args {
     schemas: Vec<String>,
     packet: Option<String>,
@@ -92,27 +93,6 @@ struct Args {
     json_value: Option<String>,
 }
 
-impl Default for Args {
-    fn default() -> Self {
-        Args {
-            schemas: Vec::new(),
-            packet: None,
-            state: None,
-            direction: None,
-            hex: false,
-            target: None,
-            out: None,
-            rstom: None,
-            shapes: None,
-            check: false,
-            packets_json: None,
-            classes: Vec::new(),
-            eligible: false,
-            json_value: None,
-        }
-    }
-}
-
 /// Pull a flag's value out of `argv`, leaving the positionals.
 fn take_flag(argv: &mut Vec<String>, names: &[&str]) -> Result<Option<String>, String> {
     let mut found: Option<String> = None;
@@ -126,13 +106,13 @@ fn take_flag(argv: &mut Vec<String>, names: &[&str]) -> Result<Option<String>, S
             i += 1;
             continue;
         }
-        if let Some(eq) = arg.find('=') {
-            if arg.starts_with("--") {
-                let value = argv[i][eq + 1..].to_string();
-                argv.remove(i);
-                found = Some(value);
-                continue;
-            }
+        if let Some(eq) = arg.find('=')
+            && arg.starts_with("--")
+        {
+            let value = argv[i][eq + 1..].to_string();
+            argv.remove(i);
+            found = Some(value);
+            continue;
         }
         if i + 1 >= argv.len() {
             return Err(format!("argument {arg}: expected one argument"));
@@ -384,10 +364,10 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                     let filter: Option<Vec<String>> =
                         if a.classes.is_empty() { None } else { Some(a.classes.clone()) };
                     for unit in &units {
-                        if let Some(f) = &filter {
-                            if !f.contains(&unit.cls.name) {
-                                continue;
-                            }
+                        if let Some(f) = &filter
+                            && !f.contains(&unit.cls.name)
+                        {
+                            continue;
                         }
                         let path = hand_packet_path(&workspace, unit);
                         if !path.is_file() {
@@ -439,7 +419,7 @@ fn read_stdin() -> BpsResult<String> {
 fn hex_bytes(raw: &str) -> BpsResult<Vec<u8>> {
     let text: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
     let bytes = text.as_bytes();
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Err(BpsError::new(
             crate::errors::ErrorKind::Parse,
             "non-hexadecimal number found in fromhex() arg",

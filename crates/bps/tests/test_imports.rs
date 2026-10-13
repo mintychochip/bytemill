@@ -219,7 +219,7 @@ fn each_shipped_schema_loads_on_its_own() {
     walk(&common::repo_root().join("schemas"), &mut paths);
     paths.sort();
     for path in paths {
-        let schema = load_schema(&[path.clone()]).unwrap_or_else(|e| {
+        let schema = load_schema(std::slice::from_ref(&path)).unwrap_or_else(|e| {
             panic!("{}: {e}", path.display());
         });
         analyze(&schema).unwrap_or_else(|e| panic!("{}: {e}", path.display()));

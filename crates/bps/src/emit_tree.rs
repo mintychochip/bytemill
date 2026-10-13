@@ -345,13 +345,17 @@ fn put(planned: &mut Vec<(PathBuf, String)>, path: PathBuf, text: String) {
     }
 }
 
+/// What planning the packet files yields: the files to write (path, text) and the hand files
+/// that are swapped for generated ones.
+type PacketPlan = (Vec<(PathBuf, String)>, Vec<PathBuf>);
+
 fn planned_packets(
     resolved: &ResolvedSchema,
     workspace: &Path,
     classes: &ClassTable,
     shapes: &[(String, Shape)],
     swap_hand: bool,
-) -> BpsResult<(Vec<(PathBuf, String)>, Vec<PathBuf>)> {
+) -> BpsResult<PacketPlan> {
     let units = build_units(resolved, classes)?;
     let modules: Vec<String> = units.iter().map(module_path).collect();
     for (module, _) in shapes {

@@ -205,10 +205,10 @@ fn struct_decl(shape: &Shape) -> String {
         );
         field_lines.push(format!("    pub {}: {},", f.name, f.type_));
     }
-    if let Some(last) = field_lines.last_mut() {
-        if last.ends_with(',') {
-            last.pop();
-        }
+    if let Some(last) = field_lines.last_mut()
+        && last.ends_with(',')
+    {
+        last.pop();
     }
     let fields = field_lines.join("\n");
     format!("{docs}{derive}pub struct {} {{\n{fields}\n}}", shape.cls)

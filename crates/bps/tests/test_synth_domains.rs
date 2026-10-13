@@ -190,10 +190,10 @@ fn production_synth_overrides_validate_against_minecraft_schema() {
     let names = with_synth_overrides(|o| {
         let mut seen: Vec<String> = Vec::new();
         for key in o.keys() {
-            if let Some((pkt, _)) = key.split_once('/') {
-                if !seen.iter().any(|s| s == pkt) {
-                    seen.push(pkt.to_string());
-                }
+            if let Some((pkt, _)) = key.split_once('/')
+                && !seen.iter().any(|s| s == pkt)
+            {
+                seen.push(pkt.to_string());
             }
         }
         seen

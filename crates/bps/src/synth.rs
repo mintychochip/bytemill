@@ -273,29 +273,29 @@ fn scrutinee(expr: &Expr, env: &Env) -> Option<i128> {
 fn synth_match(mt: &MatchType, local: &mut Env, scope: &SynthScope<'_>) -> BpsResult<Env> {
     let mut arm = scrutinee(&mt.tag_expr, local).and_then(|tag| select_match_arm(mt, tag));
     let mut extra = Env::new();
-    if arm.is_none() {
-        if let Some(first) = mt.arms.first() {
-            // No arm matched and there is no `_`: retarget a plain identifier
-            // scrutinee onto the first concrete tag so the value can still encode.
-            let fallback = mt
-                .arms
-                .iter()
-                .find(|a| concrete_arm_tag(a).is_some())
-                .unwrap_or(first);
-            arm = Some(fallback);
-            if let (Some(chosen), Expr::Ident(name)) = (concrete_arm_tag(fallback), &mt.tag_expr) {
-                if !name.is_empty() {
-                    local.insert(name, Value::Int(chosen));
-                    extra.insert(name, Value::Int(chosen));
-                }
-            }
+    if arm.is_none()
+        && let Some(first) = mt.arms.first()
+    {
+        // No arm matched and there is no `_`: retarget a plain identifier
+        // scrutinee onto the first concrete tag so the value can still encode.
+        let fallback = mt
+            .arms
+            .iter()
+            .find(|a| concrete_arm_tag(a).is_some())
+            .unwrap_or(first);
+        arm = Some(fallback);
+        if let (Some(chosen), Expr::Ident(name)) = (concrete_arm_tag(fallback), &mt.tag_expr)
+            && !name.is_empty()
+        {
+            local.insert(name, Value::Int(chosen));
+            extra.insert(name, Value::Int(chosen));
         }
     }
-    if let Some(arm) = arm {
-        if let Some(FieldType::Block(b)) = &arm.type_ref {
-            let inner = block_walk(&b.items, local, scope, false)?;
-            merge(&mut extra, &inner);
-        }
+    if let Some(arm) = arm
+        && let Some(FieldType::Block(b)) = &arm.type_ref
+    {
+        let inner = block_walk(&b.items, local, scope, false)?;
+        merge(&mut extra, &inner);
     }
     Ok(extra)
 }
@@ -362,12 +362,11 @@ fn field_item(
     scope: &SynthScope<'_>,
     top: bool,
 ) -> BpsResult<()> {
-    if let Some(cond) = &wf.if_expr {
-        if let Ok(v) = eval_expr(cond, local) {
-            if !v.truthy() {
-                return Ok(());
-            }
-        }
+    if let Some(cond) = &wf.if_expr
+        && let Ok(v) = eval_expr(cond, local)
+        && !v.truthy()
+    {
+        return Ok(());
     }
     let v = match &wf.repeat {
         Some(_) => Value::list(vec![value_for(&wf.type_ref, local, scope)?]),
@@ -619,12 +618,12 @@ fn field_value(
     let mut arm = scrutinee(&mt.tag_expr, local).and_then(|tag| select_match_arm(mt, tag));
     if arm.is_none() {
         arm = mt.arms.iter().find(|a| concrete_arm_tag(a).is_some());
-        if let (Some(chosen), Expr::Ident(name)) = (arm.and_then(concrete_arm_tag), &mt.tag_expr) {
-            if !name.is_empty() {
-                // `out` may be a conditional group's result, merged into its parent's.
-                local.insert(name, Value::Int(chosen));
-                out.insert(name, Value::Int(chosen));
-            }
+        if let (Some(chosen), Expr::Ident(name)) = (arm.and_then(concrete_arm_tag), &mt.tag_expr)
+            && !name.is_empty()
+        {
+            // `out` may be a conditional group's result, merged into its parent's.
+            local.insert(name, Value::Int(chosen));
+            out.insert(name, Value::Int(chosen));
         }
     }
     match arm.and_then(|a| a.type_ref.as_ref()) {

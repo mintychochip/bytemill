@@ -235,20 +235,20 @@ fn coordinate_names<'a>(use_texts: impl Iterator<Item = &'a str>) -> BpsResult<B
 
 /// Whether `coord` matches at byte `i` of `text` (`(?<![\w:])(?:alts)(?!\w|\s*<)`).
 fn coord_match_at(text: &str, i: usize, coord: &BTreeSet<String>) -> Option<usize> {
-    if let Some(prev) = text[..i].chars().next_back() {
-        if is_word(prev) || prev == ':' {
-            return None;
-        }
+    if let Some(prev) = text[..i].chars().next_back()
+        && (is_word(prev) || prev == ':')
+    {
+        return None;
     }
     for name in coord {
         if !sw(text, i, name) {
             continue;
         }
         let e = i + name.len();
-        if let Some(c) = text[e..].chars().next() {
-            if is_word(c) {
-                continue;
-            }
+        if let Some(c) = text[e..].chars().next()
+            && is_word(c)
+        {
+            continue;
         }
         let after_ws = skip_ws(text, e);
         if at(text, after_ws) == Some(b'<') {
@@ -421,11 +421,11 @@ fn parse_struct_fields(body: &str) -> BpsResult<Vec<FieldShape>> {
     Ok(fields)
 }
 
-/// `_packet_struct`: (docs, derives, form, fields).
-fn packet_struct(
-    text: &str,
-    cls: &str,
-) -> BpsResult<(Vec<String>, Vec<String>, String, Vec<FieldShape>)> {
+/// What `packet_struct` reads off a packet struct: (docs, derives, form, fields).
+type PacketStruct = (Vec<String>, Vec<String>, String, Vec<FieldShape>);
+
+/// `_packet_struct`.
+fn packet_struct(text: &str, cls: &str) -> BpsResult<PacketStruct> {
     let head = struct_head(text).ok_or_else(|| shape_error(format!("malformed struct {cls}")))?;
     let (docs, attr_pos) = docs_and_attrs_before(text, head.start)?;
     let derives = parse_struct_attrs(text, attr_pos, head.start)?;
@@ -520,15 +520,15 @@ fn first_call(text: &str, prefix: &str) -> Option<String> {
 
 /// `_parse_serializer_body`: (style, name).
 fn parse_serializer_body(body: &str) -> BpsResult<(String, String)> {
-    if body.contains("ConstantSerializer::new") {
-        if let Some(name) = first_call(body, "ConstantSerializer::new(") {
-            return Ok(("constant".to_string(), name));
-        }
+    if body.contains("ConstantSerializer::new")
+        && let Some(name) = first_call(body, "ConstantSerializer::new(")
+    {
+        return Ok(("constant".to_string(), name));
     }
-    if let Some(name) = first_call(body, "Arc::new(") {
-        if name != "ConstantSerializer" {
-            return Ok(("struct".to_string(), name));
-        }
+    if let Some(name) = first_call(body, "Arc::new(")
+        && name != "ConstantSerializer"
+    {
+        return Ok(("struct".to_string(), name));
     }
     Err(shape_error("unrecognized serializer() body"))
 }

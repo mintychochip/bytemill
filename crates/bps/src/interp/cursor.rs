@@ -57,3 +57,9 @@ impl WriteCursor {
         self.buf
     }
 }
+
+impl Default for WriteCursor {
+    fn default() -> Self {
+        Self::new()
+    }
+}

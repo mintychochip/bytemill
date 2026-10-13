@@ -294,13 +294,13 @@ impl Parser {
                 let cond = self.parse_expr()?;
                 if self.at(TokKind::LBrace) {
                     self.pos = mark;
-                    items.push(BlockItem::Field(WireField {
+                    items.push(BlockItem::Field(Box::new(WireField {
                         name,
                         type_ref,
                         if_expr: None,
                         repeat: None,
                         encode_expr: None,
-                    }));
+                    })));
                     items.push(self.parse_conditional_group_item()?);
                     continue;
                 }
@@ -314,13 +314,13 @@ impl Parser {
             if self.at(TokKind::LBracket) {
                 repeat = Some(self.parse_repeat()?);
             }
-            items.push(BlockItem::Field(WireField {
+            items.push(BlockItem::Field(Box::new(WireField {
                 name,
                 type_ref,
                 if_expr,
                 repeat,
                 encode_expr,
-            }));
+            })));
             self.try_eat(TokKind::Comma);
         }
         self.eat(TokKind::RBrace, None)?;

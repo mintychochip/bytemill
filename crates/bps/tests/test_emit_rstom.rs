@@ -275,10 +275,10 @@ fn str_field(map: &Value, key: &str) -> Option<String> {
 
 /// `tests/rstom_tables.py::CARGO_TARGET`, read the same way.
 fn cargo_target_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("BPS_CARGO_TARGET_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir);
-        }
+    if let Some(dir) = std::env::var_os("BPS_CARGO_TARGET_DIR")
+        && !dir.is_empty()
+    {
+        return PathBuf::from(dir);
     }
     let shm = Path::new("/dev/shm");
     if shm.is_dir() {

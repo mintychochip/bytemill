@@ -180,9 +180,9 @@ pub fn docs_and_attrs_before(src: &str, item_pos: usize) -> BpsResult<(Vec<Strin
             doc_lines.insert(0, doc_line_text(stripped));
         } else if stripped.starts_with("#[") {
             attr_start = attr_start.min(line_begin);
-        } else if stripped.is_empty() {
-        } else if line_in_attr_prefix(src, line_begin, item_line)? {
-        } else {
+        } else if !stripped.is_empty() && !line_in_attr_prefix(src, line_begin, item_line)? {
+            // Blank lines and the continuation lines of a multi-line attribute stay in the
+            // block; anything else ends it.
             break;
         }
         if line_begin == 0 {
@@ -235,10 +235,10 @@ fn raw_string_hashes(src: &str, pos: usize) -> Option<usize> {
     if before == Some('b') {
         before = sub(src, 0, j - 1).chars().next_back();
     }
-    if let Some(c) = before {
-        if c.is_alphanumeric() || c == '_' {
-            return None;
-        }
+    if let Some(c) = before
+        && (c.is_alphanumeric() || c == '_')
+    {
+        return None;
     }
     Some(pos - 1 - j)
 }
@@ -459,9 +459,7 @@ pub(crate) fn read_type(src: &str, pos: usize) -> (String, usize) {
             depth_paren += 1;
         } else if ch == b')' {
             depth_paren -= 1;
-        } else if ch == b',' && depth_angle == 0 && depth_paren == 0 {
-            break;
-        } else if ch == b'}' && depth_angle == 0 && depth_paren == 0 {
+        } else if (ch == b',' || ch == b'}') && depth_angle == 0 && depth_paren == 0 {
             break;
         }
         pos += 1;

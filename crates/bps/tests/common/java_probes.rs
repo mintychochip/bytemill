@@ -148,16 +148,16 @@ pub fn samples() -> Vec<Sample> {
     }
     for (index, case) in case_list("playernetworkprobe").iter().enumerate() {
         let op = str_field(case.get("op"));
-        if op.as_deref() == Some("clientSettings") {
-            if let Some(hex) = str_field(case.get("hex")) {
-                out.push(Sample {
-                    fixture: "playernetworkprobe".into(),
-                    index,
-                    java_class: "ClientSettingsPacket".into(),
-                    data: hex_bytes(&hex),
-                    value: case.get("input").cloned().filter(|v| !matches!(v, Value::Null)),
-                });
-            }
+        if op.as_deref() == Some("clientSettings")
+            && let Some(hex) = str_field(case.get("hex"))
+        {
+            out.push(Sample {
+                fixture: "playernetworkprobe".into(),
+                index,
+                java_class: "ClientSettingsPacket".into(),
+                data: hex_bytes(&hex),
+                value: case.get("input").cloned().filter(|v| !matches!(v, Value::Null)),
+            });
         }
     }
     for fixture in KIND_FIXTURES {

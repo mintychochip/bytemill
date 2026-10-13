@@ -25,10 +25,13 @@ fn packet_sources_present() -> bool {
         .is_dir()
 }
 
+/// Every unit whose hand file extracts, with its shape.
+type Pairs = Vec<(Unit, Shape)>;
+
 /// Python's `setUpClass`: every unit whose hand file extracts, plus the names
 /// of the units that have no hand file or raise `ShapeError`. `None` when the
 /// worktree (or its packets.json) is absent, mirroring the class-level skip.
-fn collect_pairs() -> Option<(Vec<(Unit, Shape)>, Vec<String>)> {
+fn collect_pairs() -> Option<(Pairs, Vec<String>)> {
     if !packet_sources_present() {
         return None;
     }
@@ -66,14 +69,14 @@ fn hand_and_siblings(rstom: &Path, unit: &Unit) -> (String, String) {
     let prefix = format!("{}.", unit.cls.stem);
     let own = format!("{}.rs", unit.cls.stem);
     let mut siblings = Vec::new();
-    if let Some(parent) = path.parent() {
-        if let Ok(entries) = std::fs::read_dir(parent) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                // `{stem}.*.rs` never matches the packet file itself.
-                if name != own && name.starts_with(&prefix) && name.ends_with(".rs") {
-                    siblings.push(std::fs::read_to_string(entry.path()).unwrap());
-                }
+    if let Some(parent) = path.parent()
+        && let Ok(entries) = std::fs::read_dir(parent)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // `{stem}.*.rs` never matches the packet file itself.
+            if name != own && name.starts_with(&prefix) && name.ends_with(".rs") {
+                siblings.push(std::fs::read_to_string(entry.path()).unwrap());
             }
         }
     }
@@ -157,13 +160,13 @@ fn strip_use_statements(hand: &str) -> String {
     let mut kept_start = 0usize;
     let mut i = 0usize;
     while i < bytes.len() {
-        if i == 0 || bytes[i - 1] == b'\n' {
-            if let Some(end) = use_match_end(bytes, i) {
-                out.push_str(&hand[kept_start..i]);
-                kept_start = end;
-                i = end;
-                continue;
-            }
+        if (i == 0 || bytes[i - 1] == b'\n')
+            && let Some(end) = use_match_end(bytes, i)
+        {
+            out.push_str(&hand[kept_start..i]);
+            kept_start = end;
+            i = end;
+            continue;
         }
         i += 1;
     }
@@ -174,14 +177,14 @@ fn strip_use_statements(hand: &str) -> String {
 /// The names a kept `use` statement binds, reproducing `_bound_names`.
 fn bound_names(statement: &str) -> Vec<String> {
     let mut inner = statement;
-    if let Some(rest) = inner.strip_prefix("use") {
-        if rest.starts_with(|c: char| c.is_whitespace()) {
-            inner = rest.trim_start();
-        }
+    if let Some(rest) = inner.strip_prefix("use")
+        && rest.starts_with(|c: char| c.is_whitespace())
+    {
+        inner = rest.trim_start();
     }
     let inner = inner.trim_end_matches(';');
     let mut names = Vec::new();
-    for part in inner.split(|c| c == '{' || c == '}' || c == ',') {
+    for part in inner.split(['{', '}', ',']) {
         let part = part.trim();
         if part.is_empty() || part.ends_with("::") {
             continue;

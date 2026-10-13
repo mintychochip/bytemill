@@ -27,10 +27,13 @@ const STATEMENT_SOURCE: &str = "
     }
 ";
 
+/// A raw payload and the decoded fields it must produce.
+type Case<'a> = (Vec<u8>, &'a [(&'a str, Value)]);
+
 #[test]
 fn match_splices_the_selected_arm() {
     let r = resolved(STATEMENT_SOURCE);
-    let cases: [(Vec<u8>, &[(&str, Value)]); 4] = [
+    let cases: [Case<'_>; 4] = [
         (vec![0, 0x11], &[("action", Value::Int(0)), ("x", Value::Int(0x11))]),
         (vec![1, 0x22], &[("action", Value::Int(1)), ("y", Value::Int(0x22))]),
         (vec![2, 0x22], &[("action", Value::Int(2)), ("y", Value::Int(0x22))]),

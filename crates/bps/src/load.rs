@@ -288,10 +288,10 @@ fn merge(modules: impl Iterator<Item = Module>) -> Schema {
 
 /// `Path._show`: relative to the cwd when possible, else the absolute posix path.
 fn show(path: &Path) -> String {
-    if let Ok(cwd) = std::env::current_dir() {
-        if let Ok(rel) = path.strip_prefix(&cwd) {
-            return posix(rel);
-        }
+    if let Ok(cwd) = std::env::current_dir()
+        && let Ok(rel) = path.strip_prefix(&cwd)
+    {
+        return posix(rel);
     }
     posix(path)
 }

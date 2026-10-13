@@ -225,7 +225,11 @@ fn python_shortest(a: f64, digits: String, e: i32) -> (String, i32) {
         return (digits, e); // all nines: the upper candidate has an extra digit
     }
     let upper = String::from_utf8(upper).expect("ascii digits");
-    let even = if (lower.as_bytes()[n - 1] - b'0') % 2 == 0 { lower.to_string() } else { upper };
+    let even = if (lower.as_bytes()[n - 1] - b'0').is_multiple_of(2) {
+        lower.to_string()
+    } else {
+        upper
+    };
     let exp_first = exact.len() as i32 - 1 - k as i32;
     let candidate = format!("{even}e{}", exp_first - (n as i32 - 1));
     if candidate.parse::<f64>() == Ok(a) {
@@ -262,7 +266,7 @@ pub fn float_repr(f: f64) -> String {
     if neg {
         out.push('-');
     }
-    if e < -4 || e >= 16 {
+    if !(-4..16).contains(&e) {
         out.push_str(&digits[..1]);
         if n > 1 {
             out.push('.');

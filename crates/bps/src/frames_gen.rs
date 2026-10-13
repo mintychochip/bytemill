@@ -127,11 +127,11 @@ fn helpers() -> Vec<(&'static str, &'static str)> {
             docs_start.get_or_insert(start);
             continue;
         }
-        if let Some(rest) = bare.strip_prefix("fn ") {
-            if let Some(end) = rest.find('(') {
-                current = Some((docs_start.take().unwrap_or(start), &rest[..end]));
-                continue;
-            }
+        if let Some(rest) = bare.strip_prefix("fn ")
+            && let Some(end) = rest.find('(')
+        {
+            current = Some((docs_start.take().unwrap_or(start), &rest[..end]));
+            continue;
         }
         docs_start = None;
     }
@@ -583,10 +583,10 @@ impl<'c, 'a> Body<'c, 'a> {
             Expr::Int(v) => Ok((format!("{v}i64"), Kind::Int)),
             Expr::Bool(b) => Ok((if *b { "true" } else { "false" }.to_string(), Kind::Bool)),
             Expr::Ident(name) => {
-                if let Some(v) = self.consts.get(name) {
-                    if !self.in_scope(name) {
-                        return Ok((format!("{v}i64"), Kind::Int));
-                    }
+                if let Some(v) = self.consts.get(name)
+                    && !self.in_scope(name)
+                {
+                    return Ok((format!("{v}i64"), Kind::Int));
                 }
                 if !self.in_scope(name) {
                     return Err(self.fail(&format!(
@@ -842,12 +842,12 @@ impl<'c, 'a> Body<'c, 'a> {
         } else if self.c.resolved.encodings.contains_key(name) {
             if !tr.args.is_empty() {
                 let target = alias_target(self.c.resolved, name);
-                if let Some(enc) = self.c.resolved.encodings.get(&target) {
-                    if !enc.params.is_empty() {
-                        return Err(self.fail(&format!(
-                            "{name} is used with arguments, which is not supported"
-                        )));
-                    }
+                if let Some(enc) = self.c.resolved.encodings.get(&target)
+                    && !enc.params.is_empty()
+                {
+                    return Err(self.fail(&format!(
+                        "{name} is used with arguments, which is not supported"
+                    )));
                 }
             }
             if wanted {

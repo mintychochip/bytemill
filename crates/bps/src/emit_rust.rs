@@ -392,10 +392,9 @@ fn snake(s: &str) -> String {
 /// The field name of a packet that is a single `rest` field, if it is one.
 fn rest_only(pkt: &PacketDecl) -> Option<&str> {
     match pkt.items.as_slice() {
-        [BlockItem::Field(WireField { name, type_ref: FieldType::Ref(tr), .. })]
-            if tr.name == "rest" =>
-        {
-            Some(name.as_str())
+        // A box cannot be destructured in a pattern, so the `rest` type is checked in the guard.
+        [BlockItem::Field(wf)] if matches!(&wf.type_ref, FieldType::Ref(tr) if tr.name == "rest") => {
+            Some(wf.name.as_str())
         }
         _ => None,
     }

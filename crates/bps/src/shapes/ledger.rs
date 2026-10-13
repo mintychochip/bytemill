@@ -130,10 +130,10 @@ pub fn extract_shapes_for_units(
 ) -> BpsResult<Vec<(Unit, Shape)>> {
     let mut out = Vec::new();
     for unit in units {
-        if let Some(names) = class_names {
-            if !names.contains(&unit.cls.name) {
-                continue;
-            }
+        if let Some(names) = class_names
+            && !names.contains(&unit.cls.name)
+        {
+            continue;
         }
         let path = hand_packet_path(workspace, unit);
         if !path.is_file() {

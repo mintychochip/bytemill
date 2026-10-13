@@ -1058,15 +1058,14 @@ fn rust_guard(expr: Option<&Expr>, types: &OrderedMap<String>, mode: &str) -> Bp
                 let right = rust_guard(Some(r), types, mode)?;
                 return Ok(format!("({left} {op} {right})"));
             }
-            if matches!(op.as_str(), "==" | "!=") && is_zero_int(r) {
-                if let Expr::Ident(n) = &**l {
-                    if !n.is_empty() {
-                        let (inner, _) = field_rust_type(n, types);
-                        if inner == "bool" {
-                            let access = rust_field_access(n, types, mode);
-                            return Ok(if op == "!=" { access } else { format!("!{access}") });
-                        }
-                    }
+            if matches!(op.as_str(), "==" | "!=") && is_zero_int(r)
+                && let Expr::Ident(n) = &**l
+                && !n.is_empty()
+            {
+                let (inner, _) = field_rust_type(n, types);
+                if inner == "bool" {
+                    let access = rust_field_access(n, types, mode);
+                    return Ok(if op == "!=" { access } else { format!("!{access}") });
                 }
             }
             let left = rust_operand(l, types, mode)?;
@@ -1285,10 +1284,10 @@ fn repeat_shape(
 ) -> BpsResult<PacketShape> {
     let repeat = wf.repeat.as_ref();
     let mut count = None;
-    if let Some(rep) = repeat {
-        if rep.mode == ast::RepeatMode::Count {
-            count = count_field(rep.expr.as_ref()).or_else(|| count_expr(rep.expr.as_ref()));
-        }
+    if let Some(rep) = repeat
+        && rep.mode == ast::RepeatMode::Count
+    {
+        count = count_field(rep.expr.as_ref()).or_else(|| count_expr(rep.expr.as_ref()));
     }
     let mut element: Vec<PacketShape> = Vec::new();
     let mut elem_types: OrderedMap<String> = OrderedMap::new();
@@ -1518,10 +1517,10 @@ fn flatten_match(
     let Some(default_type) = &default.type_ref else {
         return Ok(());
     };
-    if let FieldType::Ref(r) = default_type {
-        if r.name == "nbt_nothing" {
-            return Ok(());
-        }
+    if let FieldType::Ref(r) = default_type
+        && r.name == "nbt_nothing"
+    {
+        return Ok(());
     }
     let mut default_guard: Option<Expr> = parent_guard.cloned();
     for t in &explicit {
@@ -1569,12 +1568,11 @@ fn flatten(
                 flatten_match(mt, out, resolved, bind, parent_guard, field_types, parent)?;
             }
             BlockItem::Spread { name, .. } => {
-                if let Some(resolved) = resolved {
-                    if let Some(enc) = resolved.encodings.get(name) {
-                        if let EncBody::Block(b) = &enc.body {
-                            flatten(&b.items, out, Some(resolved), bind, parent_guard, field_types, parent, expand_payloads)?;
-                        }
-                    }
+                if let Some(resolved) = resolved
+                    && let Some(enc) = resolved.encodings.get(name)
+                    && let EncBody::Block(b) = &enc.body
+                {
+                    flatten(&b.items, out, Some(resolved), bind, parent_guard, field_types, parent, expand_payloads)?;
                 }
             }
             BlockItem::Field(wf) => {
@@ -1950,10 +1948,10 @@ pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> 
         struct_lines.push(format!("    /// Java: `{}`.", f.java));
         struct_lines.push(format!("    pub {}: {},", f.ident, rtype));
     }
-    if let Some(last) = struct_lines.last_mut() {
-        if last.ends_with(',') {
-            last.pop();
-        }
+    if let Some(last) = struct_lines.last_mut()
+        && last.ends_with(',')
+    {
+        last.pop();
     }
     let field_decls = if struct_lines.is_empty() {
         "    // no wire fields".to_string()

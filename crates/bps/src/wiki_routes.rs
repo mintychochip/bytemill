@@ -112,19 +112,19 @@ fn find_heading(html: &str, lower: &str, from: usize) -> Option<Heading> {
         let start = at + rel;
         let word_start = start + OPEN.len();
         let word_end = skip_while(html, word_start, is_word);
-        if word_end > word_start {
-            if let Some(after_space) = lower[word_end..].strip_prefix(' ') {
-                for direction in ["clientbound", "serverbound"] {
-                    let Some(tail) = after_space.strip_prefix(direction) else { continue };
-                    if tail.starts_with(SUFFIX) {
-                        let word = &html[word_start..word_end];
-                        let state = STATE_MAP
-                            .iter()
-                            .find(|(name, _)| *name == word)
-                            .map_or_else(|| word.to_lowercase(), |(_, state)| (*state).to_string());
-                        let end = word_end + 1 + direction.len() + SUFFIX.len();
-                        return Some(Heading { start, end, state, direction });
-                    }
+        if word_end > word_start
+            && let Some(after_space) = lower[word_end..].strip_prefix(' ')
+        {
+            for direction in ["clientbound", "serverbound"] {
+                let Some(tail) = after_space.strip_prefix(direction) else { continue };
+                if tail.starts_with(SUFFIX) {
+                    let word = &html[word_start..word_end];
+                    let state = STATE_MAP
+                        .iter()
+                        .find(|(name, _)| *name == word)
+                        .map_or_else(|| word.to_lowercase(), |(_, state)| (*state).to_string());
+                    let end = word_end + 1 + direction.len() + SUFFIX.len();
+                    return Some(Heading { start, end, state, direction });
                 }
             }
         }

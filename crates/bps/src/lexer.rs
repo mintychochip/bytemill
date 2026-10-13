@@ -180,7 +180,7 @@ pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
             continue;
         }
         if c.is_ascii_digit() || (c == '-' && peek!(1).is_ascii_digit()) {
-            if c == '0' && peek!(1).to_ascii_lowercase() == 'x' {
+            if c == '0' && peek!(1).eq_ignore_ascii_case(&'x') {
                 i += 2;
                 while i < n && chars[i].is_ascii_hexdigit() {
                     i += 1;

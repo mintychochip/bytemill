@@ -19,7 +19,7 @@ pub struct FieldShape {
     pub wire: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct NewShape {
     pub present: bool,
     pub const_: bool,
@@ -30,39 +30,13 @@ pub struct NewShape {
     pub params: Option<String>,
 }
 
-impl Default for NewShape {
-    fn default() -> Self {
-        NewShape {
-            present: false,
-            const_: false,
-            must_use: false,
-            attrs: Vec::new(),
-            docs: Vec::new(),
-            body: Vec::new(),
-            params: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SerializerShape {
     pub style: String,
     pub name: String,
     pub public: bool,
     pub docs: Vec<String>,
     pub read_via_new: bool,
-}
-
-impl Default for SerializerShape {
-    fn default() -> Self {
-        SerializerShape {
-            style: String::new(),
-            name: String::new(),
-            public: false,
-            docs: Vec::new(),
-            read_via_new: false,
-        }
-    }
 }
 
 /// A hand item the shape keeps verbatim instead of generating it.

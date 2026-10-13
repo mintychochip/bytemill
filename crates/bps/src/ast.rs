@@ -152,7 +152,8 @@ pub struct MatchType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BlockItem {
-    Field(WireField),
+    /// Boxed: a wire field is several times larger than any other item.
+    Field(Box<WireField>),
     Computed { name: String, expr: Expr },
     Require(Expr),
     Spread { name: String, args: Vec<Expr> },
@@ -274,10 +275,10 @@ pub fn select_match_arm(mt: &MatchType, tag: i128) -> Option<&MatchArm> {
             continue;
         }
         for arm_tag in arm_tag_list(arm) {
-            if let Tag::Int(v) = arm_tag {
-                if *v == tag {
-                    return Some(arm);
-                }
+            if let Tag::Int(v) = arm_tag
+                && *v == tag
+            {
+                return Some(arm);
             }
         }
     }
