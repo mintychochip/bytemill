@@ -886,6 +886,7 @@ fn launch_vanilla_client_inner(
     let log = File::create(&log_path).map_err(|e| e.to_string())?;
     let log_err = log.try_clone().map_err(|e| e.to_string())?;
     let mut child = cmd
+        .current_dir(&game_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(log_err))
