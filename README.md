@@ -117,6 +117,16 @@ scripts/verify_versions.py                         # ProtoDef oracle, both direc
 scripts/python_parity_versions.py                  # Python reference vs Rust on every version
 ```
 
+## Hytale (build 2026.02.17-255364b8e)
+
+`schemas/hytale/` is a second protocol family, transcribed from the decompiled
+`com.hypixel.hytale.protocol` package (not vendored). The root is
+`schemas/hytale/2026_02_17.bps`: connection packets only so far (`connect`,
+`disconnect`, `ping`, `pong`). Integers are little-endian; the frame length is
+an `i32le` of the payload and does not include the packet id. `bpsc decode
+--state` still assumes a Minecraft varint frame, so use `--packet`. See
+`schemas/hytale/README.md`.
+
 ## Quick start
 
 ```bash

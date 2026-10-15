@@ -1,0 +1,31 @@
+// Shared Hytale layouts.
+//
+// Source: decompiled protocol package on
+// github.com/soksx/hytale-protocol branch version/2026.02.17-255364b8e
+// (PacketIO.java, VarInt.java, HostAddress.java, InstantData.java).
+// Not vendored here. Layouts below are transcribed from those serialize methods.
+//
+// VarInt.write rejects negatives and emits unsigned LEB128, at most 5 bytes.
+// For 0..=2^31-1 that is the same bytes as schemas/std/varint.bps. A string is
+// that length plus the UTF-8 bytes (writeVarString), not a UTF-16 unit budget.
+// writeUUID writes two big-endian longs. Every other multi-byte integer in this
+// tree is little-endian.
+
+import "../std/integers.bps"
+import "../std/varint.bps"
+
+encoding string(max_bytes) = {
+    byte_len: varint
+    value:    bytes(byte_len) as utf8
+    require   byte_len <= max_bytes
+}
+
+encoding host_address = {
+    port: i16le
+    host: string(256)
+}
+
+encoding instant_data = {
+    seconds: i64le
+    nanos:   i32le
+}
