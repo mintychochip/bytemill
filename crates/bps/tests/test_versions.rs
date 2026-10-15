@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use bps::interp::{decode_packet, encode_packet};
-use bps::protodef::versions::{VersionEntry, import_versions, load_protocol, parse_manifest};
+use bps::protodef::versions::{VersionEntry, generate as generate_schema, import_versions, load_protocol, parse_manifest};
 use bps::wiregen::generate;
 use bps::{ResolvedSchema, analyze, load_schema};
 
@@ -337,4 +337,125 @@ fn oracle_vectors_round_trip() {
         total += report.checked;
     }
     assert!(total > 7000, "only {total} vectors");
+}
+
+/// Compare two name-keyed declaration maps: same names, AST-equal values.
+fn compare_maps<V: PartialEq + std::fmt::Debug>(
+    release: &str,
+    kind: &str,
+    a: &std::collections::BTreeMap<&str, V>,
+    b: &std::collections::BTreeMap<&str, V>,
+) {
+    assert_eq!(a.len(), b.len(), "{release}: {kind} count differs");
+    for (name, da) in a {
+        let db = b
+            .get(name)
+            .unwrap_or_else(|| panic!("{release}: {kind} {name} missing from the single file"));
+        assert_eq!(da, db, "{release}: {kind} {name} differs");
+    }
+}
+
+/// The merged schema loaded from the root equals the merged schema loaded from the single-file
+/// rendering, declaration by declaration (AST PartialEq; declaration order is not meaningful),
+/// protocol block included. Built fresh in a scratch directory, never the committed tree.
+#[test]
+fn shared_layout_means_what_the_single_file_means() {
+    struct TempRoot(std::path::PathBuf);
+    impl TempRoot {
+        fn new(tag: &str) -> Self {
+            static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "bps-share-equiv-{tag}-{}-{n}-{:?}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+            ));
+            Self(dir)
+        }
+    }
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let tmp = TempRoot::new("equiv");
+    std::fs::create_dir_all(tmp.0.join("std")).unwrap();
+    for f in ["integers.bps", "varint.bps"] {
+        std::fs::copy(root().join("schemas/std").join(f), tmp.0.join("std").join(f)).unwrap();
+    }
+    let report = import_versions(
+        &root().join("schemas/versions/manifest.json"),
+        &root().join("data/minecraft-data"),
+        &tmp.0.join("out"),
+        false,
+    )
+    .unwrap();
+    assert!(report.stale.is_empty());
+    let manifest_dir = root().join("schemas/versions/manifest.json");
+    let manifest_dir = manifest_dir.parent().unwrap();
+    for entry in entries() {
+        let name = entry.file_name();
+        let single = generate_schema(&entry, &root().join("data/minecraft-data"), manifest_dir)
+            .unwrap_or_else(|e| panic!("{}: {e}", entry.release));
+        let single_dir = tmp.0.join("single");
+        std::fs::create_dir_all(&single_dir).unwrap();
+        std::fs::write(single_dir.join(&name), &single).unwrap();
+        let merged_root = load_schema(&[tmp.0.join("out").join(&name)])
+            .unwrap_or_else(|e| panic!("{} root: {e}", entry.release));
+        let merged_single = load_schema(&[single_dir.join(&name)])
+            .unwrap_or_else(|e| panic!("{} single: {e}", entry.release));
+        let release = &entry.release;
+        let (a, b) = (&merged_root, &merged_single);
+        {
+            let map_a: std::collections::BTreeMap<&str, &bps::ast::EncodingDecl> =
+                a.encodings.iter().map(|e| (e.name.as_str(), e)).collect();
+            let map_b: std::collections::BTreeMap<&str, &bps::ast::EncodingDecl> =
+                b.encodings.iter().map(|e| (e.name.as_str(), e)).collect();
+            compare_maps(release, "encoding", &map_a, &map_b);
+        }
+        {
+            let map_a: std::collections::BTreeMap<&str, &bps::ast::PacketDecl> =
+                a.packets.iter().map(|p| (p.name.as_str(), p)).collect();
+            let map_b: std::collections::BTreeMap<&str, &bps::ast::PacketDecl> =
+                b.packets.iter().map(|p| (p.name.as_str(), p)).collect();
+            compare_maps(release, "packet", &map_a, &map_b);
+        }
+        {
+            let map_a: std::collections::BTreeMap<&str, &bps::ast::EnumDecl> =
+                a.enums.iter().map(|e| (e.name.as_str(), e)).collect();
+            let map_b: std::collections::BTreeMap<&str, &bps::ast::EnumDecl> =
+                b.enums.iter().map(|e| (e.name.as_str(), e)).collect();
+            compare_maps(release, "enum", &map_a, &map_b);
+        }
+            let release = &entry.release;
+
+        assert_eq!(
+            a.protocols.len(),
+            b.protocols.len(),
+            "{release}: protocol count differs"
+        );
+        assert_eq!(
+            a.protocols.first(),
+            b.protocols.first(),
+            "{release}: protocol block differs"
+        );
+    }
+}
+
+/// Every shared file parses and analyzes on its own: imports resolve, nothing external remains.
+#[test]
+fn every_shared_file_checks_alone() {
+    let mut n = 0;
+    for dir in std::fs::read_dir(root().join("schemas/versions/common")).unwrap() {
+        let path = dir.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("bps") {
+            continue;
+        }
+        let schema = load_schema(std::slice::from_ref(&path)).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        analyze(&schema).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        n += 1;
+    }
+    assert!(n > 0, "no shared files under common/");
 }
