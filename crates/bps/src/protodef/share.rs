@@ -1253,7 +1253,7 @@ protocol minecraft @ v1_13 {
         assert!(a_file.contains("import \"../../std/varint.bps\""));
         // a references b: the shared file holding b is imported.
         assert!(
-            a_file.contains("import \"../../common/from_1_13.bps\""),
+            a_file.contains("import \"from_1_13.bps\""),
             "{a_file}"
         );
         let b_file = layout
