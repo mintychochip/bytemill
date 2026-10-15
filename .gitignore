@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 target/
 tools/protodef-oracle/node_modules/
+.worktrees/
