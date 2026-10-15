@@ -87,7 +87,9 @@ crates/bps/tests/fixtures/protodef_vectors/  one oracle packet per packet type a
 
 Each generated file is self-contained: `import "../std/integers.bps"`, `import "../std/varint.bps"`,
 then a prelude on demand (UUID, NBT flavours, `lp_vec3`, `entity_delta`), the protocol's named
-types, the packets, and the `protocol minecraft @ v… { id = N … route … }` block.
+types, the packets, and the `protocol minecraft @ v… { id = N … route … }` block. (Superseded:
+since the shared-declarations build, roots are thin and declarations live in
+`schemas/versions/common/`.)
 `minecraft_core.bps` is not used: it encodes 26.x semantics (anonymous NBT roots) and must not
 couple to the versions.
 

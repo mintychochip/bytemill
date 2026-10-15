@@ -99,14 +99,15 @@ file that declares packets.
 
 ## Protocol versions (1.13 → 26.3)
 
-`schemas/versions/` has one schema per Minecraft Java protocol number from 393 (1.13) to 777 (26.3):
-39 protocols, 51 release versions, every state and direction, every packet decoded. They are
-generated from PrismarineJS minecraft-data's ProtoDef descriptions (vendored in
-`data/minecraft-data/`) by `bpsc import-versions`, corrected where the decompiled vanilla server
-disagrees (26.1 to 26.3, `schemas/versions/patches/`), and checked against an independent ProtoDef
-implementation. Versions before 26.1 are as the community data publishes them. See
-`schemas/versions/README.md` for the version table, the value shape, the verification record and the
-known limits.
+`schemas/versions/` has one root schema per Minecraft Java protocol number from 393 (1.13) to
+777 (26.3): 39 protocols, 51 release versions, every state and direction, every packet decoded.
+Declarations shared across versions live once in `schemas/versions/common/` (164 files, ~44% of
+the single-file size); a root imports the files its version needs. They are generated from
+PrismarineJS minecraft-data's ProtoDef descriptions (vendored in `data/minecraft-data/`) by
+`bpsc import-versions`, corrected where the decompiled vanilla server disagrees (26.1 to 26.3,
+`schemas/versions/patches/`), and checked against an independent ProtoDef implementation.
+Versions before 26.1 are as the community data publishes them. See `schemas/versions/README.md`
+for the version table, the value shape, the verification record and the known limits.
 
 ```bash
 bpsc check schemas/versions/v1_20_1.bps            # protocol 763: 1.20 and 1.20.1

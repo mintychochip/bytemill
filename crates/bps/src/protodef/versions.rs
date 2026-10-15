@@ -1,10 +1,11 @@
 //! The version table (`schemas/versions/manifest.json`) and the batch import over it.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::model::{Protocol, Res};
 use super::render::{FileSpec, import, version_ident};
+use super::share::write_layout;
 use crate::json::loads;
 use crate::value::Value;
 
@@ -114,45 +115,39 @@ pub fn generate(entry: &VersionEntry, data_dir: &Path, manifest_dir: &Path) -> R
         .map_err(|e| format!("{} (protocol {}): {e}", entry.release, entry.protocol))
 }
 
-#[derive(Debug, Default)]
-pub struct Report {
-    pub written: Vec<PathBuf>,
-    pub unchanged: usize,
-    /// With `check`: files whose committed text differs from a fresh import (or are missing).
-    pub stale: Vec<PathBuf>,
-}
-
-/// Import every manifest entry (or just `only`). With `check` nothing is written: stale files
-/// are reported instead.
+/// Import every manifest entry as roots plus shared files. The layout depends on every
+/// version, so there is no `--only`. With `check` nothing is written: stale files are
+/// reported instead.
 pub fn import_versions(
     manifest: &Path,
     data_dir: &Path,
     out_dir: &Path,
     check: bool,
-    only: Option<u32>,
-) -> Res<Report> {
+) -> Res<super::share::WriteReport> {
     let text = fs::read_to_string(manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
     let entries = parse_manifest(&text)?;
     let manifest_dir = manifest.parent().unwrap_or(Path::new("."));
-    let mut report = Report::default();
-    for entry in entries
-        .iter()
-        .filter(|e| only.is_none_or(|p| p == e.protocol))
-    {
+    let mut splits = Vec::with_capacity(entries.len());
+    for entry in &entries {
         let fresh = generate(entry, data_dir, manifest_dir)?;
-        let path = out_dir.join(entry.file_name());
-        let current = fs::read_to_string(&path).ok();
-        if current.as_deref() == Some(fresh.as_str()) {
-            report.unchanged += 1;
-            continue;
+        let mut s = super::share::split(&fresh)?;
+        for d in &mut s.decls {
+            d.fill_refs()?;
         }
-        if check {
-            report.stale.push(path);
-            continue;
-        }
-        fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
-        fs::write(&path, fresh).map_err(|e| format!("{}: {e}", path.display()))?;
-        report.written.push(path);
+        splits.push(s);
     }
+    let versions: Vec<Vec<super::share::Decl>> =
+        splits.iter().map(|s| s.decls.clone()).collect();
+    let ids = super::share::identity(&versions)?;
+    let layout = super::share::share(&entries, &splits, &ids)?;
+    let mut report = write_layout(&layout, out_dir, check)?;
+    report.roots = entries.len();
+    report.shared = layout.files.len() - entries.len();
+    report.declarations = versions.iter().map(|v| v.len()).sum();
+    let mut distinct: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    for m in &ids {
+        distinct.extend(m.values());
+    }
+    report.kept = distinct.len();
     Ok(report)
 }

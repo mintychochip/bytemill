@@ -1,7 +1,10 @@
 # Minecraft Java protocols 1.13 → 26.3
 
 One BPS schema per protocol number, 393 (1.13) to 777 (26.3): 39 protocols covering all 51
-release versions in that range. Each file is a complete, self-contained root:
+release versions in that range. Each root file is thin: header, imports, and the protocol
+block (routes); every packet and encoding declaration lives in a shared file under `common/`,
+stored once per set of versions in which it is identical. Loading a root loads its shared
+files, so every example works the same:
 
 ```bash
 bpsc check  schemas/versions/v1_20_1.bps          # parse + resolve
@@ -10,8 +13,15 @@ echo '<hex payload>' | bpsc decode --packet spawn_entity schemas/versions/v1_20_
 bpsc wire-check schemas/versions/v1_20_1.bps --file vectors.jsonl   # decode + re-encode, in bulk
 ```
 
-A file is named after the newest release that shares the protocol number (`v1_20_1.bps` is 763,
-which 1.20 and 1.20.1 share). `manifest.json` is the table; the generated files are never edited.
+A root is named after the newest release that shares the protocol number (`v1_20_1.bps` is 763,
+which 1.20 and 1.20.1 share). A shared file is named after the run of consecutive versions it
+serves: `from_1_13.bps` (unchanged since 1.13), `1_20_6_to_1_21_11.bps`, `only_1_21_11.bps`,
+`1_13_to_1_16_5+1_19_4_to_1_20_4.bps` (a `+` joins runs). `manifest.json` is the table; the
+generated files are never edited. To find a declaration:
+
+```bash
+grep -l '^packet map_chunk' schemas/versions/common/*.bps
+```
 
 | Protocol | Releases | File | Routes | Source (`data/minecraft-data/`) |
 | --- | --- | --- | --- | --- |
@@ -109,13 +119,19 @@ A packet whose name exists in several states or directions is suffixed `_<state>
 ## Regenerate and check
 
 ```bash
-bpsc import-versions            # rewrite schemas/versions/*.bps from manifest.json + data/
+bpsc import-versions            # rewrite schemas/versions/*.bps + common/ from manifest.json + data/
 bpsc import-versions --check    # exit 3 listing any committed file that differs (also a cargo test)
 bpsc import-protodef data/minecraft-data/pc/1.20/protocol.json --protocol 763 --release 1.20.1 | less
 ```
 
 Every generated file is parsed and run through a name-flow lint at import time: each identifier an
 expression uses must be bound by an earlier field, or the import fails with the packet and the name.
+
+The sharing: 39 roots and 164 shared files, 8 881 declarations (declaration + everything it
+references) kept as 1 011 — 44% of the 2.32 MB the self-contained files took. For every version,
+the merged schema from the root is proven equal, declaration by declaration, to the single-file
+rendering (`shared_layout_means_what_the_single_file_means` in `test_versions.rs`), and the decoded
+dumps of 7 271 pinned oracle packets are byte-identical before and after.
 
 ## Verification
 
