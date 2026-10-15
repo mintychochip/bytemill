@@ -44,7 +44,12 @@ pub fn lower(resolved: &ResolvedSchema) -> BpsResult<IrSchema> {
     lower_enums(resolved, &mut ir)?;
     lower_records(resolved, &mut ir)?;
     for pkt in resolved.packets.values() {
-        install_record(&pkt.name, &[], &pkt.items, resolved, &mut ir)?;
+        let key = if ir.decode.contains_key(&pkt.name) {
+            format!("packet:{}", pkt.name)
+        } else {
+            pkt.name.clone()
+        };
+        install_record(&key, &[], &pkt.items, resolved, &mut ir)?;
     }
     lower_frames(resolved, &mut ir)?;
     Ok(ir)
@@ -700,11 +705,17 @@ fn lower_frames(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
         }
     }
     for (route, packet) in &resolved.routes {
+        let prefixed = format!("packet:{}", packet.name);
+        let key = if ir.decode.contains_key(&prefixed) {
+            prefixed
+        } else {
+            packet.name.clone()
+        };
         ir.routes.push(Route {
             state: route.state.clone(),
             direction: route.direction.clone(),
             packet_id: route.packet_id,
-            packet: TypeId(packet.name.clone()),
+            packet: TypeId(key),
             frame: route.frame.clone().unwrap_or_else(|| "default".into()),
         });
     }
@@ -720,7 +731,7 @@ fn repeat_stmt(
     let elem = if decode {
         decode_field("__elem", &wf.type_ref, resolved, owner)?
     } else {
-        encode_element(&wf.type_ref, resolved, owner)?
+        encode_element(&wf.type_ref, "__elem", resolved, owner)?
     };
     let expr = rep.expr.clone().unwrap_or(Expr::Int(0));
     Ok(match rep.mode {
@@ -741,18 +752,23 @@ fn repeat_stmt(
     })
 }
 
-fn encode_element(ty: &FieldType, resolved: &ResolvedSchema, owner: &str) -> BpsResult<Vec<Stmt>> {
+fn encode_element(
+    ty: &FieldType,
+    dst: &str,
+    resolved: &ResolvedSchema,
+    owner: &str,
+) -> BpsResult<Vec<Stmt>> {
     match ty {
         FieldType::Ref(r) => Ok(vec![Stmt::CallEncode {
             callee: TypeId(r.name.clone()),
             args: call_args(resolved, r, owner)?,
-            value: Expr::Ident("__elem".into()),
+            value: Expr::Ident(dst.to_string()),
         }]),
         FieldType::Block(block) => Ok(vec![Stmt::Block {
             body: lower_items(&block.items, false, resolved, owner)?,
-            dst: "__elem".into(),
+            dst: dst.to_string(),
         }]),
-        FieldType::Match(mt) => Ok(vec![typed_match("__elem", mt, false, resolved, owner)?]),
+        FieldType::Match(mt) => Ok(vec![typed_match(dst, mt, false, resolved, owner)?]),
     }
 }
 
@@ -769,13 +785,7 @@ fn typed_match(
         let body = match &arm.type_ref {
             None => Vec::new(),
             Some(ty) if decode => decode_field(dst, ty, resolved, owner)?,
-            Some(ty) => encode_element(ty, resolved, owner)?,
-        };
-        // encode_element writes `__elem`, but a match field's value is the field itself.
-        let body = if decode {
-            body
-        } else {
-            rewrite_elem_value(&body, dst)
+            Some(ty) => encode_element(ty, dst, resolved, owner)?,
         };
         match arm_tags(arm)? {
             None => default = Some(body),
@@ -789,23 +799,7 @@ fn typed_match(
     })
 }
 
-fn rewrite_elem_value(stmts: &[Stmt], dst: &str) -> Vec<Stmt> {
-    stmts
-        .iter()
-        .map(|stmt| match stmt {
-            Stmt::CallEncode {
-                callee,
-                args,
-                value: Expr::Ident(n),
-            } if *n == "__elem" => Stmt::CallEncode {
-                callee: callee.clone(),
-                args: args.clone(),
-                value: Expr::Ident(dst.to_string()),
-            },
-            other => other.clone(),
-        })
-        .collect()
-}
+
 
 fn stmt_match(
     mt: &crate::ast::MatchType,

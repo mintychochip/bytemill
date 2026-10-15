@@ -185,21 +185,19 @@ fn run_decode(
                     )));
                 }
             }
-            Stmt::If {
-                cond,
-                then_body,
-                else_body,
-                fallback,
-            } => {
-                let branch = match eval_expr(cond, env) {
-                    Ok(v) if v.truthy() => then_body,
-                    Ok(_) => else_body,
-                    Err(_) if *fallback && cur.remaining() == 0 => continue,
-                    Err(_) if *fallback => then_body,
+            Stmt::If { cond, then_body, else_body, fallback } => {
+                let want = match eval_expr(cond, env) {
+                    Ok(v) => v.truthy(),
+                    Err(_) if *fallback => true,
                     Err(e) => return Err(e),
                 };
+                if *fallback && want && cur.remaining() == 0 {
+                    continue;
+                }
+                let branch = if want { then_body } else { else_body };
                 run_decode(ir, branch, env, out, cur)?;
             }
+
             Stmt::Read { dst, op } => {
                 let v = read_op(op, env, cur)?;
                 bind_out(env, out, dst, v);

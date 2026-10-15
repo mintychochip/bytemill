@@ -29,6 +29,7 @@ fn sign_extend_picks_the_smallest_signed_class() {
 fn comparison_is_bool_and_unsigned_or_is_u16() {
     let env = locals(&[("b0", Storage::U8), ("b1", Storage::U8), ("raw", Storage::U8)]);
     assert_eq!(storage_of(&parse_expr("raw != 0"), &env), Storage::Bool);
+    assert_eq!(storage_of(&parse_expr("false"), &env), Storage::Bool);
     assert_eq!(storage_of(&parse_expr("(b0 << 8) | b1"), &env), Storage::U16);
 }
 

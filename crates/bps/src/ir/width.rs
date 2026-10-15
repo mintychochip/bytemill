@@ -22,9 +22,10 @@ pub enum Storage {
     Str,
     Bytes,
 }
-
-/// Classify `expr`. `locals` holds names already classified (`b0` → [`Storage::U8`]).
 pub fn storage_of(expr: &Expr, locals: &HashMap<String, Storage>) -> Storage {
+    if matches!(expr, Expr::Bool(_)) {
+        return Storage::Bool;
+    }
     if is_comparison(expr) {
         return Storage::Bool;
     }
