@@ -461,7 +461,7 @@ struct Compiler<'a> {
     done: BTreeSet<String>,
 }
 
-impl<'a> Compiler<'a> {
+impl Compiler<'_> {
     /// The fn that skips `name`, queueing its compilation.
     fn want(&mut self, name: &str) -> String {
         let target = alias_target(self.resolved, name);
@@ -557,7 +557,7 @@ fn kind_name(e: &Expr) -> &'static str {
     }
 }
 
-impl<'c, 'a> Body<'c, 'a> {
+impl Body<'_, '_> {
     // -- helpers ----------------------------------------------------------------
 
     fn emit(&mut self, indent: usize, text: &str) {

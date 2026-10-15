@@ -2,7 +2,8 @@
 //!
 //! Argument handling is hand-rolled to match the Python `argparse` surface the
 //! tests exercise: the same subcommands, the same flags, exit code 2 for usage
-//! errors and 3 for `BpsError`/`ShapeError`.
+//! errors and 3 for `BpsError`/`ShapeError`. The Python CLI has no `import-versions`,
+//! `import-protodef` or `wire-check`; those are Rust-only.
 
 use crate::analyze::analyze;
 use crate::emit_json::schema_to_json;
@@ -139,12 +140,132 @@ fn take_switch(argv: &mut Vec<String>, name: &str) -> bool {
     found
 }
 
+/// `bpsc import-versions` and `bpsc import-protodef`: minecraft-data's ProtoDef descriptions
+/// as BPS schemas (see `crate::protodef`). Rust-only; the Python CLI has no importer.
+fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
+    use crate::protodef::{import, import_versions, FileSpec, Protocol};
+    let root = Path::new(PROTOC_ROOT);
+    if cmd == "import-versions" {
+        let manifest = take_flag(&mut argv, &["--manifest"])?
+            .map_or_else(|| root.join("schemas/versions/manifest.json"), PathBuf::from);
+        let data = take_flag(&mut argv, &["--data"])?
+            .map_or_else(|| root.join("data/minecraft-data"), PathBuf::from);
+        let out = take_flag(&mut argv, &["--out"])?
+            .map_or_else(|| root.join("schemas/versions"), PathBuf::from);
+        let only = match take_flag(&mut argv, &["--only"])? {
+            Some(p) => Some(p.parse::<u32>().map_err(|_| format!("--only: {p:?} is not a protocol number"))?),
+            None => None,
+        };
+        let check = take_switch(&mut argv, "--check");
+        if let Some(extra) = argv.first() {
+            return Err(format!("import-versions: unrecognized argument {extra}"));
+        }
+        let report = match import_versions(&manifest, &data, &out, check, only) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{e}");
+                return Ok(3);
+            }
+        };
+        if check {
+            if report.stale.is_empty() {
+                println!("ok: {} schemas up to date", report.unchanged);
+                return Ok(0);
+            }
+            for p in &report.stale {
+                eprintln!("stale: {}", p.display());
+            }
+            return Ok(3);
+        }
+        println!("wrote {}, unchanged {}", report.written.len(), report.unchanged);
+        return Ok(0);
+    }
+    // import-protodef <protocol.json> --protocol N --release V [--also V]... [--patches FILE] [--out FILE]
+    let protocol = take_flag(&mut argv, &["--protocol"])?
+        .ok_or("import-protodef: the following arguments are required: --protocol")?
+        .parse::<u32>()
+        .map_err(|_| "import-protodef: --protocol is not a number".to_string())?;
+    let release = take_flag(&mut argv, &["--release"])?
+        .ok_or("import-protodef: the following arguments are required: --release")?;
+    let mut also = Vec::new();
+    while let Some(a) = take_flag(&mut argv, &["--also"])? {
+        also.push(a);
+    }
+    let out = take_flag(&mut argv, &["--out"])?;
+    let patches = take_flag(&mut argv, &["--patches"])?;
+    let [path] = argv.as_slice() else {
+        return Err("import-protodef: expected exactly one protocol.json".to_string());
+    };
+    let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+    let result = Protocol::from_json(&text).and_then(|mut proto| {
+        let mut reasons = Vec::new();
+        if let Some(f) = &patches {
+            let patch_text = std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?;
+            reasons = proto.apply_patches(&patch_text)?;
+        }
+        let spec = FileSpec { protocol, release: &release, also: &also, source: path, patches: &reasons, note: None };
+        import(&proto, &spec)
+    });
+    match result {
+        Ok(src) => {
+            match out {
+                Some(f) => std::fs::write(&f, src).map_err(|e| format!("{f}: {e}"))?,
+                None => print!("{src}"),
+            }
+            Ok(0)
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            Ok(3)
+        }
+    }
+}
+
+/// `bpsc wire-check <schema>... [--file vectors.jsonl] [--dump decoded.jsonl]`: every vector
+/// (stdin by default) must decode strictly and re-encode to the same bytes; `--dump` writes the
+/// decoded values. See `crate::wire`.
+fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
+    let file = take_flag(&mut argv, &["--file"])?;
+    let dump = take_flag(&mut argv, &["--dump"])?;
+    let text = match file {
+        Some(f) => std::fs::read_to_string(&f).map_err(|e| format!("{f}: {e}"))?,
+        None => {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf).map_err(|e| format!("stdin: {e}"))?;
+            buf
+        }
+    };
+    let resolved = match load_and_analyze(&argv) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            return Ok(3);
+        }
+    };
+    let report = crate::wire::check_vectors(&resolved, &text, dump.is_some())?;
+    if let Some(path) = dump {
+        std::fs::write(&path, report.decoded.join("\n")).map_err(|e| format!("{path}: {e}"))?;
+    }
+    for f in report.failures.iter().take(50) {
+        eprintln!("line {}: {}: {}", f.line, f.packet, f.reason);
+    }
+    println!("checked {}, failed {}", report.checked, report.failures.len());
+    Ok(if report.failures.is_empty() { 0 } else { 3 })
+}
+
 pub fn main(argv: &[String]) -> Result<i32, String> {
     let mut argv = argv.to_vec();
     if argv.is_empty() {
         return Err("usage: bpsc <command> ...".to_string());
     }
     let cmd = argv.remove(0);
+    if cmd == "import-versions" || cmd == "import-protodef" {
+        return import_cli(&cmd, argv);
+    }
+    if cmd == "wire-check" {
+        return wire_check_cli(argv);
+    }
     let mut a = Args::default();
     let mut shapes_cmd: Option<String> = None;
 
@@ -235,7 +356,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
         }
         _ => {
             return Err(format!(
-                "argument cmd: invalid choice: {cmd:?} (choose from 'check', 'dump-json', 'routes', 'decode', 'encode', 'emit', 'shapes')"
+                "argument cmd: invalid choice: {cmd:?} (choose from 'check', 'dump-json', 'routes', 'decode', 'encode', 'emit', 'shapes', 'import-versions', 'import-protodef', 'wire-check')"
             ));
         }
     }

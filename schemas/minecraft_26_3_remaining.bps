@@ -756,7 +756,7 @@ encoding commands_node = {
     if flags & 0x08 != 0 {
         redirect_node: varint
     }
-    if node_type != 0 {
+    if node_type == 1 || node_type == 2 {
         name: string(32767)
     }
     if node_type == 2 {

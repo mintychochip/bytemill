@@ -63,3 +63,33 @@ fn a_float_beyond_i128_wraps_like_pythons_unbounded_int() {
         assert_eq!(encode(value), want.to_be_bytes(), "{value:e}");
     }
 }
+
+#[test]
+fn a_json_integer_beyond_i128_keeps_its_low_bits() {
+    // Python's `json.loads` keeps the whole integer and a width-masked encode sees its low bits.
+    // Each row is (literal, Python's `int % 2**128` as a signed value, the `keep_alive` bytes).
+    // Rounding the literal to a float, as the parser once did, encoded zeros for all of them.
+    let cases: [(&str, i128, u64); 8] = [
+        // 2**200 + 5
+        ("1606938044258990275541962092341162602522202993782792835301381", 5, 5),
+        ("-1606938044258990275541962092341162602522202993782792835301381", -5, 0xffff_ffff_ffff_fffb),
+        // 2**128 and 2**128 + 7
+        ("340282366920938463463374607431768211456", 0, 0),
+        ("340282366920938463463374607431768211463", 7, 7),
+        // 10**40
+        ("10000000000000000000000000000000000000000", 131811359292784559562136384478721867776, 0xb9f5_6100_0000_0000),
+        ("-10000000000000000000000000000000000000000", -131811359292784559562136384478721867776, 0x460a_9f00_0000_0000),
+        // 2**127, the first integer that does not fit
+        ("170141183460469231731687303715884105728", i128::MIN, 0),
+        // 2**255 + 1
+        ("57896044618658097711785492504343953926634992332820282019728792003956564819969", 1, 1),
+    ];
+    let resolved = common::load_minecraft().unwrap();
+    for (literal, want_value, want_bytes) in cases {
+        assert_eq!(bps::json::loads(literal).unwrap(), Value::Int(want_value), "{literal}");
+        let object = bps::json::loads(&format!("{{\"keep_alive_id\": {literal}}}")).unwrap();
+        let Value::Map(fields) = object else { panic!("not an object: {object:?}") };
+        let bytes = encode_packet(&resolved, "keep_alive", &fields).unwrap();
+        assert_eq!(bytes, want_bytes.to_be_bytes(), "{literal}");
+    }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "protodef-oracle",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Differential oracle: compiles minecraft-data protocol.json exactly like node-minecraft-protocol and exchanges raw packet bytes with the BPS Rust tools over JSON Lines.",
+  "license": "MIT",
+  "bin": {
+    "protodef-oracle": "oracle.js"
+  },
+  "scripts": {
+    "test": "node oracle.js --help"
+  },
+  "dependencies": {
+    "prismarine-nbt": "2.8.0",
+    "protodef": "1.19.0",
+    "uuid-1345": "1.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

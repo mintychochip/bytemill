@@ -128,6 +128,9 @@ encoding nbt_payload = {
   `std/varint.bps` and `minecraft_core.bps`; `minecraft_26_3_wiki.bps` (the routes)
   imports every packet file, so it is the one root that loads the whole protocol
 
+- `schemas/versions/` — protocols 393 (1.13) to 777 (26.3), one self-contained file each, generated
+  from minecraft-data's ProtoDef descriptions by `bpsc import-versions` (see its README)
+
 Authoring rules and the per-packet workflow live in `docs/AUTHORING_GUIDE.md`.
 
 Run: `bpsc check schemas/minecraft_26_3_wiki.bps`

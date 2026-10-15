@@ -2,7 +2,7 @@
 
 Describe arbitrary binary wire formats (varints, bit-packed fields, tagged unions, stateful
 packet routing) that protobuf cannot express. Reference target: **Minecraft Java 26.3 /
-protocol 777**.
+protocol 777**; every release protocol from 1.13 (393) on is in `schemas/versions/`.
 
 ## DSL structure (three layers)
 
@@ -97,10 +97,29 @@ cargo run -q -p bps --bin scrape_wiki_routes -- -o schemas/minecraft_26_3_wiki.b
 The generated file imports `std/varint.bps` (its frame uses it) and every `--manual-replace`
 file that declares packets.
 
+## Protocol versions (1.13 → 26.3)
+
+`schemas/versions/` has one schema per Minecraft Java protocol number from 393 (1.13) to 777 (26.3):
+39 protocols, 51 release versions, every state and direction, every packet decoded. They are
+generated from PrismarineJS minecraft-data's ProtoDef descriptions (vendored in
+`data/minecraft-data/`) by `bpsc import-versions`, corrected where the decompiled vanilla server
+disagrees (26.1 to 26.3, `schemas/versions/patches/`), and checked against an independent ProtoDef
+implementation. Versions before 26.1 are as the community data publishes them. See
+`schemas/versions/README.md` for the version table, the value shape, the verification record and the
+known limits.
+
+```bash
+bpsc check schemas/versions/v1_20_1.bps            # protocol 763: 1.20 and 1.20.1
+bpsc routes schemas/versions/v26_3.bps             # 261 routes
+bpsc import-versions --check                       # the committed files are what the importer writes
+scripts/verify_versions.py                         # ProtoDef oracle, both directions (needs Node)
+scripts/python_parity_versions.py                  # Python reference vs Rust on every version
+```
+
 ## Quick start
 
 ```bash
-scripts/bps_cargo.sh test --no-fail-fast    # 256 tests, memory-capped (see below); the rstom tests read ../rstom-bps
+scripts/bps_cargo.sh test --no-fail-fast    # 281 tests, memory-capped (see below); the rstom tests read ../rstom-bps
 scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings   # the lint gate: prints nothing, exits 0
 cargo build --release                       # once: target/release/bpsc (the examples below call it `bpsc`)
 ROOT=schemas/minecraft_26_3_wiki.bps             # imports every other schema file

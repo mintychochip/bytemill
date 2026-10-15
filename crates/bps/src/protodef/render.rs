@@ -1,0 +1,215 @@
+//! Assemble one generated schema file: header, prelude, named types, packets, protocol block.
+
+use std::collections::HashMap;
+
+use super::ir::{EncBody, Printer};
+use super::lower::{EncOut, Importer, PacketOut};
+use super::model::{Direction, Protocol, Res};
+use super::names;
+use super::prelude;
+
+/// What a generated file declares about itself.
+pub struct FileSpec<'a> {
+    pub protocol: u32,
+    /// The release the file is named after (the newest one sharing the protocol number).
+    pub release: &'a str,
+    /// The other releases with the same protocol number.
+    pub also: &'a [String],
+    /// Where the protocol description came from, for the header.
+    pub source: &'a str,
+    /// The reasons of the patches applied to the source (see `Protocol::apply_patches`).
+    pub patches: &'a [String],
+    pub note: Option<&'a str>,
+}
+
+/// `1.20.1` -> `v1_20_1`.
+pub fn version_ident(release: &str) -> String {
+    format!("v{}", release.replace(['.', '-'], "_"))
+}
+
+struct Route {
+    state: String,
+    direction: Direction,
+    id: i128,
+    packet: String,
+}
+
+fn print_encoding(name: &str, e: &EncOut) -> Res<String> {
+    let names = e
+        .arena
+        .assign_names()
+        .map_err(|m| format!("type {name}: {m}"))?;
+    let mut p = Printer::new(&names);
+    match &e.body {
+        EncBody::Alias(a) => p.raw(&format!("encoding {name} = {a}\n")),
+        EncBody::Block(b) if b.items.is_empty() => p.raw(&format!("encoding {name} = {{ }}\n")),
+        EncBody::Block(b) => {
+            p.raw(&format!("encoding {name} = {{\n"));
+            p.items(&b.items, 1);
+            p.raw("}\n");
+        }
+    }
+    Ok(p.finish())
+}
+
+fn print_packet(name: &str, pk: &PacketOut) -> Res<String> {
+    let names = pk
+        .arena
+        .assign_names()
+        .map_err(|m| format!("packet {name}: {m}"))?;
+    let mut p = Printer::new(&names);
+    if pk.block.items.is_empty() {
+        p.raw(&format!("packet {name} {{ }}\n"));
+    } else {
+        p.raw(&format!("packet {name} {{\n"));
+        p.items(&pk.block.items, 1);
+        p.raw("}\n");
+    }
+    Ok(p.finish())
+}
+
+/// Packet names: the mapper's name, suffixed with state and direction wherever the same name is
+/// declared in more than one scope.
+fn packet_names(proto: &Protocol) -> Res<HashMap<(usize, usize), String>> {
+    let mut uses: HashMap<String, usize> = HashMap::new();
+    for scope in &proto.scopes {
+        for pk in &scope.packets {
+            *uses.entry(names::snake(&pk.name)).or_default() += 1;
+        }
+    }
+    let mut out = HashMap::new();
+    let mut seen: HashMap<String, String> = HashMap::new();
+    for (si, scope) in proto.scopes.iter().enumerate() {
+        for (pi, pk) in scope.packets.iter().enumerate() {
+            let base = names::snake(&pk.name);
+            let name = if uses[&base] > 1 {
+                format!("{base}_{}_{}", scope.state, scope.direction.as_str())
+            } else {
+                base
+            };
+            let name = names::unique(&name, |_| false);
+            if let Some(prev) = seen.insert(
+                name.clone(),
+                format!("{}.{} 0x{:x}", scope.state, scope.direction.as_str(), pk.id),
+            ) {
+                return Err(format!(
+                    "packet name {name:?} is used by both {prev} and {}.{} 0x{:x}",
+                    scope.state,
+                    scope.direction.as_str(),
+                    pk.id
+                ));
+            }
+            out.insert((si, pi), name);
+        }
+    }
+    Ok(out)
+}
+
+/// The BPS source of one protocol.
+pub fn import(proto: &Protocol, spec: &FileSpec<'_>) -> Res<String> {
+    let mut imp = Importer::new(proto);
+    let pkt_names = packet_names(proto)?;
+    let mut packets: Vec<(String, PacketOut)> = Vec::new();
+    let mut routes: Vec<Route> = Vec::new();
+    for (si, scope) in proto.scopes.iter().enumerate() {
+        for (pi, pk) in scope.packets.iter().enumerate() {
+            let name = pkt_names[&(si, pi)].clone();
+            let out = imp.lower_packet(scope, &name, pk.body.as_ref())?;
+            packets.push((name.clone(), out));
+            routes.push(Route {
+                state: scope.state.clone(),
+                direction: scope.direction,
+                id: pk.id,
+                packet: name,
+            });
+        }
+    }
+    packets.sort_by(|a, b| a.0.cmp(&b.0));
+    routes.sort_by(|a, b| {
+        (a.state.as_str(), a.direction, a.id).cmp(&(b.state.as_str(), b.direction, b.id))
+    });
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "// Minecraft Java Edition {} (protocol {}).\n",
+        spec.release, spec.protocol
+    ));
+    if !spec.also.is_empty() {
+        out.push_str(&format!(
+            "// The same protocol number is used by {}.\n",
+            spec.also.join(", ")
+        ));
+    }
+    out.push_str(&format!(
+        "// GENERATED by `bpsc import-versions` from {} (PrismarineJS/minecraft-data).\n",
+        spec.source
+    ));
+    out.push_str(
+        "// Do not edit: change the importer or schemas/versions/manifest.json and regenerate.\n",
+    );
+    if !spec.patches.is_empty() {
+        out.push_str(&format!(
+            "// Corrected where the source is wrong ({} patches):\n",
+            spec.patches.len()
+        ));
+        for reason in spec.patches {
+            out.push_str(&format!("//   - {}\n", reason.replace('\n', " ")));
+        }
+    }
+    if let Some(note) = spec.note {
+        for line in note.lines() {
+            out.push_str(&format!("// {line}\n"));
+        }
+    }
+    out.push_str("\nimport \"../std/integers.bps\"\nimport \"../std/varint.bps\"\n\n");
+    let pre = prelude::text(&imp.prelude);
+    if !pre.is_empty() {
+        out.push_str(&pre);
+    }
+    if !imp.encodings.is_empty() {
+        out.push_str("// --- named types ---\n\n");
+    }
+    for (name, enc) in &imp.encodings {
+        out.push_str(&print_encoding(name, enc)?);
+        out.push('\n');
+    }
+    out.push_str("// --- packets ---\n\n");
+    let route_order: HashMap<&str, usize> = routes
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.packet.as_str(), i))
+        .collect();
+    packets.sort_by_key(|(n, _)| route_order[n.as_str()]);
+    for (name, pk) in &packets {
+        out.push_str(&print_packet(name, pk)?);
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "protocol minecraft @ {} {{\n    id = {}\n",
+        version_ident(spec.release),
+        spec.protocol
+    ));
+    out.push_str("    frame default {\n        length: varint\n        id: varint\n        payload: rest\n    }\n\n");
+    for r in &routes {
+        out.push_str(&format!(
+            "    route {}.{} 0x{:02x} => {}\n",
+            r.state,
+            r.direction.as_str(),
+            r.id,
+            r.packet
+        ));
+    }
+    out.push_str("}\n");
+    let schema =
+        crate::parse(&out).map_err(|e| format!("the generated source does not parse: {e}"))?;
+    let problems = super::lint::lint(&schema);
+    if !problems.is_empty() {
+        let shown: Vec<&str> = problems.iter().take(8).map(String::as_str).collect();
+        return Err(format!(
+            "{} unbound identifiers in the generated source:\n  {}",
+            problems.len(),
+            shown.join("\n  ")
+        ));
+    }
+    Ok(out)
+}

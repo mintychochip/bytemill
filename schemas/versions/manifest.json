@@ -1,0 +1,242 @@
+{
+  "format": 1,
+  "versions": [
+    {
+      "protocol": 393,
+      "release": "1.13",
+      "data": "pc/1.13"
+    },
+    {
+      "protocol": 401,
+      "release": "1.13.1",
+      "data": "pc/1.13.1"
+    },
+    {
+      "protocol": 404,
+      "release": "1.13.2",
+      "data": "pc/1.13.2"
+    },
+    {
+      "protocol": 477,
+      "release": "1.14",
+      "data": "pc/1.14"
+    },
+    {
+      "protocol": 480,
+      "release": "1.14.1",
+      "data": "pc/1.14.1"
+    },
+    {
+      "protocol": 485,
+      "release": "1.14.2",
+      "data": "pc/1.14.1",
+      "note": "minecraft-data has no description of its own for protocol 485. It uses the one of 1.14.1 (480).\nThe next one, 1.14.3 (490), adds only `can_restock` to the trade list; that field arrived with the\n1.14.3 pre-releases (486-490), so 485 is taken to predate it [inference]."
+    },
+    {
+      "protocol": 490,
+      "release": "1.14.3",
+      "data": "pc/1.14.3"
+    },
+    {
+      "protocol": 498,
+      "release": "1.14.4",
+      "data": "pc/1.14.4"
+    },
+    {
+      "protocol": 573,
+      "release": "1.15",
+      "data": "pc/1.15"
+    },
+    {
+      "protocol": 575,
+      "release": "1.15.1",
+      "data": "pc/1.15.1"
+    },
+    {
+      "protocol": 578,
+      "release": "1.15.2",
+      "data": "pc/1.15.2"
+    },
+    {
+      "protocol": 735,
+      "release": "1.16",
+      "data": "pc/1.16"
+    },
+    {
+      "protocol": 736,
+      "release": "1.16.1",
+      "data": "pc/1.16.1"
+    },
+    {
+      "protocol": 751,
+      "release": "1.16.2",
+      "data": "pc/1.16.2"
+    },
+    {
+      "protocol": 753,
+      "release": "1.16.3",
+      "data": "pc/1.16.2",
+      "note": "minecraft-data describes 1.16.2 to 1.16.5 with one file (pc/1.16.2)."
+    },
+    {
+      "protocol": 754,
+      "release": "1.16.5",
+      "also": [
+        "1.16.4"
+      ],
+      "data": "pc/1.16.2",
+      "note": "minecraft-data describes 1.16.2 to 1.16.5 with one file (pc/1.16.2)."
+    },
+    {
+      "protocol": 755,
+      "release": "1.17",
+      "data": "pc/1.17"
+    },
+    {
+      "protocol": 756,
+      "release": "1.17.1",
+      "data": "pc/1.17.1"
+    },
+    {
+      "protocol": 757,
+      "release": "1.18.1",
+      "also": [
+        "1.18"
+      ],
+      "data": "pc/1.18"
+    },
+    {
+      "protocol": 758,
+      "release": "1.18.2",
+      "data": "pc/1.18.2"
+    },
+    {
+      "protocol": 759,
+      "release": "1.19",
+      "data": "pc/1.19"
+    },
+    {
+      "protocol": 760,
+      "release": "1.19.2",
+      "also": [
+        "1.19.1"
+      ],
+      "data": "pc/1.19.2"
+    },
+    {
+      "protocol": 761,
+      "release": "1.19.3",
+      "data": "pc/1.19.3"
+    },
+    {
+      "protocol": 762,
+      "release": "1.19.4",
+      "data": "pc/1.19.4"
+    },
+    {
+      "protocol": 763,
+      "release": "1.20.1",
+      "also": [
+        "1.20"
+      ],
+      "data": "pc/1.20"
+    },
+    {
+      "protocol": 764,
+      "release": "1.20.2",
+      "data": "pc/1.20.2"
+    },
+    {
+      "protocol": 765,
+      "release": "1.20.4",
+      "also": [
+        "1.20.3"
+      ],
+      "data": "pc/1.20.3"
+    },
+    {
+      "protocol": 766,
+      "release": "1.20.6",
+      "also": [
+        "1.20.5"
+      ],
+      "data": "pc/1.20.5"
+    },
+    {
+      "protocol": 767,
+      "release": "1.21.1",
+      "also": [
+        "1.21"
+      ],
+      "data": "pc/1.21.1"
+    },
+    {
+      "protocol": 768,
+      "release": "1.21.3",
+      "also": [
+        "1.21.2"
+      ],
+      "data": "pc/1.21.3"
+    },
+    {
+      "protocol": 769,
+      "release": "1.21.4",
+      "data": "pc/1.21.4"
+    },
+    {
+      "protocol": 770,
+      "release": "1.21.5",
+      "data": "pc/1.21.5"
+    },
+    {
+      "protocol": 771,
+      "release": "1.21.6",
+      "data": "pc/1.21.6"
+    },
+    {
+      "protocol": 772,
+      "release": "1.21.8",
+      "also": [
+        "1.21.7"
+      ],
+      "data": "pc/1.21.8"
+    },
+    {
+      "protocol": 773,
+      "release": "1.21.10",
+      "also": [
+        "1.21.9"
+      ],
+      "data": "pc/1.21.9"
+    },
+    {
+      "protocol": 774,
+      "release": "1.21.11",
+      "data": "pc/1.21.11"
+    },
+    {
+      "protocol": 775,
+      "release": "26.1.2",
+      "also": [
+        "26.1",
+        "26.1.1"
+      ],
+      "data": "pc/26.1",
+      "patches": "patches/26.1.json"
+    },
+    {
+      "protocol": 776,
+      "release": "26.2",
+      "data": "pc/26.2",
+      "patches": "patches/26.2.json",
+      "note": "minecraft-data has no 26.2 on master. This is the head of pull request #1333 (a resync of the 26.2 branch), chosen over the\nbranch of #1298 after both were compared with the decompiled vanilla 26.2 server: both have the same, vanilla-correct packet ids, and\n#1298 only adds wire-neutral differences from 26.1. The patches fix the places where the description disagrees with vanilla."
+    },
+    {
+      "protocol": 777,
+      "release": "26.3",
+      "data": "pc/26.3",
+      "note": "minecraft-data has no 26.3 on master; this is pull request #1301. The hand-written, vanilla-derived\nschemas/minecraft_26_3*.bps stay authoritative for 26.3; this file exists so the set is uniform.",
+      "patches": "patches/26.3.json"
+    }
+  ]
+}

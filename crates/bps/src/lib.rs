@@ -23,6 +23,7 @@ pub mod ordmap;
 pub mod parser;
 pub mod pins;
 pub mod primitives;
+pub mod protodef;
 pub mod refs;
 pub mod shapes;
 pub mod synth;
@@ -30,6 +31,8 @@ pub mod text;
 pub mod tree_packet;
 pub mod value;
 pub mod wiki_routes;
+pub mod wire;
+pub mod wiregen;
 
 pub use analyze::analyze;
 pub use ast::{BlockItem, ResolvedSchema};

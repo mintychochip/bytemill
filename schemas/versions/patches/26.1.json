@@ -1,0 +1,567 @@
+{
+  "patches": [
+    {
+      "reason": "move_minecart: vanilla 26.1 NewMinecartBehavior.MinecartStep writes position and movement as Vec3 (three doubles each) and both rotations as ROTATION_BYTE; the description has floats (net/minecraft/world/entity/vehicle/minecart/NewMinecartBehavior.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_move_minecart": [
+          "container",
+          [
+            {
+              "name": "entityId",
+              "type": "varint"
+            },
+            {
+              "name": "steps",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": [
+                    "container",
+                    [
+                      {
+                        "name": "position",
+                        "type": "vec3f64"
+                      },
+                      {
+                        "name": "velocity",
+                        "type": "vec3f64"
+                      },
+                      {
+                        "name": "yaw",
+                        "type": "i8"
+                      },
+                      {
+                        "name": "pitch",
+                        "type": "i8"
+                      },
+                      {
+                        "name": "weight",
+                        "type": "f32"
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "custom_click_action: vanilla 26.1 ServerboundCustomClickActionPacket sends the id and then the payload length-prefixed (a VarInt byte count, then an optional tag whose absent form is a lone TAG_End), not a presence boolean (net/minecraft/network/protocol/common/ServerboundCustomClickActionPacket.java)",
+      "scope": "global",
+      "types": {
+        "packet_common_custom_click_action": [
+          "container",
+          [
+            {
+              "name": "id",
+              "type": "string"
+            },
+            {
+              "name": "payloadSize",
+              "type": "varint"
+            },
+            {
+              "name": "nbt",
+              "type": "anonOptionalNbt"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "initialize_world_border: vanilla 26.1 ClientboundInitializeBorderPacket reads/writes lerpTime with readVarLong/writeVarLong (long lerpTime), not VarInt; the description labels speed varint (net/minecraft/network/protocol/game/ClientboundInitializeBorderPacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_initialize_world_border": [
+          "container",
+          [
+            {
+              "name": "x",
+              "type": "f64"
+            },
+            {
+              "name": "z",
+              "type": "f64"
+            },
+            {
+              "name": "oldDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "newDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "speed",
+              "type": "varlong"
+            },
+            {
+              "name": "portalTeleportBoundary",
+              "type": "varint"
+            },
+            {
+              "name": "warningBlocks",
+              "type": "varint"
+            },
+            {
+              "name": "warningTime",
+              "type": "varint"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "world_border_lerp_size: vanilla 26.1 ClientboundSetBorderLerpSizePacket reads/writes the lerp time with readVarLong/writeVarLong (long lerpTime), not VarInt; the description labels speed varint (net/minecraft/network/protocol/game/ClientboundSetBorderLerpSizePacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_world_border_lerp_size": [
+          "container",
+          [
+            {
+              "name": "oldDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "newDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "speed",
+              "type": "varlong"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "multi_block_change: vanilla 26.1 ClientboundSectionBlocksUpdatePacket reads/writes each packed block-change entry with readVarLong/writeVarLong (block-state id << 12 | 12-bit section-relative pos), not VarInt; the description labels the records array varint (net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_multi_block_change": [
+          "container",
+          [
+            {
+              "name": "chunkCoordinates",
+              "type": [
+                "bitfield",
+                [
+                  {
+                    "name": "x",
+                    "size": 22,
+                    "signed": true
+                  },
+                  {
+                    "name": "z",
+                    "size": 22,
+                    "signed": true
+                  },
+                  {
+                    "name": "y",
+                    "size": 20,
+                    "signed": true
+                  }
+                ]
+              ]
+            },
+            {
+              "name": "records",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": "varlong"
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "player_chat chat decoration parameters: vanilla 26.1 ChatTypeDecoration.Parameter ids are SENDER 0, TARGET 1, CONTENT 2; the description rotates them to content 0, sender 1, target 2 (net/minecraft/network/chat/ChatTypeDecoration.java)",
+      "scope": "play.toClient",
+      "types": {
+        "ChatTypeParameterType": [
+          "mapper",
+          {
+            "type": "varint",
+            "mappings": {
+              "0": "sender",
+              "1": "target",
+              "2": "content"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "reason": "player_info: vanilla 26.1 ClientboundPlayerInfoUpdatePacket Action ids are UPDATE_LIST_ORDER 6 and UPDATE_HAT 7, and UPDATE_LISTED carries a boolean; the description swaps the top two flag bits and types listed as varint (net/minecraft/network/protocol/game/ClientboundPlayerInfoUpdatePacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_player_info": [
+          "container",
+          [
+            {
+              "name": "action",
+              "type": [
+                "bitflags",
+                {
+                  "type": "u8",
+                  "flags": [
+                    "add_player",
+                    "initialize_chat",
+                    "update_game_mode",
+                    "update_listed",
+                    "update_latency",
+                    "update_display_name",
+                    "update_list_order",
+                    "update_hat"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "data",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": [
+                    "container",
+                    [
+                      {
+                        "name": "uuid",
+                        "type": "UUID"
+                      },
+                      {
+                        "name": "player",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/add_player",
+                            "fields": {
+                              "true": "game_profile_name_prop"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "chatSession",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/initialize_chat",
+                            "fields": {
+                              "true": "chat_session"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "gamemode",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_game_mode",
+                            "fields": {
+                              "true": "varint"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "listed",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_listed",
+                            "fields": {
+                              "true": "bool"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "latency",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_latency",
+                            "fields": {
+                              "true": "varint"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "displayName",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_display_name",
+                            "fields": {
+                              "true": [
+                                "option",
+                                "anonymousNbt"
+                              ]
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "listPriority",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_list_order",
+                            "fields": {
+                              "true": "varint"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "showHat",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_hat",
+                            "fields": {
+                              "true": "bool"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "update_structure_block: vanilla 26.1 ServerboundSetStructureBlockPacket carries seed as a VarLong (readVarLong/writeVarLong, long seed) and flags as a raw bitmask byte (1 ignore_entities, 2 show_air, 4 show_bounding_box, 8 strict); the description has seed varint and a u8 enum mapper that misdecodes combined masks (net/minecraft/network/protocol/game/ServerboundSetStructureBlockPacket.java)",
+      "scope": "play.toServer",
+      "types": {
+        "packet_update_structure_block": [
+          "container",
+          [
+            {
+              "name": "location",
+              "type": "position"
+            },
+            {
+              "name": "action",
+              "type": "varint"
+            },
+            {
+              "name": "mode",
+              "type": "varint"
+            },
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "offset_x",
+              "type": "i8"
+            },
+            {
+              "name": "offset_y",
+              "type": "i8"
+            },
+            {
+              "name": "offset_z",
+              "type": "i8"
+            },
+            {
+              "name": "size_x",
+              "type": "i8"
+            },
+            {
+              "name": "size_y",
+              "type": "i8"
+            },
+            {
+              "name": "size_z",
+              "type": "i8"
+            },
+            {
+              "name": "mirror",
+              "type": "varint"
+            },
+            {
+              "name": "rotation",
+              "type": "varint"
+            },
+            {
+              "name": "metadata",
+              "type": "string"
+            },
+            {
+              "name": "integrity",
+              "type": "f32"
+            },
+            {
+              "name": "seed",
+              "type": "varlong"
+            },
+            {
+              "name": "flags",
+              "type": [
+                "bitflags",
+                {
+                  "type": "u8",
+                  "flags": [
+                    "ignore_entities",
+                    "show_air",
+                    "show_bounding_box",
+                    "strict"
+                  ]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "login/respawn SpawnInfo: vanilla 26.1 CommonPlayerSpawnInfo writes gameType and previousGameType as single bytes (previousGameType -1 for none); the description types previousGamemode as u8, losing the -1 (net/minecraft/network/protocol/game/CommonPlayerSpawnInfo.java)",
+      "scope": "play.toClient",
+      "types": {
+        "SpawnInfo": [
+          "container",
+          [
+            {
+              "name": "dimension",
+              "type": "varint"
+            },
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "hashedSeed",
+              "type": "i64"
+            },
+            {
+              "name": "gamemode",
+              "type": [
+                "mapper",
+                {
+                  "type": "varint",
+                  "mappings": {
+                    "0": "survival",
+                    "1": "creative",
+                    "2": "adventure",
+                    "3": "spectator"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "previousGamemode",
+              "type": "optvarint"
+            },
+            {
+              "name": "isDebug",
+              "type": "bool"
+            },
+            {
+              "name": "isFlat",
+              "type": "bool"
+            },
+            {
+              "name": "death",
+              "type": [
+                "option",
+                "GlobalPos"
+              ]
+            },
+            {
+              "name": "portalCooldown",
+              "type": "varint"
+            },
+            {
+              "name": "seaLevel",
+              "type": "varint"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "can_place_on/can_break ItemBlockProperty: vanilla 26.1 RangedMatcher holds two Optional<String> bounds; the description has plain strings (net/minecraft/advancements/criterion/StatePropertiesPredicate.java)",
+      "scope": "global",
+      "types": {
+        "ItemBlockProperty": [
+          "container",
+          [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "isExactMatch",
+              "type": "bool"
+            },
+            {
+              "name": "value",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "isExactMatch",
+                  "fields": {
+                    "true": [
+                      "container",
+                      [
+                        {
+                          "name": "exactValue",
+                          "type": "string"
+                        }
+                      ]
+                    ],
+                    "false": [
+                      "container",
+                      [
+                        {
+                          "name": "minValue",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        },
+                        {
+                          "name": "maxValue",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        }
+                      ]
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

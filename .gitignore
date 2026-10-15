@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 .venv/
 target/
+tools/protodef-oracle/node_modules/

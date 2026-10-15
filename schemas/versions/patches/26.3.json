@@ -1,0 +1,3753 @@
+{
+  "patches": [
+    {
+      "reason": "entity_look: vanilla 26.3 ClientboundMoveEntityPacket.Rot writes onGround before the two rotation bytes; the description has the older order (net/minecraft/network/protocol/game/ClientboundMoveEntityPacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_entity_look": [
+          "container",
+          [
+            {
+              "name": "entityId",
+              "type": "varint"
+            },
+            {
+              "name": "onGround",
+              "type": "bool"
+            },
+            {
+              "name": "yaw",
+              "type": "i8"
+            },
+            {
+              "name": "pitch",
+              "type": "i8"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "move_minecart: vanilla 26.3 NewMinecartBehavior.MinecartStep writes position and movement as Vec3 (three doubles each) and both rotations as ROTATION_BYTE; the description has floats (net/minecraft/world/entity/vehicle/minecart/NewMinecartBehavior.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_move_minecart": [
+          "container",
+          [
+            {
+              "name": "entityId",
+              "type": "varint"
+            },
+            {
+              "name": "steps",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": [
+                    "container",
+                    [
+                      {
+                        "name": "position",
+                        "type": "vec3f64"
+                      },
+                      {
+                        "name": "velocity",
+                        "type": "vec3f64"
+                      },
+                      {
+                        "name": "yaw",
+                        "type": "i8"
+                      },
+                      {
+                        "name": "pitch",
+                        "type": "i8"
+                      },
+                      {
+                        "name": "weight",
+                        "type": "f32"
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "update_sign: vanilla 26.3 ServerboundSignUpdatePacket writes the position, the four lines, then the SignTextSlot id (a VarInt), not a leading isFrontText flag (net/minecraft/network/protocol/game/ServerboundSignUpdatePacket.java)",
+      "scope": "play.toServer",
+      "types": {
+        "packet_update_sign": [
+          "container",
+          [
+            {
+              "name": "location",
+              "type": "position"
+            },
+            {
+              "name": "text1",
+              "type": "string"
+            },
+            {
+              "name": "text2",
+              "type": "string"
+            },
+            {
+              "name": "text3",
+              "type": "string"
+            },
+            {
+              "name": "text4",
+              "type": "string"
+            },
+            {
+              "name": "slot",
+              "type": "varint"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "explosion: vanilla 26.3 ClientboundExplodePacket ends with a playSound boolean the description lacks (net/minecraft/network/protocol/game/ClientboundExplodePacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_explosion": [
+          "container",
+          [
+            {
+              "name": "center",
+              "type": "vec3f64"
+            },
+            {
+              "name": "radius",
+              "type": "f32"
+            },
+            {
+              "name": "blockCount",
+              "type": "i32"
+            },
+            {
+              "name": "playerKnockback",
+              "type": [
+                "option",
+                "vec3f64"
+              ]
+            },
+            {
+              "name": "explosionParticle",
+              "type": "Particle"
+            },
+            {
+              "name": "sound",
+              "type": "ItemSoundHolder"
+            },
+            {
+              "name": "blockParticles",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": "ExplosionParticleEntry"
+                }
+              ]
+            },
+            {
+              "name": "playSound",
+              "type": "bool"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "custom_click_action: vanilla 26.3 ServerboundCustomClickActionPacket sends the id and then the payload length-prefixed (a VarInt byte count, then an optional tag whose absent form is a lone TAG_End), not a presence boolean (net/minecraft/network/protocol/common/ServerboundCustomClickActionPacket.java)",
+      "scope": "global",
+      "types": {
+        "packet_common_custom_click_action": [
+          "container",
+          [
+            {
+              "name": "id",
+              "type": "string"
+            },
+            {
+              "name": "payloadSize",
+              "type": "varint"
+            },
+            {
+              "name": "nbt",
+              "type": "anonOptionalNbt"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "declare_commands: vanilla 26.3 ArgumentTypeInfos registers 62 command argument types (ids 0-61) including context_float_provider (55), context_int_provider (56), slot_source (57), feature (59) and swing_animation (60), all SingletonArgumentInfo with zero wire bytes; the description stops at 56 with dialog misnumbered as 55 (vanilla 58) and uuid as 56 (vanilla 61), and its properties switch lacks void arms for the singleton parsers (net/minecraft/commands/synchronization/ArgumentTypeInfos.java, net/minecraft/commands/synchronization/SingletonArgumentInfo.java)",
+      "scope": "global",
+      "types": {
+        "command_node": [
+          "container",
+          [
+            {
+              "name": "flags",
+              "type": [
+                "bitfield",
+                [
+                  {
+                    "name": "unused",
+                    "size": 2,
+                    "signed": false
+                  },
+                  {
+                    "name": "allows_restricted",
+                    "size": 1,
+                    "signed": false
+                  },
+                  {
+                    "name": "has_custom_suggestions",
+                    "size": 1,
+                    "signed": false
+                  },
+                  {
+                    "name": "has_redirect_node",
+                    "size": 1,
+                    "signed": false
+                  },
+                  {
+                    "name": "has_command",
+                    "size": 1,
+                    "signed": false
+                  },
+                  {
+                    "name": "command_node_type",
+                    "size": 2,
+                    "signed": false
+                  }
+                ]
+              ]
+            },
+            {
+              "name": "children",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": "varint"
+                }
+              ]
+            },
+            {
+              "name": "redirectNode",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "flags/has_redirect_node",
+                  "fields": {
+                    "1": "varint"
+                  },
+                  "default": "void"
+                }
+              ]
+            },
+            {
+              "name": "extraNodeData",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "flags/command_node_type",
+                  "fields": {
+                    "0": "void",
+                    "1": [
+                      "container",
+                      [
+                        {
+                          "name": "name",
+                          "type": "string"
+                        }
+                      ]
+                    ],
+                    "2": [
+                      "container",
+                      [
+                        {
+                          "name": "name",
+                          "type": "string"
+                        },
+                        {
+                          "name": "parser",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "brigadier:bool",
+                                "1": "brigadier:float",
+                                "2": "brigadier:double",
+                                "3": "brigadier:integer",
+                                "4": "brigadier:long",
+                                "5": "brigadier:string",
+                                "6": "minecraft:entity",
+                                "7": "minecraft:game_profile",
+                                "8": "minecraft:block_pos",
+                                "9": "minecraft:column_pos",
+                                "10": "minecraft:vec3",
+                                "11": "minecraft:vec2",
+                                "12": "minecraft:block_state",
+                                "13": "minecraft:block_predicate",
+                                "14": "minecraft:item_stack",
+                                "15": "minecraft:item_predicate",
+                                "16": "minecraft:color",
+                                "17": "minecraft:hex_color",
+                                "18": "minecraft:component",
+                                "19": "minecraft:style",
+                                "20": "minecraft:message",
+                                "21": "minecraft:nbt",
+                                "22": "minecraft:nbt_tag",
+                                "23": "minecraft:nbt_path",
+                                "24": "minecraft:objective",
+                                "25": "minecraft:objective_criteria",
+                                "26": "minecraft:operation",
+                                "27": "minecraft:particle",
+                                "28": "minecraft:angle",
+                                "29": "minecraft:rotation",
+                                "30": "minecraft:scoreboard_slot",
+                                "31": "minecraft:score_holder",
+                                "32": "minecraft:swizzle",
+                                "33": "minecraft:team",
+                                "34": "minecraft:item_slot",
+                                "35": "minecraft:item_slots",
+                                "36": "minecraft:resource_location",
+                                "37": "minecraft:function",
+                                "38": "minecraft:entity_anchor",
+                                "39": "minecraft:int_range",
+                                "40": "minecraft:float_range",
+                                "41": "minecraft:dimension",
+                                "42": "minecraft:gamemode",
+                                "43": "minecraft:time",
+                                "44": "minecraft:resource_or_tag",
+                                "45": "minecraft:resource_or_tag_key",
+                                "46": "minecraft:resource",
+                                "47": "minecraft:resource_key",
+                                "48": "minecraft:resource_selector",
+                                "49": "minecraft:template_mirror",
+                                "50": "minecraft:template_rotation",
+                                "51": "minecraft:heightmap",
+                                "52": "minecraft:loot_table",
+                                "53": "minecraft:loot_predicate",
+                                "54": "minecraft:loot_modifier",
+                                "55": "minecraft:context_float_provider",
+                                "56": "minecraft:context_int_provider",
+                                "57": "minecraft:slot_source",
+                                "58": "minecraft:dialog",
+                                "59": "minecraft:feature",
+                                "60": "minecraft:swing_animation",
+                                "61": "minecraft:uuid"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "properties",
+                          "type": [
+                            "switch",
+                            {
+                              "compareTo": "parser",
+                              "fields": {
+                                "brigadier:bool": "void",
+                                "brigadier:float": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "flags",
+                                      "type": [
+                                        "bitfield",
+                                        [
+                                          {
+                                            "name": "unused",
+                                            "size": 6,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "max_present",
+                                            "size": 1,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "min_present",
+                                            "size": 1,
+                                            "signed": false
+                                          }
+                                        ]
+                                      ]
+                                    },
+                                    {
+                                      "name": "min",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/min_present",
+                                          "fields": {
+                                            "1": "f32"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "max",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/max_present",
+                                          "fields": {
+                                            "1": "f32"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                ],
+                                "brigadier:double": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "flags",
+                                      "type": [
+                                        "bitfield",
+                                        [
+                                          {
+                                            "name": "unused",
+                                            "size": 6,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "max_present",
+                                            "size": 1,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "min_present",
+                                            "size": 1,
+                                            "signed": false
+                                          }
+                                        ]
+                                      ]
+                                    },
+                                    {
+                                      "name": "min",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/min_present",
+                                          "fields": {
+                                            "1": "f64"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "max",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/max_present",
+                                          "fields": {
+                                            "1": "f64"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                ],
+                                "brigadier:integer": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "flags",
+                                      "type": [
+                                        "bitfield",
+                                        [
+                                          {
+                                            "name": "unused",
+                                            "size": 6,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "max_present",
+                                            "size": 1,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "min_present",
+                                            "size": 1,
+                                            "signed": false
+                                          }
+                                        ]
+                                      ]
+                                    },
+                                    {
+                                      "name": "min",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/min_present",
+                                          "fields": {
+                                            "1": "i32"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "max",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/max_present",
+                                          "fields": {
+                                            "1": "i32"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                ],
+                                "brigadier:long": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "flags",
+                                      "type": [
+                                        "bitfield",
+                                        [
+                                          {
+                                            "name": "unused",
+                                            "size": 6,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "max_present",
+                                            "size": 1,
+                                            "signed": false
+                                          },
+                                          {
+                                            "name": "min_present",
+                                            "size": 1,
+                                            "signed": false
+                                          }
+                                        ]
+                                      ]
+                                    },
+                                    {
+                                      "name": "min",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/min_present",
+                                          "fields": {
+                                            "1": "i64"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "name": "max",
+                                      "type": [
+                                        "switch",
+                                        {
+                                          "compareTo": "flags/max_present",
+                                          "fields": {
+                                            "1": "i64"
+                                          },
+                                          "default": "void"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                ],
+                                "brigadier:string": [
+                                  "mapper",
+                                  {
+                                    "type": "varint",
+                                    "mappings": {
+                                      "0": "SINGLE_WORD",
+                                      "1": "QUOTABLE_PHRASE",
+                                      "2": "GREEDY_PHRASE"
+                                    }
+                                  }
+                                ],
+                                "minecraft:entity": [
+                                  "bitfield",
+                                  [
+                                    {
+                                      "name": "unused",
+                                      "size": 6,
+                                      "signed": false
+                                    },
+                                    {
+                                      "name": "onlyAllowPlayers",
+                                      "size": 1,
+                                      "signed": false
+                                    },
+                                    {
+                                      "name": "onlyAllowEntities",
+                                      "size": 1,
+                                      "signed": false
+                                    }
+                                  ]
+                                ],
+                                "minecraft:game_profile": "void",
+                                "minecraft:block_pos": "void",
+                                "minecraft:column_pos": "void",
+                                "minecraft:vec3": "void",
+                                "minecraft:vec2": "void",
+                                "minecraft:block_state": "void",
+                                "minecraft:block_predicate": "void",
+                                "minecraft:item_stack": "void",
+                                "minecraft:item_predicate": "void",
+                                "minecraft:color": "void",
+                                "minecraft:hex_color": "void",
+                                "minecraft:component": "void",
+                                "minecraft:message": "void",
+                                "minecraft:nbt": "void",
+                                "minecraft:nbt_path": "void",
+                                "minecraft:objective": "void",
+                                "minecraft:objective_criteria": "void",
+                                "minecraft:operation": "void",
+                                "minecraft:particle": "void",
+                                "minecraft:angle": "void",
+                                "minecraft:rotation": "void",
+                                "minecraft:scoreboard_slot": "void",
+                                "minecraft:score_holder": [
+                                  "bitfield",
+                                  [
+                                    {
+                                      "name": "unused",
+                                      "size": 7,
+                                      "signed": false
+                                    },
+                                    {
+                                      "name": "allowMultiple",
+                                      "size": 1,
+                                      "signed": false
+                                    }
+                                  ]
+                                ],
+                                "minecraft:swizzle": "void",
+                                "minecraft:team": "void",
+                                "minecraft:item_slot": "void",
+                                "minecraft:resource_location": "void",
+                                "minecraft:function": "void",
+                                "minecraft:entity_anchor": "void",
+                                "minecraft:int_range": "void",
+                                "minecraft:float_range": "void",
+                                "minecraft:dimension": "void",
+                                "minecraft:gamemode": "void",
+                                "minecraft:time": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "min",
+                                      "type": "i32"
+                                    }
+                                  ]
+                                ],
+                                "minecraft:resource_or_tag": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "registry",
+                                      "type": "string"
+                                    }
+                                  ]
+                                ],
+                                "minecraft:resource_or_tag_key": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "registry",
+                                      "type": "string"
+                                    }
+                                  ]
+                                ],
+                                "minecraft:resource": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "registry",
+                                      "type": "string"
+                                    }
+                                  ]
+                                ],
+                                "minecraft:resource_key": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "registry",
+                                      "type": "string"
+                                    }
+                                  ]
+                                ],
+                                "minecraft:resource_selector": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "registry",
+                                      "type": "string"
+                                    }
+                                  ]
+                                ],
+                                "minecraft:template_mirror": "void",
+                                "minecraft:template_rotation": "void",
+                                "minecraft:heightmap": "void",
+                                "minecraft:dialog": "void",
+                                "minecraft:uuid": "void",
+                                "minecraft:context_float_provider": "void",
+                                "minecraft:context_int_provider": "void",
+                                "minecraft:slot_source": "void",
+                                "minecraft:feature": "void",
+                                "minecraft:swing_animation": "void",
+                                "minecraft:item_slots": "void",
+                                "minecraft:loot_modifier": "void",
+                                "minecraft:loot_predicate": "void",
+                                "minecraft:loot_table": "void",
+                                "minecraft:nbt_tag": "void",
+                                "minecraft:style": "void"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "suggestionType",
+                          "type": [
+                            "switch",
+                            {
+                              "compareTo": "../flags/has_custom_suggestions",
+                              "fields": {
+                                "1": "string"
+                              },
+                              "default": "void"
+                            }
+                          ]
+                        }
+                      ]
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "initialize_world_border: vanilla 26.3 ClientboundInitializeBorderPacket reads/writes lerpTime with readVarLong/writeVarLong (long lerpTime), not VarInt; the description labels speed varint (net/minecraft/network/protocol/game/ClientboundInitializeBorderPacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_initialize_world_border": [
+          "container",
+          [
+            {
+              "name": "x",
+              "type": "f64"
+            },
+            {
+              "name": "z",
+              "type": "f64"
+            },
+            {
+              "name": "oldDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "newDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "speed",
+              "type": "varlong"
+            },
+            {
+              "name": "portalTeleportBoundary",
+              "type": "varint"
+            },
+            {
+              "name": "warningBlocks",
+              "type": "varint"
+            },
+            {
+              "name": "warningTime",
+              "type": "varint"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "open_sign_entity: vanilla 26.3 ClientboundOpenSignEditorPacket writes the position then the SignTextSlot id (a VarInt, BACK 0 / FRONT 1), not an isFrontText flag (net/minecraft/network/protocol/game/ClientboundOpenSignEditorPacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_open_sign_entity": [
+          "container",
+          [
+            {
+              "name": "location",
+              "type": "position"
+            },
+            {
+              "name": "slot",
+              "type": "varint"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "player_chat: vanilla 26.3 FilterMask PARTIALLY_FILTERED payload is a BIT_SET (a varint byte count followed by raw bytes, BitSet.valueOf(readByteArray)), not an element-counted array of big-endian i64 (net/minecraft/network/chat/FilterMask.java, net/minecraft/network/codec/ByteBufCodecs.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_player_chat": [
+          "container",
+          [
+            {
+              "name": "globalIndex",
+              "type": "varint"
+            },
+            {
+              "name": "senderUuid",
+              "type": "UUID"
+            },
+            {
+              "name": "index",
+              "type": "varint"
+            },
+            {
+              "name": "signature",
+              "type": [
+                "option",
+                [
+                  "buffer",
+                  {
+                    "count": 256
+                  }
+                ]
+              ]
+            },
+            {
+              "name": "plainMessage",
+              "type": "string"
+            },
+            {
+              "name": "timestamp",
+              "type": "i64"
+            },
+            {
+              "name": "salt",
+              "type": "i64"
+            },
+            {
+              "name": "previousMessages",
+              "type": "previousMessages"
+            },
+            {
+              "name": "unsignedChatContent",
+              "type": [
+                "option",
+                "anonymousNbt"
+              ]
+            },
+            {
+              "name": "filterType",
+              "type": "varint"
+            },
+            {
+              "name": "filterTypeMask",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "filterType",
+                  "fields": {
+                    "2": [
+                      "buffer",
+                      {
+                        "countType": "varint"
+                      }
+                    ]
+                  },
+                  "default": "void"
+                }
+              ]
+            },
+            {
+              "name": "type",
+              "type": "ChatTypesHolder"
+            },
+            {
+              "name": "networkName",
+              "type": "anonymousNbt"
+            },
+            {
+              "name": "networkTargetName",
+              "type": [
+                "option",
+                "anonymousNbt"
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "player_chat chat decoration parameters: vanilla 26.3 ChatTypeDecoration.Parameter ids are SENDER 0, TARGET 1, CONTENT 2; the description rotates them to content 0, sender 1, target 2 (net/minecraft/network/chat/ChatTypeDecoration.java)",
+      "scope": "play.toClient",
+      "types": {
+        "ChatTypeParameterType": [
+          "mapper",
+          {
+            "type": "varint",
+            "mappings": {
+              "0": "sender",
+              "1": "target",
+              "2": "content"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "reason": "player_info: vanilla 26.3 ClientboundPlayerInfoUpdatePacket Action ids are UPDATE_LIST_ORDER 6 and UPDATE_HAT 7, and UPDATE_LISTED carries a boolean; the description swaps the top two flag bits and types listed as varint (net/minecraft/network/protocol/game/ClientboundPlayerInfoUpdatePacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_player_info": [
+          "container",
+          [
+            {
+              "name": "action",
+              "type": [
+                "bitflags",
+                {
+                  "type": "u8",
+                  "flags": [
+                    "add_player",
+                    "initialize_chat",
+                    "update_game_mode",
+                    "update_listed",
+                    "update_latency",
+                    "update_display_name",
+                    "update_list_order",
+                    "update_hat"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "data",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": [
+                    "container",
+                    [
+                      {
+                        "name": "uuid",
+                        "type": "UUID"
+                      },
+                      {
+                        "name": "player",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/add_player",
+                            "fields": {
+                              "true": "game_profile_name_prop"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "chatSession",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/initialize_chat",
+                            "fields": {
+                              "true": "chat_session"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "gamemode",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_game_mode",
+                            "fields": {
+                              "true": "varint"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "listed",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_listed",
+                            "fields": {
+                              "true": "bool"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "latency",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_latency",
+                            "fields": {
+                              "true": "varint"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "displayName",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_display_name",
+                            "fields": {
+                              "true": [
+                                "option",
+                                "anonymousNbt"
+                              ]
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "listPriority",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_list_order",
+                            "fields": {
+                              "true": "varint"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      },
+                      {
+                        "name": "showHat",
+                        "type": [
+                          "switch",
+                          {
+                            "compareTo": "../action/update_hat",
+                            "fields": {
+                              "true": "bool"
+                            },
+                            "default": "void"
+                          }
+                        ]
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "multi_block_change: vanilla 26.3 ClientboundSectionBlocksUpdatePacket reads/writes each packed block-change entry with readVarLong/writeVarLong (block-state id << 12 | 12-bit section-relative pos), not VarInt; the description labels the records array varint (net/minecraft/network/protocol/game/ClientboundSectionBlocksUpdatePacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_multi_block_change": [
+          "container",
+          [
+            {
+              "name": "chunkCoordinates",
+              "type": [
+                "bitfield",
+                [
+                  {
+                    "name": "x",
+                    "size": 22,
+                    "signed": true
+                  },
+                  {
+                    "name": "z",
+                    "size": 22,
+                    "signed": true
+                  },
+                  {
+                    "name": "y",
+                    "size": 20,
+                    "signed": true
+                  }
+                ]
+              ]
+            },
+            {
+              "name": "records",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": "varlong"
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "world_border_lerp_size: vanilla 26.3 ClientboundSetBorderLerpSizePacket reads/writes the lerp time with readVarLong/writeVarLong (long lerpTime), not VarInt; the description labels speed varint (net/minecraft/network/protocol/game/ClientboundSetBorderLerpSizePacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_world_border_lerp_size": [
+          "container",
+          [
+            {
+              "name": "oldDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "newDiameter",
+              "type": "f64"
+            },
+            {
+              "name": "speed",
+              "type": "varlong"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "teams: vanilla 26.3 ClientboundSetPlayerTeamPacket Parameters writes displayName, prefix, suffix, visibility, collisionRule, optional color (presence boolean plus VarInt id), then the options byte; the description regressed to the old order with the flags byte second, an unguarded color varint and prefix/suffix last (net/minecraft/network/protocol/game/ClientboundSetPlayerTeamPacket.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_teams": [
+          "container",
+          [
+            {
+              "name": "team",
+              "type": "string"
+            },
+            {
+              "name": "mode",
+              "type": [
+                "mapper",
+                {
+                  "type": "i8",
+                  "mappings": {
+                    "0": "add",
+                    "1": "remove",
+                    "2": "change",
+                    "3": "join",
+                    "4": "leave"
+                  }
+                }
+              ]
+            },
+            {
+              "anon": true,
+              "type": [
+                "switch",
+                {
+                  "compareTo": "mode",
+                  "fields": {
+                    "add": [
+                      "container",
+                      [
+                        {
+                          "name": "name",
+                          "type": "anonymousNbt"
+                        },
+                        {
+                          "name": "prefix",
+                          "type": "anonymousNbt"
+                        },
+                        {
+                          "name": "suffix",
+                          "type": "anonymousNbt"
+                        },
+                        {
+                          "name": "nameTagVisibility",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "always",
+                                "1": "never",
+                                "2": "hide_for_other_teams",
+                                "3": "hide_for_own_team"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "collisionRule",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "always",
+                                "1": "never",
+                                "2": "push_other_teams",
+                                "3": "push_own_team"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "formatting",
+                          "type": [
+                            "option",
+                            "varint"
+                          ]
+                        },
+                        {
+                          "name": "flags",
+                          "type": [
+                            "bitflags",
+                            {
+                              "type": "u8",
+                              "flags": [
+                                "friendly_fire",
+                                "see_friendly_invisible"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "change": [
+                      "container",
+                      [
+                        {
+                          "name": "name",
+                          "type": "anonymousNbt"
+                        },
+                        {
+                          "name": "prefix",
+                          "type": "anonymousNbt"
+                        },
+                        {
+                          "name": "suffix",
+                          "type": "anonymousNbt"
+                        },
+                        {
+                          "name": "nameTagVisibility",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "always",
+                                "1": "never",
+                                "2": "hide_for_other_teams",
+                                "3": "hide_for_own_team"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "collisionRule",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "always",
+                                "1": "never",
+                                "2": "push_other_teams",
+                                "3": "push_own_team"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "formatting",
+                          "type": [
+                            "option",
+                            "varint"
+                          ]
+                        },
+                        {
+                          "name": "flags",
+                          "type": [
+                            "bitflags",
+                            {
+                              "type": "u8",
+                              "flags": [
+                                "friendly_fire",
+                                "see_friendly_invisible"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ]
+                  },
+                  "default": "void"
+                }
+              ]
+            },
+            {
+              "name": "players",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "mode",
+                  "fields": {
+                    "add": [
+                      "array",
+                      {
+                        "countType": "varint",
+                        "type": "string"
+                      }
+                    ],
+                    "join": [
+                      "array",
+                      {
+                        "countType": "varint",
+                        "type": "string"
+                      }
+                    ],
+                    "leave": [
+                      "array",
+                      {
+                        "countType": "varint",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "default": "void"
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "update_structure_block: vanilla 26.3 ServerboundSetStructureBlockPacket carries seed as a VarLong (readVarLong/writeVarLong, long seed) and flags as a raw bitmask byte (1 ignore_entities, 2 show_air, 4 show_bounding_box, 8 strict); the description has seed varint and a u8 enum mapper that misdecodes combined masks (net/minecraft/network/protocol/game/ServerboundSetStructureBlockPacket.java)",
+      "scope": "play.toServer",
+      "types": {
+        "packet_update_structure_block": [
+          "container",
+          [
+            {
+              "name": "location",
+              "type": "position"
+            },
+            {
+              "name": "action",
+              "type": "varint"
+            },
+            {
+              "name": "mode",
+              "type": "varint"
+            },
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "offset_x",
+              "type": "i8"
+            },
+            {
+              "name": "offset_y",
+              "type": "i8"
+            },
+            {
+              "name": "offset_z",
+              "type": "i8"
+            },
+            {
+              "name": "size_x",
+              "type": "i8"
+            },
+            {
+              "name": "size_y",
+              "type": "i8"
+            },
+            {
+              "name": "size_z",
+              "type": "i8"
+            },
+            {
+              "name": "mirror",
+              "type": "varint"
+            },
+            {
+              "name": "rotation",
+              "type": "varint"
+            },
+            {
+              "name": "metadata",
+              "type": "string"
+            },
+            {
+              "name": "integrity",
+              "type": "f32"
+            },
+            {
+              "name": "seed",
+              "type": "varlong"
+            },
+            {
+              "name": "flags",
+              "type": [
+                "bitflags",
+                {
+                  "type": "u8",
+                  "flags": [
+                    "ignore_entities",
+                    "show_air",
+                    "show_bounding_box",
+                    "strict"
+                  ]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "play toServer routes: vanilla 26.3 registers SERVERBOUND_SPECTATOR_ACTION at 0x3f (the swing packet is deleted in 26.3); the description maps 0x3f to arm_animation and leaves the spectator_action type unmapped (net/minecraft/network/protocol/game/GameProtocols.java)",
+      "scope": "play.toServer",
+      "types": {
+        "packet": [
+          "container",
+          [
+            {
+              "name": "name",
+              "type": [
+                "mapper",
+                {
+                  "type": "varint",
+                  "mappings": {
+                    "0x00": "teleport_confirm",
+                    "0x01": "attack",
+                    "0x02": "query_block_nbt",
+                    "0x03": "select_bundle_item",
+                    "0x04": "set_difficulty",
+                    "0x05": "change_gamemode",
+                    "0x06": "message_acknowledgement",
+                    "0x07": "chat_command",
+                    "0x08": "chat_command_signed",
+                    "0x09": "chat_message",
+                    "0x0a": "chat_session_update",
+                    "0x0b": "chunk_batch_received",
+                    "0x0c": "client_command",
+                    "0x0d": "tick_end",
+                    "0x0e": "settings",
+                    "0x0f": "tab_complete",
+                    "0x10": "configuration_acknowledged",
+                    "0x11": "enchant_item",
+                    "0x12": "window_click",
+                    "0x13": "close_window",
+                    "0x14": "set_slot_state",
+                    "0x15": "cookie_response",
+                    "0x16": "custom_payload",
+                    "0x17": "debug_subscription_request",
+                    "0x18": "edit_book",
+                    "0x19": "query_entity_nbt",
+                    "0x1a": "use_entity",
+                    "0x1b": "generate_structure",
+                    "0x1c": "keep_alive",
+                    "0x1d": "lock_difficulty",
+                    "0x1e": "position",
+                    "0x1f": "position_look",
+                    "0x20": "look",
+                    "0x21": "flying",
+                    "0x22": "vehicle_move",
+                    "0x23": "steer_boat",
+                    "0x24": "pick_item_from_block",
+                    "0x25": "pick_item_from_entity",
+                    "0x26": "ping_request",
+                    "0x27": "craft_recipe_request",
+                    "0x28": "abilities",
+                    "0x29": "block_dig",
+                    "0x2a": "entity_action",
+                    "0x2b": "player_input",
+                    "0x2c": "player_loaded",
+                    "0x2d": "pong",
+                    "0x2e": "punch",
+                    "0x2f": "recipe_book",
+                    "0x30": "displayed_recipe",
+                    "0x31": "name_item",
+                    "0x32": "resource_pack_receive",
+                    "0x33": "advancement_tab",
+                    "0x34": "select_trade",
+                    "0x35": "set_beacon_effect",
+                    "0x36": "held_item_slot",
+                    "0x37": "update_command_block",
+                    "0x38": "update_command_block_minecart",
+                    "0x39": "set_creative_slot",
+                    "0x3a": "set_game_rule",
+                    "0x3b": "update_jigsaw_block",
+                    "0x3c": "update_structure_block",
+                    "0x3d": "set_test_block",
+                    "0x3e": "update_sign",
+                    "0x3f": "spectator_action",
+                    "0x40": "spectate",
+                    "0x41": "test_instance_block_action",
+                    "0x42": "block_place",
+                    "0x43": "use_item",
+                    "0x44": "custom_click_action"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "params",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "name",
+                  "fields": {
+                    "teleport_confirm": "packet_teleport_confirm",
+                    "attack": "packet_attack",
+                    "query_block_nbt": "packet_query_block_nbt",
+                    "select_bundle_item": "packet_select_bundle_item",
+                    "set_difficulty": "packet_set_difficulty",
+                    "change_gamemode": "packet_change_gamemode",
+                    "message_acknowledgement": "packet_message_acknowledgement",
+                    "chat_command": "packet_chat_command",
+                    "chat_command_signed": "packet_chat_command_signed",
+                    "chat_message": "packet_chat_message",
+                    "chat_session_update": "packet_chat_session_update",
+                    "chunk_batch_received": "packet_chunk_batch_received",
+                    "client_command": "packet_client_command",
+                    "tick_end": "packet_tick_end",
+                    "settings": "packet_common_settings",
+                    "tab_complete": "packet_tab_complete",
+                    "configuration_acknowledged": "packet_configuration_acknowledged",
+                    "enchant_item": "packet_enchant_item",
+                    "window_click": "packet_window_click",
+                    "close_window": "packet_close_window",
+                    "set_slot_state": "packet_set_slot_state",
+                    "cookie_response": "packet_common_cookie_response",
+                    "custom_payload": "packet_custom_payload",
+                    "debug_subscription_request": "packet_debug_subscription_request",
+                    "edit_book": "packet_edit_book",
+                    "query_entity_nbt": "packet_query_entity_nbt",
+                    "use_entity": "packet_use_entity",
+                    "generate_structure": "packet_generate_structure",
+                    "keep_alive": "packet_keep_alive",
+                    "lock_difficulty": "packet_lock_difficulty",
+                    "position": "packet_position",
+                    "position_look": "packet_position_look",
+                    "look": "packet_look",
+                    "flying": "packet_flying",
+                    "vehicle_move": "packet_vehicle_move",
+                    "steer_boat": "packet_steer_boat",
+                    "pick_item_from_block": "packet_pick_item_from_block",
+                    "pick_item_from_entity": "packet_pick_item_from_entity",
+                    "ping_request": "packet_ping_request",
+                    "craft_recipe_request": "packet_craft_recipe_request",
+                    "abilities": "packet_abilities",
+                    "block_dig": "packet_block_dig",
+                    "entity_action": "packet_entity_action",
+                    "player_input": "packet_player_input",
+                    "player_loaded": "packet_player_loaded",
+                    "pong": "packet_pong",
+                    "punch": "packet_punch",
+                    "recipe_book": "packet_recipe_book",
+                    "displayed_recipe": "packet_displayed_recipe",
+                    "name_item": "packet_name_item",
+                    "resource_pack_receive": "packet_resource_pack_receive",
+                    "advancement_tab": "packet_advancement_tab",
+                    "select_trade": "packet_select_trade",
+                    "set_beacon_effect": "packet_set_beacon_effect",
+                    "held_item_slot": "packet_held_item_slot",
+                    "update_command_block": "packet_update_command_block",
+                    "update_command_block_minecart": "packet_update_command_block_minecart",
+                    "set_creative_slot": "packet_set_creative_slot",
+                    "set_game_rule": "packet_set_game_rule",
+                    "update_jigsaw_block": "packet_update_jigsaw_block",
+                    "update_structure_block": "packet_update_structure_block",
+                    "set_test_block": "packet_set_test_block",
+                    "update_sign": "packet_update_sign",
+                    "spectate": "packet_spectate",
+                    "test_instance_block_action": "packet_test_instance_block_action",
+                    "block_place": "packet_block_place",
+                    "use_item": "packet_use_item",
+                    "custom_click_action": "packet_common_custom_click_action",
+                    "spectator_action": "packet_spectator_action"
+                  }
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "spectator_action: vanilla 26.3 ServerboundSpectatorActionPacket carries a single OPTIONAL_VAR_INT (one varint, 0 absent else id plus 1), not a presence boolean plus varint (net/minecraft/network/protocol/game/ServerboundSpectatorActionPacket.java, net/minecraft/network/codec/ByteBufCodecs.java)",
+      "scope": "play.toServer",
+      "types": {
+        "packet_spectator_action": [
+          "container",
+          [
+            {
+              "name": "entityId",
+              "type": "optvarint"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "login/respawn SpawnInfo: vanilla 26.3 CommonPlayerSpawnInfo carries gameType as a VarInt idMapper and previousGameType as a single OPTIONAL_VAR_INT (one varint, 0 absent else id plus 1); the description has an i8 mapper and a u8 (net/minecraft/network/protocol/game/CommonPlayerSpawnInfo.java, net/minecraft/world/level/GameType.java)",
+      "scope": "play.toClient",
+      "types": {
+        "SpawnInfo": [
+          "container",
+          [
+            {
+              "name": "dimension",
+              "type": "varint"
+            },
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "hashedSeed",
+              "type": "i64"
+            },
+            {
+              "name": "gamemode",
+              "type": [
+                "mapper",
+                {
+                  "type": "varint",
+                  "mappings": {
+                    "0": "survival",
+                    "1": "creative",
+                    "2": "adventure",
+                    "3": "spectator"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "previousGamemode",
+              "type": "optvarint"
+            },
+            {
+              "name": "isDebug",
+              "type": "bool"
+            },
+            {
+              "name": "isFlat",
+              "type": "bool"
+            },
+            {
+              "name": "death",
+              "type": [
+                "option",
+                "GlobalPos"
+              ]
+            },
+            {
+              "name": "portalCooldown",
+              "type": "varint"
+            },
+            {
+              "name": "seaLevel",
+              "type": "varint"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "SlotComponent: vanilla 26.3 SignText carries filteredMessages as an optional 4-message list, and DataComponents registers block_transformer (43, holder), compostable (84, resolvable int), cooking_fuel (85, resolvable int plus float), brewing_fuel (86, resolvable int plus float) and provides_pottery_pattern (117, holder); the description has mandatory filteredMessages and no arms for the five (either-forms are a presence boolean plus const int/float or registry-key string) (net/minecraft/world/level/block/entity/SignText.java, net/minecraft/core/component/DataComponents.java, net/minecraft/world/level/storage/loot/providers/number/ints/ResolvableInt.java)",
+      "scope": "global",
+      "types": {
+        "SlotComponent": [
+          "container",
+          [
+            {
+              "name": "type",
+              "type": "SlotComponentType"
+            },
+            {
+              "name": "data",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "type",
+                  "fields": {
+                    "custom_data": "anonymousNbt",
+                    "max_stack_size": "varint",
+                    "max_damage": "varint",
+                    "damage": "varint",
+                    "unbreakable": "void",
+                    "use_effects": [
+                      "container",
+                      [
+                        {
+                          "name": "can_sprint",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "interact_vibrations",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "speed_multiplier",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "custom_name": "anonymousNbt",
+                    "minimum_attack_charge": "f32",
+                    "damage_type": [
+                      "container",
+                      [
+                        {
+                          "name": "hasHolder",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "damageType",
+                          "type": [
+                            "switch",
+                            {
+                              "compareTo": "hasHolder",
+                              "fields": {
+                                "true": [
+                                  "registryEntryHolder",
+                                  {
+                                    "baseName": "damageTypeId",
+                                    "otherwise": {
+                                      "name": "data",
+                                      "type": "DamageTypeData"
+                                    }
+                                  }
+                                ],
+                                "false": "string"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "item_name": "anonymousNbt",
+                    "item_model": "string",
+                    "lore": [
+                      "array",
+                      {
+                        "countType": "varint",
+                        "type": "anonymousNbt"
+                      }
+                    ],
+                    "rarity": [
+                      "mapper",
+                      {
+                        "type": "varint",
+                        "mappings": {
+                          "0": "common",
+                          "1": "uncommon",
+                          "2": "rare",
+                          "3": "epic"
+                        }
+                      }
+                    ],
+                    "enchantments": [
+                      "container",
+                      [
+                        {
+                          "name": "enchantments",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "id",
+                                    "type": "varint"
+                                  },
+                                  {
+                                    "name": "level",
+                                    "type": "varint"
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "can_place_on": [
+                      "container",
+                      [
+                        {
+                          "name": "predicates",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemBlockPredicate"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "can_break": [
+                      "container",
+                      [
+                        {
+                          "name": "predicates",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemBlockPredicate"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "attribute_modifiers": [
+                      "array",
+                      {
+                        "countType": "varint",
+                        "type": [
+                          "container",
+                          [
+                            {
+                              "name": "typeId",
+                              "type": "varint"
+                            },
+                            {
+                              "name": "name",
+                              "type": "string"
+                            },
+                            {
+                              "name": "value",
+                              "type": "f64"
+                            },
+                            {
+                              "name": "operation",
+                              "type": [
+                                "mapper",
+                                {
+                                  "type": "varint",
+                                  "mappings": {
+                                    "0": "add",
+                                    "1": "multiply_base",
+                                    "2": "multiply_total"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "name": "slot",
+                              "type": [
+                                "mapper",
+                                {
+                                  "type": "varint",
+                                  "mappings": {
+                                    "0": "any",
+                                    "1": "main_hand",
+                                    "2": "off_hand",
+                                    "3": "hand",
+                                    "4": "feet",
+                                    "5": "legs",
+                                    "6": "chest",
+                                    "7": "head",
+                                    "8": "armor",
+                                    "9": "body",
+                                    "10": "saddle"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "name": "display",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "type",
+                                    "type": [
+                                      "mapper",
+                                      {
+                                        "type": "varint",
+                                        "mappings": {
+                                          "0": "default",
+                                          "1": "hidden",
+                                          "2": "override"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "name": "component",
+                                    "type": [
+                                      "switch",
+                                      {
+                                        "compareTo": "type",
+                                        "fields": {
+                                          "override": "anonymousNbt"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        ]
+                      }
+                    ],
+                    "custom_model_data": [
+                      "container",
+                      [
+                        {
+                          "name": "floats",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "f32"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "flags",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "bool"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "strings",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "colors",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "i32"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "tooltip_display": [
+                      "container",
+                      [
+                        {
+                          "name": "hideTooltip",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "hiddenComponents",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "varint"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "repair_cost": "varint",
+                    "creative_slot_lock": "void",
+                    "enchantment_glint_override": "bool",
+                    "intangible_projectile": "anonymousNbt",
+                    "food": [
+                      "container",
+                      [
+                        {
+                          "name": "nutrition",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "saturationModifier",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "canAlwaysEat",
+                          "type": "bool"
+                        }
+                      ]
+                    ],
+                    "consumable": [
+                      "container",
+                      [
+                        {
+                          "name": "consume_seconds",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "animation",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "none",
+                                "1": "eat",
+                                "2": "drink",
+                                "3": "block",
+                                "4": "bow",
+                                "5": "spear",
+                                "6": "crossbow",
+                                "7": "spyglass",
+                                "8": "toot_horn",
+                                "9": "brush",
+                                "10": "bundle"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "sound",
+                          "type": "ItemSoundHolder"
+                        },
+                        {
+                          "name": "makes_particles",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "effects",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemConsumeEffect"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "use_remainder": "ItemStackTemplate",
+                    "use_cooldown": [
+                      "container",
+                      [
+                        {
+                          "name": "seconds",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "cooldownGroup",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        }
+                      ]
+                    ],
+                    "damage_resistant": "string",
+                    "tool": [
+                      "container",
+                      [
+                        {
+                          "name": "rules",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "blocks",
+                                    "type": "IDSet"
+                                  },
+                                  {
+                                    "name": "speed",
+                                    "type": [
+                                      "option",
+                                      "f32"
+                                    ]
+                                  },
+                                  {
+                                    "name": "correctDropForBlocks",
+                                    "type": [
+                                      "option",
+                                      "bool"
+                                    ]
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "defaultMiningSpeed",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "damagePerBlock",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "canDestroyBlocksInCreative",
+                          "type": "bool"
+                        }
+                      ]
+                    ],
+                    "weapon": [
+                      "container",
+                      [
+                        {
+                          "name": "itemDamagePerAttack",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "disableBlockingForSeconds",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "attack_range": [
+                      "container",
+                      [
+                        {
+                          "name": "minRange",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "maxRange",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "minCreativeRange",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "maxCreativeRange",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "hitboxMargin",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "mobFactor",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "enchantable": "varint",
+                    "equippable": [
+                      "container",
+                      [
+                        {
+                          "name": "slot",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "main_hand",
+                                "1": "off_hand",
+                                "2": "feet",
+                                "3": "legs",
+                                "4": "chest",
+                                "5": "head",
+                                "6": "body",
+                                "7": "saddle"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "sound",
+                          "type": "ItemSoundHolder"
+                        },
+                        {
+                          "name": "model",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        },
+                        {
+                          "name": "cameraOverlay",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        },
+                        {
+                          "name": "allowedEntities",
+                          "type": [
+                            "option",
+                            "IDSet"
+                          ]
+                        },
+                        {
+                          "name": "dispensable",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "swappable",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "damageable",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "equipOnInteract",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "shearable",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "shearingSound",
+                          "type": "ItemSoundHolder"
+                        }
+                      ]
+                    ],
+                    "repairable": [
+                      "container",
+                      [
+                        {
+                          "name": "items",
+                          "type": "IDSet"
+                        }
+                      ]
+                    ],
+                    "glider": "void",
+                    "tooltip_style": "string",
+                    "death_protection": [
+                      "container",
+                      [
+                        {
+                          "name": "effects",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemConsumeEffect"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "blocks_attacks": [
+                      "container",
+                      [
+                        {
+                          "name": "blockDelaySeconds",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "disableCooldownScale",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "damageReductions",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "horizontalBlockingAngle",
+                                    "type": "f32"
+                                  },
+                                  {
+                                    "name": "type",
+                                    "type": [
+                                      "option",
+                                      "IDSet"
+                                    ]
+                                  },
+                                  {
+                                    "name": "base",
+                                    "type": "f32"
+                                  },
+                                  {
+                                    "name": "factor",
+                                    "type": "f32"
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "name": "itemDamage",
+                          "type": [
+                            "container",
+                            [
+                              {
+                                "name": "threshold",
+                                "type": "f32"
+                              },
+                              {
+                                "name": "base",
+                                "type": "f32"
+                              },
+                              {
+                                "name": "factor",
+                                "type": "f32"
+                              }
+                            ]
+                          ]
+                        },
+                        {
+                          "name": "bypassedBy",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        },
+                        {
+                          "name": "blockSound",
+                          "type": [
+                            "option",
+                            "ItemSoundHolder"
+                          ]
+                        },
+                        {
+                          "name": "disableSound",
+                          "type": [
+                            "option",
+                            "ItemSoundHolder"
+                          ]
+                        }
+                      ]
+                    ],
+                    "piercing_weapon": [
+                      "container",
+                      [
+                        {
+                          "name": "dealsKnockback",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "dismounts",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "sound",
+                          "type": [
+                            "option",
+                            "ItemSoundHolder"
+                          ]
+                        },
+                        {
+                          "name": "hitSound",
+                          "type": [
+                            "option",
+                            "ItemSoundHolder"
+                          ]
+                        }
+                      ]
+                    ],
+                    "kinetic_weapon": [
+                      "container",
+                      [
+                        {
+                          "name": "contactCooldownTicks",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "delayTicks",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "dismountConditions",
+                          "type": [
+                            "option",
+                            "KineticWeaponCondition"
+                          ]
+                        },
+                        {
+                          "name": "knockbackConditions",
+                          "type": [
+                            "option",
+                            "KineticWeaponCondition"
+                          ]
+                        },
+                        {
+                          "name": "damageConditions",
+                          "type": [
+                            "option",
+                            "KineticWeaponCondition"
+                          ]
+                        },
+                        {
+                          "name": "forwardMovement",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "damageMultiplier",
+                          "type": "f32"
+                        },
+                        {
+                          "name": "sound",
+                          "type": [
+                            "option",
+                            "ItemSoundHolder"
+                          ]
+                        },
+                        {
+                          "name": "hitSound",
+                          "type": [
+                            "option",
+                            "ItemSoundHolder"
+                          ]
+                        }
+                      ]
+                    ],
+                    "attack_animation": [
+                      "container",
+                      [
+                        {
+                          "name": "type",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "none",
+                                "1": "whack",
+                                "2": "stab"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "duration",
+                          "type": "varint"
+                        }
+                      ]
+                    ],
+                    "interact_animation": [
+                      "container",
+                      [
+                        {
+                          "name": "type",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "none",
+                                "1": "whack",
+                                "2": "stab"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "duration",
+                          "type": "varint"
+                        }
+                      ]
+                    ],
+                    "additional_trade_cost": "varint",
+                    "villager_food": [
+                      "container",
+                      [
+                        {
+                          "name": "value",
+                          "type": "varint"
+                        }
+                      ]
+                    ],
+                    "stored_enchantments": [
+                      "container",
+                      [
+                        {
+                          "name": "enchantments",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "id",
+                                    "type": "varint"
+                                  },
+                                  {
+                                    "name": "level",
+                                    "type": "varint"
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "dye": "DyeColor",
+                    "dyed_color": "i32",
+                    "map_id": "varint",
+                    "map_decorations": "anonymousNbt",
+                    "map_post_processing": "varint",
+                    "charged_projectiles": [
+                      "container",
+                      [
+                        {
+                          "name": "projectiles",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemStackTemplate"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "bundle_contents": [
+                      "container",
+                      [
+                        {
+                          "name": "contents",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemStackTemplate"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "potion_contents": [
+                      "container",
+                      [
+                        {
+                          "name": "potionId",
+                          "type": [
+                            "option",
+                            "varint"
+                          ]
+                        },
+                        {
+                          "name": "customColor",
+                          "type": [
+                            "option",
+                            "i32"
+                          ]
+                        },
+                        {
+                          "name": "customEffects",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemPotionEffect"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "customName",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        }
+                      ]
+                    ],
+                    "potion_duration_scale": "f32",
+                    "suspicious_stew_effects": [
+                      "container",
+                      [
+                        {
+                          "name": "effects",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "effect",
+                                    "type": "varint"
+                                  },
+                                  {
+                                    "name": "duration",
+                                    "type": "varint"
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "writable_book_content": [
+                      "container",
+                      [
+                        {
+                          "name": "pages",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemBookPage"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "written_book_content": [
+                      "container",
+                      [
+                        {
+                          "name": "rawTitle",
+                          "type": "string"
+                        },
+                        {
+                          "name": "filteredTitle",
+                          "type": [
+                            "option",
+                            "string"
+                          ]
+                        },
+                        {
+                          "name": "author",
+                          "type": "string"
+                        },
+                        {
+                          "name": "generation",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "pages",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemWrittenBookPage"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "resolved",
+                          "type": "bool"
+                        }
+                      ]
+                    ],
+                    "trim": [
+                      "container",
+                      [
+                        {
+                          "name": "material",
+                          "type": [
+                            "registryEntryHolder",
+                            {
+                              "baseName": "materialId",
+                              "otherwise": {
+                                "name": "data",
+                                "type": "ArmorTrimMaterial"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "pattern",
+                          "type": [
+                            "registryEntryHolder",
+                            {
+                              "baseName": "patternId",
+                              "otherwise": {
+                                "name": "data",
+                                "type": "ArmorTrimPattern"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "debug_stick_state": "anonymousNbt",
+                    "entity_data": [
+                      "container",
+                      [
+                        {
+                          "name": "type",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "data",
+                          "type": "anonymousNbt"
+                        }
+                      ]
+                    ],
+                    "bucket_entity_data": "anonymousNbt",
+                    "block_entity_data": [
+                      "container",
+                      [
+                        {
+                          "name": "type",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "data",
+                          "type": "anonymousNbt"
+                        }
+                      ]
+                    ],
+                    "instrument": [
+                      "container",
+                      [
+                        {
+                          "name": "hasHolder",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "data",
+                          "type": [
+                            "switch",
+                            {
+                              "compareTo": "hasHolder",
+                              "fields": {
+                                "true": [
+                                  "registryEntryHolder",
+                                  {
+                                    "baseName": "instrumentId",
+                                    "otherwise": {
+                                      "name": "data",
+                                      "type": "InstrumentData"
+                                    }
+                                  }
+                                ],
+                                "false": "string"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "provides_trim_material": [
+                      "container",
+                      [
+                        {
+                          "name": "hasHolder",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "material",
+                          "type": [
+                            "switch",
+                            {
+                              "compareTo": "hasHolder",
+                              "fields": {
+                                "true": [
+                                  "registryEntryHolder",
+                                  {
+                                    "baseName": "materialId",
+                                    "otherwise": {
+                                      "name": "data",
+                                      "type": "ArmorTrimMaterial"
+                                    }
+                                  }
+                                ],
+                                "false": "string"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "ominous_bottle_amplifier": "varint",
+                    "jukebox_playable": [
+                      "container",
+                      [
+                        {
+                          "name": "hasHolder",
+                          "type": "bool"
+                        },
+                        {
+                          "name": "song",
+                          "type": [
+                            "switch",
+                            {
+                              "compareTo": "hasHolder",
+                              "fields": {
+                                "true": [
+                                  "registryEntryHolder",
+                                  {
+                                    "baseName": "songId",
+                                    "otherwise": {
+                                      "name": "data",
+                                      "type": "JukeboxSongData"
+                                    }
+                                  }
+                                ],
+                                "false": "string"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "provides_banner_patterns": "string",
+                    "recipes": "anonymousNbt",
+                    "lodestone_tracker": [
+                      "container",
+                      [
+                        {
+                          "name": "globalPosition",
+                          "type": [
+                            "option",
+                            "GlobalPos"
+                          ]
+                        },
+                        {
+                          "name": "tracked",
+                          "type": "bool"
+                        }
+                      ]
+                    ],
+                    "firework_explosion": "ItemFireworkExplosion",
+                    "fireworks": [
+                      "container",
+                      [
+                        {
+                          "name": "flightDuration",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "explosions",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "ItemFireworkExplosion"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "profile": "ResolvableProfile",
+                    "note_block_sound": "string",
+                    "banner_patterns": [
+                      "container",
+                      [
+                        {
+                          "name": "layers",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": "BannerPatternLayer"
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "base_color": "DyeColor",
+                    "pot_decorations": [
+                      "container",
+                      [
+                        {
+                          "name": "back",
+                          "type": [
+                            "option",
+                            "ItemStackTemplate"
+                          ]
+                        },
+                        {
+                          "name": "left",
+                          "type": [
+                            "option",
+                            "ItemStackTemplate"
+                          ]
+                        },
+                        {
+                          "name": "right",
+                          "type": [
+                            "option",
+                            "ItemStackTemplate"
+                          ]
+                        },
+                        {
+                          "name": "front",
+                          "type": [
+                            "option",
+                            "ItemStackTemplate"
+                          ]
+                        }
+                      ]
+                    ],
+                    "container": [
+                      "container",
+                      [
+                        {
+                          "name": "contents",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "option",
+                                "ItemStackTemplate"
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "block_state": [
+                      "container",
+                      [
+                        {
+                          "name": "properties",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "name",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "name": "value",
+                                    "type": "string"
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "bees": [
+                      "container",
+                      [
+                        {
+                          "name": "bees",
+                          "type": [
+                            "array",
+                            {
+                              "countType": "varint",
+                              "type": [
+                                "container",
+                                [
+                                  {
+                                    "name": "nbtData",
+                                    "type": "anonymousNbt"
+                                  },
+                                  {
+                                    "name": "ticksInHive",
+                                    "type": "varint"
+                                  },
+                                  {
+                                    "name": "minTicksInHive",
+                                    "type": "varint"
+                                  }
+                                ]
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    ],
+                    "sulfur_cube_content": "ItemStackTemplate",
+                    "lock": "anonymousNbt",
+                    "container_loot": "anonymousNbt",
+                    "break_sound": "ItemSoundHolder",
+                    "mob_visibility": [
+                      "container",
+                      [
+                        {
+                          "name": "entities",
+                          "type": "IDSet"
+                        },
+                        {
+                          "name": "multiplier",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "villager/variant": "varint",
+                    "wolf/variant": "varint",
+                    "wolf/sound_variant": "varint",
+                    "wolf/collar": "DyeColor",
+                    "fox/variant": "varint",
+                    "salmon/size": "varint",
+                    "parrot/variant": "varint",
+                    "tropical_fish/pattern": "varint",
+                    "tropical_fish/base_color": "DyeColor",
+                    "tropical_fish/pattern_color": "DyeColor",
+                    "mooshroom/variant": "varint",
+                    "rabbit/variant": "varint",
+                    "pig/variant": "varint",
+                    "pig/sound_variant": "varint",
+                    "cow/variant": "varint",
+                    "cow/sound_variant": "varint",
+                    "chicken/variant": [
+                      "registryEntryHolder",
+                      {
+                        "baseName": "variantId",
+                        "otherwise": {
+                          "name": "variantData",
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "chicken/sound_variant": [
+                      "registryEntryHolder",
+                      {
+                        "baseName": "variantId",
+                        "otherwise": {
+                          "name": "variantData",
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "zombie_nautilus/variant": [
+                      "registryEntryHolder",
+                      {
+                        "baseName": "variantId",
+                        "otherwise": {
+                          "name": "variantData",
+                          "type": "string"
+                        }
+                      }
+                    ],
+                    "frog/variant": "varint",
+                    "horse/variant": "varint",
+                    "painting/variant": [
+                      "registryEntryHolder",
+                      {
+                        "baseName": "variantId",
+                        "otherwise": {
+                          "name": "data",
+                          "type": "EntityMetadataPaintingVariant"
+                        }
+                      }
+                    ],
+                    "llama/variant": "varint",
+                    "axolotl/variant": "varint",
+                    "cat/variant": "varint",
+                    "cat/sound_variant": "varint",
+                    "cat/collar": "DyeColor",
+                    "sheep/color": "DyeColor",
+                    "shulker/color": "DyeColor",
+                    "sign_text_front": [
+                      "container",
+                      [
+                        {
+                          "name": "messages",
+                          "type": [
+                            "array",
+                            {
+                              "count": 4,
+                              "type": "anonymousNbt"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "filteredMessages",
+                          "type": [
+                            "option",
+                            [
+                              "array",
+                              {
+                                "count": 4,
+                                "type": "anonymousNbt"
+                              }
+                            ]
+                          ]
+                        },
+                        {
+                          "name": "color",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "hasGlowingText",
+                          "type": "bool"
+                        }
+                      ]
+                    ],
+                    "sign_text_back": [
+                      "container",
+                      [
+                        {
+                          "name": "messages",
+                          "type": [
+                            "array",
+                            {
+                              "count": 4,
+                              "type": "anonymousNbt"
+                            }
+                          ]
+                        },
+                        {
+                          "name": "filteredMessages",
+                          "type": [
+                            "option",
+                            [
+                              "array",
+                              {
+                                "count": 4,
+                                "type": "anonymousNbt"
+                              }
+                            ]
+                          ]
+                        },
+                        {
+                          "name": "color",
+                          "type": "varint"
+                        },
+                        {
+                          "name": "hasGlowingText",
+                          "type": "bool"
+                        }
+                      ]
+                    ],
+                    "waxed": "void",
+                    "cushion/color": "varint",
+                    "block_transformer": "varint",
+                    "provides_pottery_pattern": "varint",
+                    "compostable": [
+                      "container",
+                      [
+                        {
+                          "name": "layers",
+                          "type": [
+                            "container",
+                            [
+                              {
+                                "name": "isConstant",
+                                "type": "bool"
+                              },
+                              {
+                                "name": "value",
+                                "type": [
+                                  "switch",
+                                  {
+                                    "compareTo": "isConstant",
+                                    "fields": {
+                                      "true": "i32",
+                                      "false": "string"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          ]
+                        }
+                      ]
+                    ],
+                    "cooking_fuel": [
+                      "container",
+                      [
+                        {
+                          "name": "burnTime",
+                          "type": [
+                            "container",
+                            [
+                              {
+                                "name": "isConstant",
+                                "type": "bool"
+                              },
+                              {
+                                "name": "value",
+                                "type": [
+                                  "switch",
+                                  {
+                                    "compareTo": "isConstant",
+                                    "fields": {
+                                      "true": "i32",
+                                      "false": "string"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          ]
+                        },
+                        {
+                          "name": "speedMultiplier",
+                          "type": [
+                            "container",
+                            [
+                              {
+                                "name": "isConstant",
+                                "type": "bool"
+                              },
+                              {
+                                "name": "value",
+                                "type": [
+                                  "switch",
+                                  {
+                                    "compareTo": "isConstant",
+                                    "fields": {
+                                      "true": "f32",
+                                      "false": "string"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          ]
+                        }
+                      ]
+                    ],
+                    "brewing_fuel": [
+                      "container",
+                      [
+                        {
+                          "name": "uses",
+                          "type": [
+                            "container",
+                            [
+                              {
+                                "name": "isConstant",
+                                "type": "bool"
+                              },
+                              {
+                                "name": "value",
+                                "type": [
+                                  "switch",
+                                  {
+                                    "compareTo": "isConstant",
+                                    "fields": {
+                                      "true": "i32",
+                                      "false": "string"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          ]
+                        },
+                        {
+                          "name": "speedMultiplier",
+                          "type": [
+                            "container",
+                            [
+                              {
+                                "name": "isConstant",
+                                "type": "bool"
+                              },
+                              {
+                                "name": "value",
+                                "type": [
+                                  "switch",
+                                  {
+                                    "compareTo": "isConstant",
+                                    "fields": {
+                                      "true": "f32",
+                                      "false": "string"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          ]
+                        }
+                      ]
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "Particle geyser_plume: vanilla 26.3 GeyserParticleOptions carries a single waterBlocks int while geyser_base/geyser_poof use GeyserBaseParticleOptions (int plus float); the description gives geyser_plume the base shape (net/minecraft/core/particles/ParticleTypes.java, net/minecraft/core/particles/GeyserParticleOptions.java)",
+      "scope": "global",
+      "types": {
+        "Particle": [
+          "container",
+          [
+            {
+              "name": "type",
+              "type": [
+                "mapper",
+                {
+                  "type": "varint",
+                  "mappings": {
+                    "0": "angry_villager",
+                    "1": "block",
+                    "2": "block_marker",
+                    "3": "bubble",
+                    "4": "sulfur_bubbles",
+                    "5": "noxious_gas",
+                    "6": "noxious_gas_cloud",
+                    "7": "geyser",
+                    "8": "geyser_base",
+                    "9": "geyser_poof",
+                    "10": "geyser_plume",
+                    "11": "cloud",
+                    "12": "copper_fire_flame",
+                    "13": "crit",
+                    "14": "damage_indicator",
+                    "15": "dragon_breath",
+                    "16": "dripping_lava",
+                    "17": "falling_lava",
+                    "18": "landing_lava",
+                    "19": "dripping_water",
+                    "20": "falling_water",
+                    "21": "dust",
+                    "22": "dust_color_transition",
+                    "23": "effect",
+                    "24": "elder_guardian",
+                    "25": "enchanted_hit",
+                    "26": "enchant",
+                    "27": "end_rod",
+                    "28": "entity_effect",
+                    "29": "explosion_emitter",
+                    "30": "explosion",
+                    "31": "gust",
+                    "32": "small_gust",
+                    "33": "gust_emitter_large",
+                    "34": "gust_emitter_small",
+                    "35": "sonic_boom",
+                    "36": "falling_dust",
+                    "37": "firework",
+                    "38": "fishing",
+                    "39": "flame",
+                    "40": "infested",
+                    "41": "cherry_leaves",
+                    "42": "pale_oak_leaves",
+                    "43": "red_poplar_leaves",
+                    "44": "orange_poplar_leaves",
+                    "45": "yellow_poplar_leaves",
+                    "46": "tinted_leaves",
+                    "47": "sculk_soul",
+                    "48": "sculk_charge",
+                    "49": "sculk_charge_pop",
+                    "50": "soul_fire_flame",
+                    "51": "soul",
+                    "52": "flash",
+                    "53": "happy_villager",
+                    "54": "composter",
+                    "55": "heart",
+                    "56": "instant_effect",
+                    "57": "item",
+                    "58": "vibration",
+                    "59": "trail",
+                    "60": "pause_mob_growth",
+                    "61": "reset_mob_growth",
+                    "62": "item_slime",
+                    "63": "item_cobweb",
+                    "64": "item_snowball",
+                    "65": "large_smoke",
+                    "66": "lava",
+                    "67": "mycelium",
+                    "68": "note",
+                    "69": "poof",
+                    "70": "portal",
+                    "71": "rain",
+                    "72": "smoke",
+                    "73": "white_smoke",
+                    "74": "sneeze",
+                    "75": "spit",
+                    "76": "squid_ink",
+                    "77": "sweep_attack",
+                    "78": "totem_of_undying",
+                    "79": "underwater",
+                    "80": "splash",
+                    "81": "witch",
+                    "82": "bubble_pop",
+                    "83": "current_down",
+                    "84": "bubble_column_up",
+                    "85": "nautilus",
+                    "86": "dolphin",
+                    "87": "campfire_cosy_smoke",
+                    "88": "campfire_signal_smoke",
+                    "89": "dripping_honey",
+                    "90": "falling_honey",
+                    "91": "landing_honey",
+                    "92": "falling_nectar",
+                    "93": "falling_spore_blossom",
+                    "94": "ash",
+                    "95": "crimson_spore",
+                    "96": "warped_spore",
+                    "97": "spore_blossom_air",
+                    "98": "dripping_obsidian_tear",
+                    "99": "falling_obsidian_tear",
+                    "100": "landing_obsidian_tear",
+                    "101": "reverse_portal",
+                    "102": "white_ash",
+                    "103": "small_flame",
+                    "104": "snowflake",
+                    "105": "dripping_dripstone_lava",
+                    "106": "falling_dripstone_lava",
+                    "107": "dripping_dripstone_water",
+                    "108": "falling_dripstone_water",
+                    "109": "glow_squid_ink",
+                    "110": "glow",
+                    "111": "wax_on",
+                    "112": "wax_off",
+                    "113": "electric_spark",
+                    "114": "scrape",
+                    "115": "shriek",
+                    "116": "egg_crack",
+                    "117": "dust_plume",
+                    "118": "trial_spawner_detection",
+                    "119": "trial_spawner_detection_ominous",
+                    "120": "vault_connection",
+                    "121": "dust_pillar",
+                    "122": "ominous_spawning",
+                    "123": "raid_omen",
+                    "124": "trial_omen",
+                    "125": "block_crumble",
+                    "126": "firefly",
+                    "127": "sulfur_cube_goo"
+                  }
+                }
+              ]
+            },
+            {
+              "name": "data",
+              "type": [
+                "switch",
+                {
+                  "compareTo": "type",
+                  "fields": {
+                    "block": "varint",
+                    "block_marker": "varint",
+                    "falling_dust": "varint",
+                    "dust_pillar": "varint",
+                    "block_crumble": "varint",
+                    "geyser": "i32",
+                    "geyser_base": [
+                      "container",
+                      [
+                        {
+                          "name": "waterBlocks",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "burstImpulseBase",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "geyser_poof": [
+                      "container",
+                      [
+                        {
+                          "name": "waterBlocks",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "burstImpulseBase",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "geyser_plume": "i32",
+                    "dust": [
+                      "container",
+                      [
+                        {
+                          "name": "color",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "scale",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "dust_color_transition": [
+                      "container",
+                      [
+                        {
+                          "name": "fromColor",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "toColor",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "scale",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "entity_effect": "i32",
+                    "item": "ItemStackTemplate",
+                    "sculk_charge": "f32",
+                    "shriek": "varint",
+                    "vibration": [
+                      "container",
+                      [
+                        {
+                          "name": "positionType",
+                          "type": [
+                            "mapper",
+                            {
+                              "type": "varint",
+                              "mappings": {
+                                "0": "block",
+                                "1": "entity"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "position",
+                          "type": [
+                            "switch",
+                            {
+                              "compareTo": "positionType",
+                              "fields": {
+                                "block": "position",
+                                "entity": [
+                                  "container",
+                                  [
+                                    {
+                                      "name": "entityId",
+                                      "type": "varint"
+                                    },
+                                    {
+                                      "name": "entityEyeHeight",
+                                      "type": "f32"
+                                    }
+                                  ]
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "name": "ticks",
+                          "type": "varint"
+                        }
+                      ]
+                    ],
+                    "trail": [
+                      "container",
+                      [
+                        {
+                          "name": "target",
+                          "type": "vec3f64"
+                        },
+                        {
+                          "name": "color",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "duration",
+                          "type": "varint"
+                        }
+                      ]
+                    ],
+                    "tinted_leaves": "i32",
+                    "firefly": "void",
+                    "dragon_breath": [
+                      "container",
+                      [
+                        {
+                          "name": "power",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "effect": [
+                      "container",
+                      [
+                        {
+                          "name": "color",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "power",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "instant_effect": [
+                      "container",
+                      [
+                        {
+                          "name": "color",
+                          "type": "i32"
+                        },
+                        {
+                          "name": "power",
+                          "type": "f32"
+                        }
+                      ]
+                    ],
+                    "flash": "i32"
+                  }
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "reason": "entity_update_attributes: vanilla 26.3 registers 40 attributes with air_drag_modifier at 0 shifting every later id (numeric registry ids via holderRegistry); the description has a stale 31-entry table with 26.1 ids (e.g. wire id 1 is armor, the description says armor_toughness) and is missing mining_efficiency, movement_efficiency, oxygen_bonus and sneaking_speed (net/minecraft/world/entity/ai/attributes/Attributes.java, net/minecraft/world/entity/ai/attributes/Attribute.java)",
+      "scope": "play.toClient",
+      "types": {
+        "packet_entity_update_attributes": [
+          "container",
+          [
+            {
+              "name": "entityId",
+              "type": "varint"
+            },
+            {
+              "name": "properties",
+              "type": [
+                "array",
+                {
+                  "countType": "varint",
+                  "type": [
+                    "container",
+                    [
+                      {
+                        "name": "key",
+                        "type": [
+                          "mapper",
+                          {
+                            "type": "varint",
+                            "mappings": {
+                              "0": "air_drag_modifier",
+                              "1": "generic.armor",
+                              "2": "generic.armor_toughness",
+                              "3": "generic.attack_damage",
+                              "4": "generic.attack_knockback",
+                              "5": "generic.attack_speed",
+                              "6": "below_name_distance",
+                              "7": "player.block_break_speed",
+                              "8": "player.block_interaction_range",
+                              "9": "bounciness",
+                              "10": "burning_time",
+                              "11": "camera_distance",
+                              "12": "explosion_knockback_resistance",
+                              "13": "player.entity_interaction_range",
+                              "14": "generic.fall_damage_multiplier",
+                              "15": "generic.flying_speed",
+                              "16": "generic.follow_range",
+                              "17": "friction_modifier",
+                              "18": "generic.gravity",
+                              "19": "generic.jump_strength",
+                              "20": "generic.knockback_resistance",
+                              "21": "generic.luck",
+                              "22": "generic.max_absorption",
+                              "23": "generic.max_health",
+                              "24": "mining_efficiency",
+                              "25": "movement_efficiency",
+                              "26": "generic.movement_speed",
+                              "27": "name_tag_distance",
+                              "28": "oxygen_bonus",
+                              "29": "generic.safe_fall_distance",
+                              "30": "generic.scale",
+                              "31": "sneaking_speed",
+                              "32": "zombie.spawn_reinforcements",
+                              "33": "generic.step_height",
+                              "34": "submerged_mining_speed",
+                              "35": "sweeping_damage_ratio",
+                              "36": "tempt_range",
+                              "37": "water_movement_efficiency",
+                              "38": "waypoint_transmit_range",
+                              "39": "waypoint_receive_range"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "name": "value",
+                        "type": "f64"
+                      },
+                      {
+                        "name": "modifiers",
+                        "type": [
+                          "array",
+                          {
+                            "countType": "varint",
+                            "type": [
+                              "container",
+                              [
+                                {
+                                  "name": "uuid",
+                                  "type": "string"
+                                },
+                                {
+                                  "name": "amount",
+                                  "type": "f64"
+                                },
+                                {
+                                  "name": "operation",
+                                  "type": "i8"
+                                }
+                              ]
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        ]
+      }
+    }
+  ]
+}

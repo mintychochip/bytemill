@@ -317,6 +317,22 @@ fn json_err(msg: &str) -> BpsError {
     BpsError::new(crate::errors::ErrorKind::Shape, format!("json error: {msg}"))
 }
 
+/// An integer literal that does not fit `i128`, reduced modulo 2^128 (two's complement). Python's
+/// `int` is unbounded, so a width-masked encode of `2**200 + 5` sees `5`; rounding to a float, as
+/// this once did, drops those low digits and encodes zeros.
+fn wrap_to_i128(literal: &str) -> i128 {
+    let (negative, digits) = match literal.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, literal),
+    };
+    let mut acc: u128 = 0;
+    for byte in digits.bytes() {
+        acc = acc.wrapping_mul(10).wrapping_add(u128::from(byte - b'0'));
+    }
+    let value = acc as i128;
+    if negative { value.wrapping_neg() } else { value }
+}
+
 struct JsonParser {
     chars: Vec<char>,
     pos: usize,
@@ -548,10 +564,7 @@ impl JsonParser {
         } else {
             match text.parse::<i128>() {
                 Ok(i) => Ok(Value::Int(i)),
-                Err(_) => text
-                    .parse::<f64>()
-                    .map(Value::Float)
-                    .map_err(|_| json_err("Invalid number")),
+                Err(_) => Ok(Value::Int(wrap_to_i128(&text))),
             }
         }
     }
