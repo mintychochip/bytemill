@@ -980,12 +980,18 @@ fn collect_fields(
     for item in items {
         match item {
             BlockItem::Require(_) | BlockItem::Spread { .. } => {}
-            BlockItem::Computed { name, expr } => fields.push(Field {
-                name: name.clone(),
-                ty: Ty::Scalar(storage_of(expr, &HashMap::new())),
-                optional: false,
-            }),
-            BlockItem::Field(wf) => fields.push(field_desc(owner, wf, false, resolved, ir)?),
+            BlockItem::Computed { name, expr } => add_field(
+                owner,
+                &mut fields,
+                Field {
+                    name: name.clone(),
+                    ty: Ty::Scalar(storage_of(expr, &HashMap::new())),
+                    optional: false,
+                },
+            )?,
+            BlockItem::Field(wf) => {
+                add_field(owner, &mut fields, field_desc(owner, wf, false, resolved, ir)?)?;
+            }
             BlockItem::Group { cond, items } => {
                 let mut inner = collect_fields(owner, items, resolved, ir)?;
                 if cond.is_some() {
@@ -993,12 +999,31 @@ fn collect_fields(
                         field.optional = true;
                     }
                 }
-                fields.extend(inner);
+                for field in inner {
+                    add_field(owner, &mut fields, field)?;
+                }
             }
-            BlockItem::MatchStmt(mt) => fields.extend(match_stmt_fields(owner, mt, resolved, ir)?),
+            BlockItem::MatchStmt(mt) => {
+                for field in match_stmt_fields(owner, mt, resolved, ir)? {
+                    add_field(owner, &mut fields, field)?;
+                }
+            }
         }
     }
     Ok(fields)
+}
+
+fn add_field(owner: &str, fields: &mut Vec<Field>, field: Field) -> BpsResult<()> {
+    let _ = owner;
+    if let Some(existing) = fields.iter_mut().find(|have| have.name == field.name) {
+        if existing.ty != field.ty {
+            existing.ty = Ty::Named(TypeId("__any".into()));
+        }
+        existing.optional = existing.optional && field.optional;
+        return Ok(());
+    }
+    fields.push(field);
+    Ok(())
 }
 
 fn field_desc(

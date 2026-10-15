@@ -184,7 +184,7 @@ enum intent : varint { status = 1 login = 2 }
 packet opt { flag: boolean  extra: u8 if flag }
 packet counted { n: u8  items: u8[] count = n }
 packet untilled { entries: u8[] until 0 }
-packet rest { entries: u8[] until_end }
+packet tail { entries: u8[] until_end }
 packet tagged { tag: u8  value: match tag { 1 => u8  _ => u16be } }
 "#;
     let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
@@ -212,7 +212,7 @@ packet tagged { tag: u8  value: match tag { 1 => u8  _ => u16be } }
         vec![1, 2, 0]
     );
 
-    let decoded = exec_decode(&ir, "rest", &[], &[9, 8]).unwrap();
+    let decoded = exec_decode(&ir, "tail", &[], &[9, 8]).unwrap();
     let Value::Map(map) = decoded else {
         panic!("map")
     };
@@ -221,7 +221,7 @@ packet tagged { tag: u8  value: match tag { 1 => u8  _ => u16be } }
         Some(&Value::list(vec![Value::Int(9), Value::Int(8)]))
     );
     assert!(
-        exec_encode(&ir, "rest", &[], &Value::map(Env::new()))
+        exec_encode(&ir, "tail", &[], &Value::map(Env::new()))
             .unwrap_err()
             .to_string()
             .contains("until_end")
