@@ -1,8 +1,8 @@
 //! `emit c`: a `.h` and `.c` whose encode and decode functions are the IR.
 //!
-//! Scalar values are `int64_t`. A `bps_alloc` is part of every signature, as the
-//! spec requires; integer scalars do not allocate.
-
+//! Scalar values are `int64_t`. Float scalars are the IEEE bits (f32 in the low
+//! 32 bits, f64 in all 64). A `bps_alloc` is part of every signature; integer
+//! and float scalars do not allocate.
 use std::fs;
 use std::path::Path;
 
@@ -23,7 +23,11 @@ typedef struct {
     void *ctx;
 } bps_alloc;
 int bps_cursor_u8(bps_cursor *c, int64_t *out);
+int bps_cursor_f32(bps_cursor *c, int64_t *out);
+int bps_cursor_f64(bps_cursor *c, int64_t *out);
 int bps_writer_u8(bps_writer *w, bps_alloc *a, int64_t v);
+int bps_writer_f32(bps_writer *w, bps_alloc *a, int64_t v);
+int bps_writer_f64(bps_writer *w, bps_alloc *a, int64_t v);
 int64_t bps_sign_extend(int64_t v, int bits);
 #endif
 "#;
@@ -41,6 +45,39 @@ int bps_writer_u8(bps_writer *w, bps_alloc *a, int64_t v) {
     w->data[w->len++] = (uint8_t)(v & 0xFF);
     return 0;
 }
+int bps_cursor_f32(bps_cursor *c, int64_t *out) {
+    if (c->pos + 4 > c->len) return 1;
+    uint32_t u = ((uint32_t)c->data[c->pos] << 24) | ((uint32_t)c->data[c->pos + 1] << 16)
+        | ((uint32_t)c->data[c->pos + 2] << 8) | (uint32_t)c->data[c->pos + 3];
+    c->pos += 4;
+    *out = (int64_t)u;
+    return 0;
+}
+int bps_cursor_f64(bps_cursor *c, int64_t *out) {
+    if (c->pos + 8 > c->len) return 1;
+    uint64_t u = 0;
+    for (int i = 0; i < 8; i++) u = (u << 8) | c->data[c->pos++];
+    memcpy(out, &u, sizeof u);
+    return 0;
+}
+int bps_writer_f32(bps_writer *w, bps_alloc *a, int64_t v) {
+    (void)a;
+    if (w->len + 4 > w->cap) return 1;
+    uint32_t u = (uint32_t)v;
+    w->data[w->len++] = (uint8_t)(u >> 24);
+    w->data[w->len++] = (uint8_t)(u >> 16);
+    w->data[w->len++] = (uint8_t)(u >> 8);
+    w->data[w->len++] = (uint8_t)u;
+    return 0;
+}
+int bps_writer_f64(bps_writer *w, bps_alloc *a, int64_t v) {
+    (void)a;
+    if (w->len + 8 > w->cap) return 1;
+    uint64_t u = 0;
+    memcpy(&u, &v, sizeof u);
+    for (int i = 7; i >= 0; i--) w->data[w->len++] = (uint8_t)(u >> (8 * i));
+    return 0;
+}
 int64_t bps_sign_extend(int64_t v, int bits) {
     if (bits <= 0 || bits >= 64) return v;
     int64_t mask = (int64_t)1 << (bits - 1);
@@ -48,7 +85,6 @@ int64_t bps_sign_extend(int64_t v, int bits) {
     return v;
 }
 "#;
-
 pub fn emit_c(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let ir = lower(resolved)?;
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
@@ -143,8 +179,24 @@ fn stmt_c(stmt: &Stmt, decode: bool) -> BpsResult<String> {
             "    if (bps_cursor_u8(c, &v_{})) return 1;\n",
             c_name(dst)
         )),
+        Stmt::Read { dst, op: WireOp::F32be } => Ok(format!(
+            "    if (bps_cursor_f32(c, &v_{})) return 1;\n",
+            c_name(dst)
+        )),
+        Stmt::Read { dst, op: WireOp::F64be } => Ok(format!(
+            "    if (bps_cursor_f64(c, &v_{})) return 1;\n",
+            c_name(dst)
+        )),
         Stmt::Write { op: WireOp::U8, value } => Ok(format!(
             "    if (bps_writer_u8(w, a, {})) return 1;\n",
+            c_expr(value)
+        )),
+        Stmt::Write { op: WireOp::F32be, value } => Ok(format!(
+            "    if (bps_writer_f32(w, a, {})) return 1;\n",
+            c_expr(value)
+        )),
+        Stmt::Write { op: WireOp::F64be, value } => Ok(format!(
+            "    if (bps_writer_f64(w, a, {})) return 1;\n",
             c_expr(value)
         )),
         Stmt::CallDecode { dst, callee, args } if args.is_empty() => Ok(format!(

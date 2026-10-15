@@ -49,6 +49,8 @@ class Writer:
         self.buf.append(v & 0xFF)
 
     def bytes(self, b):
+        if isinstance(b, str):
+            b = b.encode("utf-8")
         self.buf.extend(b)
 
     def f32(self, v):
@@ -93,6 +95,7 @@ fn gen_body(ir: &IrSchema) -> BpsResult<String> {
         let extra = if params.is_empty() { String::new() } else { format!(", {params}") };
         out.push_str(&format!("def decode_{}(cur{extra}):\n", py_name(name)));
         out.push_str("    env = {}\n");
+        out.push_str("    _stack = []\n");
         if matches!(ir.types.get(name), Some(TypeDef::Scalar(_))) {
             for dest in prebind_dests(&proc.body) {
                 out.push_str(&format!("    env[{dest:?}] = 0\n"));
@@ -101,7 +104,8 @@ fn gen_body(ir: &IrSchema) -> BpsResult<String> {
         for p in &proc.params {
             out.push_str(&format!("    env[{p:?}] = {p}\n"));
         }
-        let body = stmts(&proc.body, "    ")?;
+        let mut seq = 0u32;
+        let body = stmts(&proc.body, "    ", false, &mut seq)?;
         if body.trim().is_empty() {
             out.push_str("    pass\n");
         } else {
@@ -117,6 +121,7 @@ fn gen_body(ir: &IrSchema) -> BpsResult<String> {
         let extra = if params.is_empty() { String::new() } else { format!(", {params}") };
         out.push_str(&format!("def encode_{}(w, value{extra}):\n", py_name(name)));
         out.push_str("    env = {\"value\": value}\n");
+        out.push_str("    _stack = []\n");
         if matches!(ir.types.get(name), Some(TypeDef::Scalar(_))) {
             for dest in prebind_dests(&proc.body) {
                 out.push_str(&format!("    if {dest:?} not in env:\n        env[{dest:?}] = 0\n"));
@@ -124,13 +129,17 @@ fn gen_body(ir: &IrSchema) -> BpsResult<String> {
         }
         if let Some(TypeDef::Record { fields }) = ir.types.get(name) {
             for field in fields {
-                out.push_str(&format!("    env[{:?}] = value[{:?}]\n", field.name, field.name));
+                out.push_str(&format!(
+                    "    env[{name:?}] = value.get({name:?}) if isinstance(value, dict) else None\n",
+                    name = field.name
+                ));
             }
         }
         for p in &proc.params {
             out.push_str(&format!("    env[{p:?}] = {p}\n"));
         }
-        let body = stmts(&proc.body, "    ")?;
+        let mut seq = 0u32;
+        let body = stmts(&proc.body, "    ", true, &mut seq)?;
         if body.trim().is_empty() {
             out.push_str("    pass\n");
         } else {
@@ -142,15 +151,15 @@ fn gen_body(ir: &IrSchema) -> BpsResult<String> {
     Ok(out)
 }
 
-fn stmts(body: &[Stmt], indent: &str) -> BpsResult<String> {
+fn stmts(body: &[Stmt], indent: &str, is_encode: bool, seq: &mut u32) -> BpsResult<String> {
     let mut out = String::new();
     for stmt in body {
-        out.push_str(&stmt_py(stmt, indent)?);
+        out.push_str(&stmt_py(stmt, indent, is_encode, seq)?);
     }
     Ok(out)
 }
 
-fn stmt_py(stmt: &Stmt, indent: &str) -> BpsResult<String> {
+fn stmt_py(stmt: &Stmt, indent: &str, is_encode: bool, seq: &mut u32) -> BpsResult<String> {
     match stmt {
         Stmt::Let { name, expr } => Ok(format!("{indent}env[{name:?}] = {}\n", py_expr(expr))),
         Stmt::Require(expr) => Ok(format!(
@@ -159,15 +168,10 @@ fn stmt_py(stmt: &Stmt, indent: &str) -> BpsResult<String> {
         )),
         Stmt::If { cond, then_body, else_body, .. } => {
             let mut s = format!("{indent}if {}:\n", py_expr(cond));
-            let then_s = stmts(then_body, &format!("{indent}    "))?;
-            if then_s.is_empty() {
-                s.push_str(&format!("{indent}    pass\n"));
-            } else {
-                s.push_str(&then_s);
-            }
+            s.push_str(&nested(then_body, indent, is_encode, seq)?);
             if !else_body.is_empty() {
                 s.push_str(&format!("{indent}else:\n"));
-                s.push_str(&stmts(else_body, &format!("{indent}    "))?);
+                s.push_str(&nested(else_body, indent, is_encode, seq)?);
             }
             Ok(s)
         }
@@ -193,24 +197,16 @@ fn stmt_py(stmt: &Stmt, indent: &str) -> BpsResult<String> {
         Stmt::Utf8 { dst, src } => Ok(format!(
             "{indent}env[{dst:?}] = env[{src:?}].decode(\"utf-8\")\n"
         )),
-        Stmt::RepeatCount { n, elem, dst } => {
-            let mut s = format!("{indent}items = []\n{indent}for _ in range({}):\n", py_expr(n));
-            s.push_str(&stmts(elem, &format!("{indent}    "))?);
-            s.push_str(&format!("{indent}    items.append(env[\"__elem\"])\n{indent}env[{dst:?}] = items\n"));
-            Ok(s)
-        }
+        Stmt::RepeatCount { n, elem, dst } => repeat(elem, dst, is_encode, seq, indent, Some(py_expr(n)), None),
         Stmt::RepeatUntil { term, elem, dst } => {
-            let mut s = format!(
-                "{indent}items = []\n{indent}while cur.pos < len(cur.data):\n{indent}    if cur.data[cur.pos] == ({t}) & 0xFF:\n{indent}        cur.pos += 1\n{indent}        break\n",
-                t = py_expr(term)
-            );
-            s.push_str(&stmts(elem, &format!("{indent}    "))?);
-            s.push_str(&format!("{indent}    items.append(env[\"__elem\"])\n{indent}env[{dst:?}] = items\n"));
-            Ok(s)
+            repeat(elem, dst, is_encode, seq, indent, None, Some(py_expr(term)))
         }
-        Stmt::RepeatUntilEnd { .. } => Ok(format!(
-            "{indent}raise ValueError(\"encode not supported for repeat mode until_end\")\n"
-        )),
+        Stmt::RepeatUntilEnd { elem, dst } => {
+            if is_encode {
+                return Ok(format!("{indent}raise ValueError(\"until-end has no encode\")\n"));
+            }
+            repeat(elem, dst, false, seq, indent, None, None)
+        }
         Stmt::Match { scrutinee, arms, default } => {
             let mut s = format!("{indent}_tag = {}\n", py_expr(scrutinee));
             let mut first = true;
@@ -219,34 +215,96 @@ fn stmt_py(stmt: &Stmt, indent: &str) -> BpsResult<String> {
                 let kw = if first { "if" } else { "elif" };
                 first = false;
                 s.push_str(&format!("{indent}{kw} {cond}:\n"));
-                s.push_str(&block(&arm.body, indent)?);
+                s.push_str(&nested(&arm.body, indent, is_encode, seq)?);
             }
             if let Some(body) = default {
                 let kw = if first { "if True" } else { "else" };
                 s.push_str(&format!("{indent}{kw}:\n"));
-                s.push_str(&block(body, indent)?);
+                s.push_str(&nested(body, indent, is_encode, seq)?);
             } else if first {
                 s.push_str(&format!("{indent}pass\n"));
             }
             Ok(s)
         }
         Stmt::Block { body, dst } => {
-            let mut s = format!("{indent}_saved = env\n{indent}env = dict(env.get({dst:?}) or {{}})\n");
-            s.push_str(&stmts(body, indent)?);
-            s.push_str(&format!("{indent}_block = env\n{indent}env = _saved\n{indent}env[{dst:?}] = _block\n"));
+            let mut s = format!(
+                "{indent}_stack.append(env)\n{indent}_child = dict(env)\n{indent}_overlay = env.get({dst:?})\n{indent}if isinstance(_overlay, dict):\n{indent}    _child.update(_overlay)\n{indent}env = _child\n"
+            );
+            let inner = stmts(body, indent, is_encode, seq)?;
+            if inner.trim().is_empty() {
+                s.push_str(&format!("{indent}pass\n"));
+            } else {
+                s.push_str(&inner);
+            }
+            s.push_str(&format!(
+                "{indent}_block = env\n{indent}env = _stack.pop()\n{indent}env[{dst:?}] = _block\n"
+            ));
             Ok(s)
         }
     }
 }
 
-fn block(body: &[Stmt], indent: &str) -> BpsResult<String> {
-    let inner = stmts(body, &format!("{indent}    "))?;
+fn repeat(
+    elem: &[Stmt],
+    dst: &str,
+    is_encode: bool,
+    seq: &mut u32,
+    indent: &str,
+    count: Option<String>,
+    until: Option<String>,
+) -> BpsResult<String> {
+    let id = *seq;
+    *seq += 1;
+    let mut s = String::new();
+    if is_encode {
+        s.push_str(&format!(
+            "{indent}for _item_{id} in env[{dst:?}] or []:\n{indent}    env[\"__elem\"] = _item_{id}\n"
+        ));
+        let inner = stmts(elem, &format!("{indent}    "), true, seq)?;
+        if inner.trim().is_empty() {
+            s.push_str(&format!("{indent}    pass\n"));
+        } else {
+            s.push_str(&inner);
+        }
+        if let Some(term) = until {
+            s.push_str(&format!("{indent}w.u8({term})\n"));
+        }
+        let _ = count;
+        return Ok(s);
+    }
+    s.push_str(&format!("{indent}_items_{id} = []\n"));
+    if let Some(n) = count {
+        s.push_str(&format!("{indent}for _ in range({n}):\n"));
+    } else if let Some(term) = until {
+        s.push_str(&format!(
+            "{indent}while cur.pos < len(cur.data):\n{indent}    if cur.data[cur.pos] == ({term}) & 0xFF:\n{indent}        cur.pos += 1\n{indent}        break\n"
+        ));
+    } else {
+        s.push_str(&format!("{indent}while cur.pos < len(cur.data):\n"));
+    }
+    let pad = format!("{indent}    ");
+    let inner = stmts(elem, &pad, false, seq)?;
+    if inner.trim().is_empty() {
+        s.push_str(&format!("{pad}pass\n"));
+    } else {
+        s.push_str(&inner);
+    }
+    s.push_str(&format!(
+        "{pad}_items_{id}.append(env[\"__elem\"])\n{indent}env[{dst:?}] = _items_{id}\n"
+    ));
+    Ok(s)
+}
+
+fn nested(body: &[Stmt], indent: &str, is_encode: bool, seq: &mut u32) -> BpsResult<String> {
+    let inner = stmts(body, &format!("{indent}    "), is_encode, seq)?;
     if inner.is_empty() {
         Ok(format!("{indent}    pass\n"))
     } else {
         Ok(inner)
     }
 }
+
+
 
 fn read_call(op: &WireOp) -> String {
     match op {
@@ -263,7 +321,7 @@ fn write_call(op: &WireOp, value: &Expr) -> String {
         WireOp::U8 => format!("w.u8({})", py_expr(value)),
         WireOp::F32be => format!("w.f32({})", py_expr(value)),
         WireOp::F64be => format!("w.f64({})", py_expr(value)),
-        WireOp::Bytes { .. } | WireOp::Rest => "w.bytes(env[\"value\"])".into(),
+        WireOp::Bytes { .. } | WireOp::Rest => format!("w.bytes({})", py_expr(value)),
     }
 }
 

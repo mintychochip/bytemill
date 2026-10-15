@@ -112,6 +112,10 @@ func ival(v any) int64 {
 		return x
 	case int32:
 		return int64(x)
+	case int16:
+		return int64(x)
+	case int8:
+		return int64(x)
 	case int:
 		return int64(x)
 	case uint8:
@@ -121,6 +125,10 @@ func ival(v any) int64 {
 	case uint32:
 		return int64(x)
 	case uint64:
+		return int64(x)
+	case float64:
+		return int64(x)
+	case float32:
 		return int64(x)
 	case bool:
 		if x {
@@ -140,6 +148,21 @@ func bval(v any) bool {
 		return x != 0
 	default:
 		return false
+	}
+}
+
+func fval(v any) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case float32:
+		return float64(x)
+	case int64:
+		return float64(x)
+	case int32:
+		return float64(x)
+	default:
+		return 0
 	}
 }
 
@@ -182,22 +205,28 @@ fn runtime_with_bits() -> String {
 }
 
 fn gen_packets(ir: &IrSchema) -> BpsResult<String> {
-    let mut out = String::from("package bpsgen\n\nimport \"fmt\"\n\n");
+    let mut out = String::from("package bpsgen\n\nimport \"fmt\"\nimport \"reflect\"\n\n");
     for (name, def) in ir.types.iter() {
         if let TypeDef::Record { fields } = def {
+            if let Some(target) = record_alias(name, ir) {
+                out.push_str(&format!("type {} = {}\n\n", struct_name(name), struct_name(target)));
+                continue;
+            }
             out.push_str(&format!("type {} struct {{\n", struct_name(name)));
             for field in fields {
-                out.push_str(&format!("\t{} {}\n", export_field(&field.name), go_ty(&field.ty, ir)));
+                out.push_str(&format!("\t{} {} `bps:\"{}\"`\n", export_field(&field.name), go_ty(&field.ty, ir), field.name));
             }
             out.push_str("}\n\n");
         }
     }
+    out.push_str(&go_helpers(ir));
+
     for (name, proc) in ir.decode.iter() {
         let ret = return_type(name, ir);
         let params = proc.params.iter().map(|p| format!("{p} int64")).collect::<Vec<_>>().join(", ");
         let args = if params.is_empty() { String::new() } else { format!(", {params}") };
         out.push_str(&format!("func Decode_{}(c *Cursor{}) ({ret}, error) {{\n", goname(name), args));
-        out.push_str("\tenv := map[string]any{}\n");
+        out.push_str("\tenv := map[string]any{}\n\t_ = env\n");
         if matches!(ir.types.get(name), Some(TypeDef::Scalar(_))) {
             for dest in prebind_dests(&proc.body) {
                 out.push_str(&format!("\tenv[\"{dest}\"] = int64(0)\n"));
@@ -206,7 +235,7 @@ fn gen_packets(ir: &IrSchema) -> BpsResult<String> {
         for p in &proc.params {
             out.push_str(&format!("\tenv[\"{p}\"] = {p}\n"));
         }
-        out.push_str(&stmts(&proc.body, "\t", &ret, false)?);
+        out.push_str(&stmts(&proc.body, "\t", &ret, ir, false)?);
         match &proc.result {
             Some(expr) => {
                 out.push_str(&format!("\treturn {}, nil\n}}\n\n", cast_result(&ret, expr)));
@@ -225,40 +254,43 @@ fn gen_packets(ir: &IrSchema) -> BpsResult<String> {
             goname(name),
             args
         ));
-        out.push_str("\tenv := map[string]any{}\n");
+        out.push_str("\tenv := map[string]any{}\n\t_ = env\n");
         out.push_str(&format!("\tenv[\"value\"] = {}\n", value_to_any(name, ir)));
         if matches!(ir.types.get(name), Some(TypeDef::Scalar(_))) {
             for dest in prebind_dests(&proc.body) {
-                out.push_str(&format!("\tif _, ok := env[\"{dest}\"]; !ok {{ env[\"{dest}\"] = int64(0) }}\n"));
+                out.push_str(&format!(
+                    "\tif _, ok := env[\"{dest}\"]; !ok {{ env[\"{dest}\"] = int64(0) }}\n"
+                ));
             }
         }
         if let Some(TypeDef::Record { fields }) = ir.types.get(name) {
             for field in fields {
                 let gof = export_field(&field.name);
-                out.push_str(&format!(
-                    "\tenv[\"{}\"] = value.{gof}\n",
-                    field.name
-                ));
+                if matches!(field.ty, crate::ir::Ty::List(_)) {
+                    out.push_str(&format!("\tenv[\"{}\"] = anyList(value.{gof})\n", field.name));
+                } else {
+                    out.push_str(&format!("\tenv[\"{}\"] = value.{gof}\n", field.name));
+                }
             }
         }
         for p in &proc.params {
             out.push_str(&format!("\tenv[\"{p}\"] = {p}\n"));
         }
-        out.push_str(&stmts(&proc.body, "\t", "", true)?);
+        out.push_str(&stmts(&proc.body, "\t", "", ir, true)?);
         out.push_str("\treturn nil\n}\n\n");
     }
     Ok(out)
 }
 
-fn stmts(body: &[Stmt], indent: &str, ret: &str, is_encode: bool) -> BpsResult<String> {
+fn stmts(body: &[Stmt], indent: &str, ret: &str, ir: &IrSchema, is_encode: bool) -> BpsResult<String> {
     let mut out = String::new();
     for stmt in body {
-        out.push_str(&stmt_go(stmt, indent, ret, is_encode)?);
+        out.push_str(&stmt_go(stmt, indent, ret, ir, is_encode)?);
     }
     Ok(out)
 }
 
-fn stmt_go(stmt: &Stmt, indent: &str, ret: &str, is_encode: bool) -> BpsResult<String> {
+fn stmt_go(stmt: &Stmt, indent: &str, ret: &str, ir: &IrSchema, is_encode: bool) -> BpsResult<String> {
     let fail = if is_encode {
         "return err".to_string()
     } else {
@@ -273,10 +305,10 @@ fn stmt_go(stmt: &Stmt, indent: &str, ret: &str, is_encode: bool) -> BpsResult<S
         )),
         Stmt::If { cond, then_body, else_body, .. } => {
             let mut s = format!("{indent}if {} {{\n", go_bool(cond));
-            s.push_str(&stmts(then_body, &format!("{indent}\t"), ret, is_encode)?);
+            s.push_str(&stmts(then_body, &format!("{indent}\t"), ret, ir, is_encode)?);
             if !else_body.is_empty() {
                 s.push_str(&format!("{indent}}} else {{\n"));
-                s.push_str(&stmts(else_body, &format!("{indent}\t"), ret, is_encode)?);
+                s.push_str(&stmts(else_body, &format!("{indent}\t"), ret, ir, is_encode)?);
             }
             s.push_str(&format!("{indent}}}\n"));
             Ok(s)
@@ -300,47 +332,70 @@ fn stmt_go(stmt: &Stmt, indent: &str, ret: &str, is_encode: bool) -> BpsResult<S
             Ok(format!(
                 "{indent}if err := Encode_{}(w, {}{extra}); err != nil {{\n{indent}\t{fail}\n{indent}}}\n",
                 goname(&callee.0),
-                go_int(value)
+                encode_passed(&callee.0, value, ir)
             ))
         }
         Stmt::Utf8 { dst, src } => Ok(format!(
             "{indent}env[\"{dst}\"] = string(env[\"{src}\"].([]byte))\n"
         )),
         Stmt::RepeatCount { n, elem, dst } => {
+            if is_encode {
+                let mut s = format!("{indent}for _, item := range anyItems(env[\"{dst}\"]) {{\n{indent}\tenv[\"__elem\"] = item\n");
+                s.push_str(&stmts(elem, &format!("{indent}\t\t"), ret, ir, is_encode)?);
+                s.push_str(&format!("{indent}}}\n"));
+                let _ = n;
+                return Ok(s);
+            }
             let mut s = format!("{indent}{{\n{indent}\tn := int({})\n{indent}\titems := make([]any, 0, n)\n{indent}\tfor i := 0; i < n; i++ {{\n", go_int(n));
-            s.push_str(&stmts(elem, &format!("{indent}\t\t"), ret, is_encode)?);
+            s.push_str(&stmts(elem, &format!("{indent}\t\t"), ret, ir, is_encode)?);
             s.push_str(&format!("{indent}\t\titems = append(items, env[\"__elem\"])\n{indent}\t}}\n{indent}\tenv[\"{dst}\"] = items\n{indent}}}\n"));
             Ok(s)
         }
         Stmt::RepeatUntil { term, elem, dst } => {
-            let mut s = format!("{indent}{{\n{indent}\titems := []any{{}}\n{indent}\tterm := {}\n{indent}\tfor c.Pos < len(c.Data) {{\n{indent}\t\tif int64(c.Data[c.Pos]) == term {{\n{indent}\t\t\tc.Pos++\n{indent}\t\t\tbreak\n{indent}\t\t}}\n", go_int(term));
-            s.push_str(&stmts(elem, &format!("{indent}\t\t"), ret, is_encode)?);
+            if is_encode {
+                let mut s = format!("{indent}for _, item := range anyItems(env[\"{dst}\"]) {{\n{indent}\tenv[\"__elem\"] = item\n");
+                s.push_str(&stmts(elem, &format!("{indent}\t\t"), ret, ir, is_encode)?);
+                s.push_str(&format!("{indent}}}\n{indent}w.u8({})\n", go_int(term)));
+                return Ok(s);
+            }
+            let mut s = format!("{indent}{{\n{indent}\titems := []any{{}}\n{indent}\tterm := int64({})\n{indent}\tfor c.Pos < len(c.Data) {{\n{indent}\t\tif int64(c.Data[c.Pos]) == term {{\n{indent}\t\t\tc.Pos++\n{indent}\t\t\tbreak\n{indent}\t\t}}\n", go_int(term));
+            s.push_str(&stmts(elem, &format!("{indent}\t\t"), ret, ir, is_encode)?);
             s.push_str(&format!("{indent}\t\titems = append(items, env[\"__elem\"])\n{indent}\t}}\n{indent}\tenv[\"{dst}\"] = items\n{indent}}}\n"));
             Ok(s)
         }
-        Stmt::RepeatUntilEnd { .. } => Ok(format!(
-            "{indent}return {z}, fmt.Errorf(\"encode not supported for repeat mode until_end\")\n",
-            z = ret_zero(ret)
-        )),
+        Stmt::RepeatUntilEnd { elem, dst } => {
+            if is_encode {
+                return Ok(format!(
+                    "{indent}return fmt.Errorf(\"encode not supported for repeat mode until_end\")\n"
+                ));
+            }
+            let mut s = format!("{indent}{{\n{indent}\titems := []any{{}}\n{indent}\tfor c.Pos < len(c.Data) {{\n");
+            s.push_str(&stmts(elem, &format!("{indent}\t\t"), ret, ir, is_encode)?);
+            s.push_str(&format!("{indent}\t\titems = append(items, env[\"__elem\"])\n{indent}\t}}\n{indent}\tenv[\"{dst}\"] = items\n{indent}}}\n"));
+            Ok(s)
+        }
         Stmt::Match { scrutinee, arms, default } => {
+            let mut seen = std::collections::BTreeSet::new();
             let mut s = format!("{indent}switch {} {{\n", go_int(scrutinee));
             for arm in arms {
-                let cases = arm.tags.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ");
+                let tags: Vec<i128> = arm.tags.iter().copied().filter(|tag| seen.insert(*tag)).collect();
+                if tags.is_empty() {
+                    continue;
+                }
+                let cases = tags.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ");
                 s.push_str(&format!("{indent}case {cases}:\n"));
-                s.push_str(&stmts(&arm.body, &format!("{indent}\t"), ret, is_encode)?);
+                s.push_str(&stmts(&arm.body, &format!("{indent}\t"), ret, ir, is_encode)?);
             }
             if let Some(body) = default {
                 s.push_str(&format!("{indent}default:\n"));
-                s.push_str(&stmts(body, &format!("{indent}\t"), ret, is_encode)?);
+                s.push_str(&stmts(body, &format!("{indent}\t"), ret, ir, is_encode)?);
             }
             s.push_str(&format!("{indent}}}\n"));
             Ok(s)
         }
         Stmt::Block { body, dst } => {
-            let mut s = format!("{indent}{{\n{indent}\tchild := map[string]any{{}}\n{indent}\tif m, ok := env[\"{dst}\"].(map[string]any); ok {{\n{indent}\t\tfor k, v := range m {{\n{indent}\t\t\tchild[k] = v\n{indent}\t\t}}\n{indent}\t}}\n");
-            // The block body reads `env`, so swap for the duration of the block by inlining into `env` after a copy.
-            s.push_str(&format!("{indent}\tsaved := env\n{indent}\tenv = child\n"));
-            s.push_str(&stmts(body, &format!("{indent}\t"), ret, is_encode)?);
+            let mut s = format!("{indent}{{\n{indent}\tchild := map[string]any{{}}\n{indent}\tfor k, v := range env {{\n{indent}\t\tchild[k] = v\n{indent}\t}}\n{indent}\tfor k, v := range fieldsToEnv(env[\"{dst}\"]) {{\n{indent}\t\tchild[k] = v\n{indent}\t}}\n{indent}\tsaved := env\n{indent}\tenv = child\n");
+            s.push_str(&stmts(body, &format!("{indent}\t"), ret, ir, is_encode)?);
             s.push_str(&format!("{indent}\tenv = saved\n{indent}\tenv[\"{dst}\"] = child\n{indent}}}\n"));
             Ok(s)
         }
@@ -360,8 +415,8 @@ fn read_call(op: &WireOp) -> String {
 fn write_call(op: &WireOp, value: &Expr) -> String {
     match op {
         WireOp::U8 => format!("w.u8({})", go_int(value)),
-        WireOp::F32be => format!("w.f32(float64({}))", go_int(value)),
-        WireOp::F64be => format!("w.f64(float64({}))", go_int(value)),
+        WireOp::F32be => format!("w.f32(fval({}))", go_any(value)),
+        WireOp::F64be => format!("w.f64(fval({}))", go_any(value)),
         WireOp::Bytes { .. } | WireOp::Rest => "w.bytes(env[\"value\"].([]byte))".to_string(),
     }
 }
@@ -458,14 +513,30 @@ fn export_field(name: &str) -> String {
 }
 
 fn go_ty(ty: &crate::ir::Ty, ir: &IrSchema) -> String {
+    go_ty_at(ty, ir, true)
+}
+fn encode_arg(name: &str, ir: &IrSchema) -> String {
+    match ir.types.get(name) {
+        Some(TypeDef::Scalar(Storage::Bool)) => "bool".into(),
+        Some(TypeDef::Scalar(Storage::Bytes)) => "[]byte".into(),
+        Some(TypeDef::Scalar(Storage::F64)) => "float64".into(),
+        Some(TypeDef::Scalar(Storage::Str)) | Some(TypeDef::String) => "string".into(),
+        Some(TypeDef::Scalar(_)) => "int64".into(),
+        Some(TypeDef::Record { .. }) => struct_name(name),
+        _ => "any".into(),
+    }
+}
+
+fn go_ty_at(ty: &crate::ir::Ty, ir: &IrSchema, ptr_record: bool) -> String {
     use crate::ir::Ty;
     match ty {
         Ty::Scalar(storage) => go_storage(*storage).into(),
-        Ty::List(inner) => format!("[]{}", go_ty(inner, ir)),
-        Ty::Optional(inner) => format!("*{}", go_ty(inner, ir)),
+        Ty::List(inner) => format!("[]{}", go_ty_at(inner, ir, false)),
+        Ty::Optional(inner) => format!("*{}", go_ty_at(inner, ir, false)),
         Ty::Named(id) => match ir.types.get(&id.0) {
             Some(TypeDef::Scalar(storage)) => go_storage(*storage).into(),
             Some(TypeDef::String) => "string".into(),
+            Some(TypeDef::Record { .. }) if ptr_record => format!("*{}", struct_name(&id.0)),
             Some(TypeDef::Record { .. }) => struct_name(&id.0),
             _ => "any".into(),
         },
@@ -498,16 +569,7 @@ fn return_type(name: &str, ir: &IrSchema) -> String {
     }
 }
 
-fn encode_arg(name: &str, ir: &IrSchema) -> String {
-    match ir.types.get(name) {
-        Some(TypeDef::Scalar(Storage::Bool)) => "bool".into(),
-        Some(TypeDef::Scalar(Storage::Bytes)) => "[]byte".into(),
-        Some(TypeDef::Scalar(Storage::Str)) | Some(TypeDef::String) => "string".into(),
-        Some(TypeDef::Scalar(_)) => "int64".into(),
-        Some(TypeDef::Record { .. }) => struct_name(name),
-        _ => "any".into(),
-    }
-}
+
 
 fn value_to_any(_name: &str, _ir: &IrSchema) -> &'static str {
     "value"
@@ -539,7 +601,10 @@ fn cast_result(ret: &str, expr: &Expr) -> String {
         "uint16" => format!("uint16({})", go_int(expr)),
         "uint32" => format!("uint32({})", go_int(expr)),
         "uint64" => format!("uint64({})", go_int(expr)),
-        "float64" => format!("float64({})", go_int(expr)),
+        "float64" => format!("fval({})", go_any(expr)),
+        other if other.chars().next().is_some_and(|c| c.is_uppercase()) => {
+            format!("deref{other}({})", go_any(expr))
+        }
         _ => go_any(expr),
     }
 }
@@ -551,26 +616,159 @@ fn record_lit(name: &str, ir: &IrSchema) -> String {
     let parts = fields
         .iter()
         .map(|field| {
-            format!("{}: {}", export_field(&field.name), field_get(&field.ty, &field.name, ir))
+            format!("{}: {}", export_field(&field.name), field_get(&field.ty, "env", &field.name, ir))
         })
         .collect::<Vec<_>>()
         .join(", ");
     format!("{}{{{parts}}}", struct_name(name))
 }
 
-fn field_get(ty: &crate::ir::Ty, name: &str, ir: &IrSchema) -> String {
+fn field_get(ty: &crate::ir::Ty, map: &str, name: &str, ir: &IrSchema) -> String {
     use crate::ir::Ty;
+    let key = format!("{map}[\"{name}\"]");
     match ty {
-        Ty::Scalar(Storage::Bool) => format!("bval(env[\"{name}\"])"),
-        Ty::Scalar(storage) => format!("{}(ival(env[\"{name}\"]))", go_storage(*storage)),
+        Ty::Scalar(Storage::Bool) => format!("bval({key})"),
+        Ty::Scalar(Storage::Str) => format!("sval({key})"),
+        Ty::Scalar(Storage::Bytes) => format!("asBytes({key})"),
+        Ty::Scalar(Storage::F64) => format!("fval({key})"),
+        Ty::Scalar(storage) => format!("{}(ival({key}))", go_storage(*storage)),
+        Ty::List(inner) => format!("{}({key})", list_fn(inner, ir)),
+        Ty::Optional(inner) => format!("{}({key})", list_fn(inner, ir)),
         Ty::Named(id) => match ir.types.get(&id.0) {
-            Some(TypeDef::Scalar(Storage::Bool)) => format!("bval(env[\"{name}\"])"),
-            Some(TypeDef::Scalar(storage)) => format!("{}(ival(env[\"{name}\"]))", go_storage(*storage)),
-            Some(TypeDef::String) => format!("sval(env[\"{name}\"])"),
-            _ => format!("env[\"{name}\"]"),
+            Some(TypeDef::Scalar(Storage::Bool)) => format!("bval({key})"),
+            Some(TypeDef::Scalar(Storage::Str)) | Some(TypeDef::String) => format!("sval({key})"),
+            Some(TypeDef::Scalar(Storage::Bytes)) => format!("asBytes({key})"),
+            Some(TypeDef::Scalar(Storage::F64)) => format!("fval({key})"),
+            Some(TypeDef::Scalar(storage)) => format!("{}(ival({key}))", go_storage(*storage)),
+            Some(TypeDef::Record { .. }) => format!("asPtr{}({key})", struct_name(&id.0)),
+            _ => key,
         },
-        _ => format!("env[\"{name}\"]"),
     }
+}
+
+fn list_fn(inner: &crate::ir::Ty, ir: &IrSchema) -> String {
+    use crate::ir::Ty;
+    match inner {
+        Ty::Named(id) if matches!(ir.types.get(&id.0), Some(TypeDef::Record { .. })) => {
+            format!("asList{}", struct_name(&id.0))
+        }
+        Ty::Scalar(Storage::Bool) => "asListBool".into(),
+        Ty::Scalar(Storage::Str) => "asListString".into(),
+        Ty::Scalar(Storage::Bytes) => "asListBytes".into(),
+        Ty::Scalar(storage) => format!("asList{}", go_storage(*storage)),
+        Ty::Named(id) => match ir.types.get(&id.0) {
+            Some(TypeDef::Scalar(storage)) => format!("asList{}", go_storage(*storage)),
+            Some(TypeDef::String) => "asListString".into(),
+            _ => "asListAny".into(),
+        },
+        _ => "asListAny".into(),
+    }
+}
+
+fn encode_passed(callee: &str, value: &Expr, ir: &IrSchema) -> String {
+    match ir.types.get(callee) {
+        Some(TypeDef::Record { .. }) => format!("deref{}({})", struct_name(callee), go_any(value)),
+        Some(TypeDef::String) | Some(TypeDef::Scalar(Storage::Str)) => go_str(value),
+        Some(TypeDef::Scalar(Storage::Bool)) => go_bool(value),
+        Some(TypeDef::Scalar(Storage::Bytes)) => format!("asBytes({})", go_any(value)),
+        Some(TypeDef::Scalar(Storage::F64)) => format!("fval({})", go_any(value)),
+        _ => go_int(value),
+    }
+}
+
+fn record_alias<'a>(name: &str, ir: &'a IrSchema) -> Option<&'a str> {
+    let TypeDef::Record { fields } = ir.types.get(name)? else {
+        return None;
+    };
+    if !fields.is_empty() {
+        return None;
+    }
+    let proc = ir.decode.get(name)?;
+    let [Stmt::CallDecode { dst, callee, args }] = proc.body.as_slice() else {
+        return None;
+    };
+    if dst != "value" || !args.is_empty() {
+        return None;
+    }
+    if !matches!(proc.result, Some(Expr::Ident(ref n)) if n == "value") {
+        return None;
+    }
+    if !matches!(ir.types.get(&callee.0), Some(TypeDef::Record { .. })) {
+        return None;
+    }
+    Some(callee.0.as_str())
+}
+
+fn go_helpers(ir: &IrSchema) -> String {
+    use crate::ir::Ty;
+    use std::collections::BTreeSet;
+    let mut ptrs = BTreeSet::new();
+    for (name, def) in ir.types.iter() {
+        if matches!(def, TypeDef::Record { .. }) {
+            ptrs.insert(name.to_string());
+        }
+    }
+    let mut lists: BTreeSet<String> = BTreeSet::new();
+    for def in ir.types.values() {
+        let TypeDef::Record { fields } = def else { continue };
+        for field in fields {
+            match &field.ty {
+                Ty::Named(id) if matches!(ir.types.get(&id.0), Some(TypeDef::Record { .. })) => {
+                    ptrs.insert(id.0.clone());
+                }
+                Ty::List(inner) => {
+                    lists.insert(list_fn(inner, ir));
+                    if let Ty::Named(id) = inner.as_ref()
+                        && matches!(ir.types.get(&id.0), Some(TypeDef::Record { .. }))
+                    {
+                        ptrs.insert(id.0.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = String::from(
+        "func asBytes(v any) []byte {\n\tswitch x := v.(type) {\n\tcase []byte:\n\t\treturn x\n\tcase string:\n\t\treturn []byte(x)\n\tdefault:\n\t\treturn nil\n\t}\n}\n\nfunc asListAny(v any) []any {\n\tif raw, ok := v.([]any); ok {\n\t\treturn raw\n\t}\n\treturn nil\n}\n\nfunc asListBool(v any) []bool {\n\traw, _ := v.([]any)\n\tout := make([]bool, 0, len(raw))\n\tfor _, item := range raw {\n\t\tout = append(out, bval(item))\n\t}\n\treturn out\n}\n\nfunc asListString(v any) []string {\n\traw, _ := v.([]any)\n\tout := make([]string, 0, len(raw))\n\tfor _, item := range raw {\n\t\tout = append(out, sval(item))\n\t}\n\treturn out\n}\n\nfunc asListBytes(v any) [][]byte {\n\traw, _ := v.([]any)\n\tout := make([][]byte, 0, len(raw))\n\tfor _, item := range raw {\n\t\tout = append(out, asBytes(item))\n\t}\n\treturn out\n}\n\n",
+    );
+    out.insert_str(
+        0,
+        "func anyItems(v any) []any {\n\tif raw, ok := v.([]any); ok {\n\t\treturn raw\n\t}\n\trv := reflect.ValueOf(v)\n\tif !rv.IsValid() || rv.Kind() != reflect.Slice {\n\t\treturn nil\n\t}\n\tout := make([]any, rv.Len())\n\tfor i := 0; i < rv.Len(); i++ {\n\t\tout[i] = rv.Index(i).Interface()\n\t}\n\treturn out\n}\n\nfunc fieldsToEnv(v any) map[string]any {\n\tif m, ok := v.(map[string]any); ok {\n\t\treturn m\n\t}\n\trv := reflect.ValueOf(v)\n\tif !rv.IsValid() {\n\t\treturn map[string]any{}\n\t}\n\tif rv.Kind() == reflect.Pointer {\n\t\tif rv.IsNil() {\n\t\t\treturn map[string]any{}\n\t\t}\n\t\trv = rv.Elem()\n\t}\n\tif rv.Kind() != reflect.Struct {\n\t\treturn map[string]any{}\n\t}\n\tout := map[string]any{}\n\trt := rv.Type()\n\tfor i := 0; i < rv.NumField(); i++ {\n\t\tkey := rt.Field(i).Tag.Get(\"bps\")\n\t\tif key == \"\" {\n\t\t\tkey = rt.Field(i).Name\n\t\t}\n\t\tout[key] = rv.Field(i).Interface()\n\t}\n\treturn out\n}\n\nfunc anyList[T any](v []T) []any {\n\tout := make([]any, len(v))\n\tfor i, e := range v {\n\t\tout[i] = e\n\t}\n\treturn out\n}\n\n",
+    );
+    let mut seen_num = std::collections::BTreeSet::new();
+    for storage in [
+        Storage::I8, Storage::I16, Storage::I32, Storage::I64, Storage::U8, Storage::U16,
+        Storage::U32, Storage::U64,
+    ] {
+        let g = go_storage(storage);
+        if !seen_num.insert(g) {
+            continue;
+        }
+        out.push_str(&format!(
+            "func asList{g}(v any) []{g} {{\n\traw, _ := v.([]any)\n\tout := make([]{g}, 0, len(raw))\n\tfor _, item := range raw {{\n\t\tout = append(out, {g}(ival(item)))\n\t}}\n\treturn out\n}}\n\n"
+        ));
+    }
+    for name in ptrs {
+        let s = struct_name(&name);
+        let deref = if let Some(target) = record_alias(&name, ir) {
+            format!("func deref{s}(v any) {s} {{ return deref{}(v) }}\n", struct_name(target))
+        } else {
+            let lit = match ir.types.get(&name) {
+                Some(TypeDef::Record { fields }) => fields
+                    .iter()
+                    .map(|field| format!("{}: {}", export_field(&field.name), field_get(&field.ty, "m", &field.name, ir)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => String::new(),
+            };
+            format!("func deref{s}(v any) {s} {{\n\tswitch x := v.(type) {{\n\tcase {s}:\n\t\treturn x\n\tcase *{s}:\n\t\tif x == nil {{\n\t\t\treturn {s}{{}}\n\t\t}}\n\t\treturn *x\n\tcase map[string]any:\n\t\tm := x\n\t\t_ = m\n\t\treturn {s}{{{lit}}}\n\tdefault:\n\t\treturn {s}{{}}\n\t}}\n}}\n")
+        };
+        out.push_str(&format!(
+            "{deref}func asPtr{s}(v any) *{s} {{\n\tx := deref{s}(v)\n\treturn &x\n}}\nfunc asList{s}(v any) []{s} {{\n\traw, _ := v.([]any)\n\tout := make([]{s}, 0, len(raw))\n\tfor _, item := range raw {{\n\t\tout = append(out, deref{s}(item))\n\t}}\n\treturn out\n}}\n\n"
+        ));
+    }
+    let _ = lists;
+    out
 }
 
 

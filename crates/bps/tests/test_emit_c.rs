@@ -63,3 +63,67 @@ int main(void) {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn c_float_roundtrip() {
+    let resolved = bps::analyze(&bps::parse(&repo("schemas/std/varint.bps")).unwrap()).unwrap();
+    let dir = std::env::temp_dir().join(format!("bps-c-float-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    bps::emit_c::emit_c(&resolved, &dir).unwrap();
+    std::fs::write(
+        dir.join("check.c"),
+        r#"#include "bpsgen.h"
+#include <stdio.h>
+#include <string.h>
+static int fail;
+static void expect(const char *name, int (*enc)(bps_writer *, bps_alloc *, int64_t),
+                   int (*dec)(bps_cursor *, bps_alloc *, int64_t *),
+                   int64_t bits, const uint8_t *want, size_t n) {
+    uint8_t buf[16];
+    bps_writer w = {buf, 0, sizeof buf};
+    if (enc(&w, 0, bits)) { printf("encode %s failed\n", name); fail = 1; return; }
+    if (w.len != n || memcmp(buf, want, n) != 0) {
+        printf("encode %s bytes\n", name); fail = 1; return;
+    }
+    bps_cursor c = {buf, w.len, 0};
+    int64_t got = 0;
+    if (dec(&c, 0, &got) || got != bits) {
+        printf("decode %s got %lld\n", name, (long long)got); fail = 1;
+    }
+}
+int main(void) {
+    const uint8_t f32[] = {0x3f, 0xc0, 0x00, 0x00};
+    const uint8_t f64[] = {0xbf, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    uint64_t u = 0xbff0000000000000ULL;
+    int64_t f64bits = 0;
+    memcpy(&f64bits, &u, sizeof u);
+    expect("f32", bps_encode_f32be, bps_decode_f32be, 0x3fc00000, f32, 4);
+    expect("f64", bps_encode_f64be, bps_decode_f64be, f64bits, f64, 8);
+    return fail;
+}
+"#,
+    )
+    .unwrap();
+    let bin = dir.join("check");
+    let compile = std::process::Command::new("cc")
+        .args(["-Wall", "-Werror", "-o"])
+        .arg(&bin)
+        .arg(dir.join("check.c"))
+        .arg(dir.join("bpsgen.c"))
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "cc failed\n{}\n{}",
+        String::from_utf8_lossy(&compile.stdout),
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let run = std::process::Command::new(&bin).output().unwrap();
+    assert!(
+        run.status.success(),
+        "c check failed\n{}\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
