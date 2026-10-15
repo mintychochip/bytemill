@@ -152,15 +152,11 @@ fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
             .map_or_else(|| root.join("data/minecraft-data"), PathBuf::from);
         let out = take_flag(&mut argv, &["--out"])?
             .map_or_else(|| root.join("schemas/versions"), PathBuf::from);
-        let only = match take_flag(&mut argv, &["--only"])? {
-            Some(p) => Some(p.parse::<u32>().map_err(|_| format!("--only: {p:?} is not a protocol number"))?),
-            None => None,
-        };
         let check = take_switch(&mut argv, "--check");
         if let Some(extra) = argv.first() {
             return Err(format!("import-versions: unrecognized argument {extra}"));
         }
-        let report = match import_versions(&manifest, &data, &out, check, only) {
+        let report = match import_versions(&manifest, &data, &out, check) {
             Ok(r) => r,
             Err(e) => {
                 eprintln!("{e}");
@@ -169,7 +165,10 @@ fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
         };
         if check {
             if report.stale.is_empty() {
-                println!("ok: {} schemas up to date", report.unchanged);
+                println!(
+                    "ok: {} roots, {} shared files up to date",
+                    report.roots, report.shared
+                );
                 return Ok(0);
             }
             for p in &report.stale {
@@ -177,7 +176,16 @@ fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
             }
             return Ok(3);
         }
-        println!("wrote {}, unchanged {}", report.written.len(), report.unchanged);
+        println!(
+            "wrote {}, unchanged {}, removed {}: {} roots, {} shared files, {} declarations kept as {}",
+            report.written.len(),
+            report.unchanged,
+            report.removed.len(),
+            report.roots,
+            report.shared,
+            report.declarations,
+            report.kept
+        );
         return Ok(0);
     }
     // import-protodef <protocol.json> --protocol N --release V [--also V]... [--patches FILE] [--out FILE]
