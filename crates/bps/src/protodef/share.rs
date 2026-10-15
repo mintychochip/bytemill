@@ -350,20 +350,16 @@ pub fn identity(versions: &[Vec<Decl>]) -> Res<Vec<BTreeMap<(Kind, String), Id>>
         let mut edges: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (i, d) in decls.iter().enumerate() {
             for r in &d.refs {
-                if let Some(&j) = index.get(&(d.kind, r.as_str())) {
-                    // A declaration only references its own kind through a type ref? No: a
-                    // packet references encodings. Resolve across both kinds: try the same
-                    // kind first, then any kind (names are unique per kind, and an encoding
-                    // and a packet never share a name in one version — the lint forbids it).
+                // Type references (fields, spreads) name encodings, never packets: a
+                // packet and an encoding may share a name (the packet `entity_metadata`
+                // field-references the encoding `entity_metadata`), so resolution is by
+                // the reference's semantics, not name collision.
+                let target = match d.kind {
+                    Kind::Encoding => Kind::Encoding,
+                    Kind::Packet => Kind::Encoding,
+                };
+                if let Some(&j) = index.get(&(target, r.as_str())) {
                     edges[i].push(j);
-                } else {
-                    let other = match d.kind {
-                        Kind::Encoding => Kind::Packet,
-                        Kind::Packet => Kind::Encoding,
-                    };
-                    if let Some(&j) = index.get(&(other, r.as_str())) {
-                        edges[i].push(j);
-                    }
                 }
             }
         }
@@ -594,7 +590,7 @@ fn common_import(name: &str, from_root: bool) -> String {
     if from_root {
         format!("common/{name}.bps")
     } else {
-        format!("../../common/{name}.bps")
+        format!("{name}.bps")
     }
 }
 
@@ -652,18 +648,9 @@ pub fn share(
             for r in &d.refs {
                 // The referenced name's id in this version; it must be in the set (or the
                 // reference is external and ignored).
-                let mut found = None;
-                for other_kind in [d.kind, match d.kind {
-                    Kind::Encoding => Kind::Packet,
-                    Kind::Packet => Kind::Encoding,
-                }] {
-                    if let Some(other_id) = map.get(&(other_kind, r.clone())) {
-                        found = Some(*other_id);
-                        break;
-                    }
-                }
-                if let Some(other_id) = found {
-                    out_refs.push(other_id);
+                // Type references name encodings, never packets (see identity()).
+                if let Some(other_id) = map.get(&(Kind::Encoding, r.clone())) {
+                    out_refs.push(*other_id);
                 }
             }
             out_refs.sort_unstable();
