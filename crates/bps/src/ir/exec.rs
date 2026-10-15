@@ -34,6 +34,59 @@ pub fn exec_encode(ir: &IrSchema, ty: &str, args: &[Value], value: &Value) -> Bp
     Ok(w.result())
 }
 
+pub fn exec_decode_frame(
+    ir: &IrSchema,
+    state: &str,
+    direction: &str,
+    frame: &[u8],
+) -> BpsResult<(i128, Value)> {
+    let frame_name = ir
+        .routes
+        .iter()
+        .find(|route| route.state == state && route.direction == direction)
+        .map(|route| route.frame.as_str())
+        .unwrap_or("default");
+    let decoded = exec_decode(ir, &format!("frame_{frame_name}"), &[], frame)?;
+    let Value::Map(fields) = decoded else {
+        return Err(crate::errors::decode("frame did not decode to a record"));
+    };
+    let id = int_of(fields.get("id").ok_or_else(|| crate::errors::decode("frame has no id"))?)?;
+    let payload = match fields.get("payload") {
+        Some(Value::Bytes(bytes)) => bytes.as_ref().to_vec(),
+        _ => return Err(crate::errors::decode("frame has no payload")),
+    };
+    let route = ir
+        .routes
+        .iter()
+        .find(|route| route.state == state && route.direction == direction && route.packet_id == id)
+        .ok_or_else(|| crate::errors::decode(format!("no route for id {id} in {state}.{direction}")))?;
+    let value = exec_decode(ir, &route.packet.0, &[], &payload)?;
+    Ok((id, value))
+}
+
+pub fn exec_encode_frame(
+    ir: &IrSchema,
+    state: &str,
+    direction: &str,
+    packet: &str,
+    fields: &Env,
+) -> BpsResult<Vec<u8>> {
+    let route = ir
+        .routes
+        .iter()
+        .find(|route| {
+            route.state == state && route.direction == direction && route.packet.0 == packet
+        })
+        .ok_or_else(|| encode(format!("no route for {packet} in {state}.{direction}")))?;
+    let payload = exec_encode(ir, packet, &[], &Value::map(fields.clone()))?;
+    let id_bytes = exec_encode(ir, "varint", &[], &Value::Int(route.packet_id))?;
+    let mut frame = Env::new();
+    frame.insert("length", Value::Int((id_bytes.len() + payload.len()) as i128));
+    frame.insert("id", Value::Int(route.packet_id));
+    frame.insert("payload", Value::bytes(payload));
+    exec_encode(ir, &format!("frame_{}", route.frame), &[], &Value::map(frame))
+}
+
 fn exec_decode_at(
     ir: &IrSchema,
     ty: &str,

@@ -7,7 +7,7 @@ mod lower;
 mod schema;
 mod width;
 
-pub use exec::{exec_decode, exec_encode};
+pub use exec::{exec_decode, exec_decode_frame, exec_encode, exec_encode_frame};
 pub use lower::lower;
 pub use schema::{Field, IrArm, IrSchema, Proc, Route, Stmt, Ty, TypeDef, TypeId, Variant, WireOp};
 pub use width::{Storage, storage_of};

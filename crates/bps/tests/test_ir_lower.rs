@@ -247,3 +247,35 @@ packet tagged { tag: u8  value: match tag { 1 => u8  _ => u16be } }
         Value::Int(0)
     );
 }
+
+#[test]
+fn handshake_frame_roundtrips_and_a_missing_frame_is_an_error() {
+    use bps::ir::{exec_decode_frame, exec_encode_frame};
+    use bps::value::Env;
+    use bps::Value;
+    let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../"))
+        .join("schemas/minecraft_26_3_wiki.bps");
+    let resolved = bps::analyze(&bps::load_schema(&[path]).unwrap()).unwrap();
+    let ir = lower(&resolved).unwrap();
+    assert_eq!(ir.routes.len(), resolved.routes.len());
+    let frame = [
+        0x10, 0x00, 0x89, 0x06, 0x09, b'l', b'o', b'c', b'a', b'l', b'h', b'o', b's', b't', 0x63,
+        0xdd, 0x01,
+    ];
+    let (id, value) = exec_decode_frame(&ir, "handshaking", "serverbound", &frame).unwrap();
+    assert_eq!(id, 0);
+    let Value::Map(fields) = value else { panic!("fields") };
+    assert_eq!(fields.get("protocol_version"), Some(&Value::Int(777)));
+    assert_eq!(fields.get("server_address"), Some(&Value::str("localhost")));
+    assert_eq!(fields.get("server_port"), Some(&Value::Int(25565)));
+    assert_eq!(fields.get("intent"), Some(&Value::Int(1)));
+    let mut env = Env::new();
+    for (key, val) in fields.iter() {
+        env.insert(key, val.clone());
+    }
+    let encoded = exec_encode_frame(&ir, "handshaking", "serverbound", "handshake", &env).unwrap();
+    assert_eq!(encoded, frame);
+
+    let bare = "packet probe { n: u8 }\nprotocol p @ v { id = 1\n route handshaking.serverbound 0x00 => probe\n}\n";
+    assert!(lower(&bps::analyze(&bps::parse(bare).unwrap()).unwrap()).is_err());
+}

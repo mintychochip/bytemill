@@ -4,7 +4,9 @@
 
 use std::collections::HashMap;
 
-use super::schema::{Field, IrArm, IrSchema, Proc, Stmt, Ty, TypeDef, TypeId, Variant, WireOp};
+use super::schema::{
+    Field, IrArm, IrSchema, Proc, Route, Stmt, Ty, TypeDef, TypeId, Variant, WireOp,
+};
 use crate::ast::{
     BlockItem, EncBody, EncodingDecl, Expr, FieldType, MatchArm as AstArm, RepeatMode,
     ResolvedSchema, Tag, TypeRef, WireField,
@@ -44,6 +46,7 @@ pub fn lower(resolved: &ResolvedSchema) -> BpsResult<IrSchema> {
     for pkt in resolved.packets.values() {
         install_record(&pkt.name, &[], &pkt.items, resolved, &mut ir)?;
     }
+    lower_frames(resolved, &mut ir)?;
     Ok(ir)
 }
 
@@ -687,6 +690,26 @@ fn install_alias(enc: &EncodingDecl, inner: &TypeRef, ir: &mut IrSchema) {
     );
 }
 
+fn lower_frames(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+    for proto in resolved.protocols.values() {
+        if proto.frames.is_empty() && !proto.routes.is_empty() {
+            return Err(emit(format!("protocol {}: no frame", proto.name)));
+        }
+        for frame in &proto.frames {
+            install_record(&format!("frame_{}", frame.name), &[], &frame.items, resolved, ir)?;
+        }
+    }
+    for (route, packet) in &resolved.routes {
+        ir.routes.push(Route {
+            state: route.state.clone(),
+            direction: route.direction.clone(),
+            packet_id: route.packet_id,
+            packet: TypeId(packet.name.clone()),
+            frame: route.frame.clone().unwrap_or_else(|| "default".into()),
+        });
+    }
+    Ok(())
+}
 fn repeat_stmt(
     wf: &WireField,
     decode: bool,
