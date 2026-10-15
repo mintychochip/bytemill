@@ -15,6 +15,7 @@ pub mod emit_tree;
 pub mod errors;
 pub mod frames_gen;
 pub mod interp;
+pub mod ir;
 pub mod json;
 pub mod lexer;
 pub mod load;
