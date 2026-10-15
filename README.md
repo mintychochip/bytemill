@@ -129,6 +129,9 @@ bpsc routes $ROOT                                # routing table (261 routes)
 bpsc dump-json $ROOT                             # schema.json
 bpsc shapes report $ROOT --rstom ../rstom-bps    # eligible vs blocked packets (worklist)
 bpsc emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
+bpsc emit go schemas/std/varint.bps --out /tmp/bps_go && (cd /tmp/bps_go && go test)
+bpsc emit python schemas/std/varint.bps --out /tmp/bps_py
+bpsc emit c schemas/std/varint.bps --out /tmp/bps_c && cc -Wall -Werror -c /tmp/bps_c/bpsgen.c -o /tmp/bps_c/bpsgen.o
 bpsc emit rstom $ROOT --out ../rstom/crates/bps_rstom  # drop-in for `rstom-packets`
 bpsc emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
 cargo run -q -p bps --bin java_probe_samples     # packets whose layout disagrees with real Minestom bytes
