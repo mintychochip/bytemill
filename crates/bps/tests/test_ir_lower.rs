@@ -143,3 +143,107 @@ fn minecraft_core_string_shapes_are_exactly_these() {
     names.sort();
     assert_eq!(names, vec!["identifier", "nbt_string", "string"]);
 }
+
+fn field_ty<'a>(fields: &'a [bps::ir::Field], name: &str) -> &'a bps::ir::Ty {
+    &fields.iter().find(|field| field.name == name).unwrap().ty
+}
+
+#[test]
+fn position_is_a_record_of_computed_signed_fields() {
+    use bps::Value;
+    use bps::ir::{Storage, Ty, TypeDef, exec_decode};
+    let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../"))
+        .join("schemas/minecraft_core.bps");
+    let resolved = bps::analyze(&bps::load_schema(&[path]).unwrap()).unwrap();
+    let ir = lower(&resolved).unwrap();
+    let TypeDef::Record { fields } = ir.types.get("position").unwrap() else {
+        panic!("position is not a record");
+    };
+    assert!(matches!(field_ty(fields, "raw"), Ty::Scalar(Storage::U64)));
+    assert!(matches!(field_ty(fields, "x"), Ty::Scalar(Storage::I32)));
+    assert!(matches!(field_ty(fields, "y"), Ty::Scalar(Storage::I16)));
+    assert!(matches!(field_ty(fields, "z"), Ty::Scalar(Storage::I32)));
+    let decoded = exec_decode(&ir, "position", &[], &[0; 8]).unwrap();
+    let Value::Map(map) = decoded else {
+        panic!("map")
+    };
+    for name in ["raw", "x", "y", "z"] {
+        assert!(map.contains_key(name), "{name}");
+    }
+}
+
+#[test]
+fn repeats_optionals_matches_and_open_enums() {
+    use bps::Value;
+    use bps::ir::{TypeDef, exec_decode, exec_encode};
+    use bps::value::Env;
+    let source = repo("schemas/std/integers.bps")
+        + &repo("schemas/std/varint.bps")
+        + r#"
+enum intent : varint { status = 1 login = 2 }
+packet opt { flag: boolean  extra: u8 if flag }
+packet counted { n: u8  items: u8[] count = n }
+packet untilled { entries: u8[] until 0 }
+packet rest { entries: u8[] until_end }
+packet tagged { tag: u8  value: match tag { 1 => u8  _ => u16be } }
+"#;
+    let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
+    let ir = lower(&resolved).unwrap();
+
+    let mut off = Env::new();
+    off.insert("flag", Value::Bool(false));
+    assert_eq!(
+        exec_encode(&ir, "opt", &[], &Value::map(off)).unwrap(),
+        vec![0]
+    );
+
+    let mut row = Env::new();
+    row.insert("n", Value::Int(2));
+    row.insert("items", Value::list(vec![Value::Int(1), Value::Int(2)]));
+    assert_eq!(
+        exec_encode(&ir, "counted", &[], &Value::map(row)).unwrap(),
+        vec![2, 1, 2]
+    );
+
+    let mut term = Env::new();
+    term.insert("entries", Value::list(vec![Value::Int(1), Value::Int(2)]));
+    assert_eq!(
+        exec_encode(&ir, "untilled", &[], &Value::map(term)).unwrap(),
+        vec![1, 2, 0]
+    );
+
+    let decoded = exec_decode(&ir, "rest", &[], &[9, 8]).unwrap();
+    let Value::Map(map) = decoded else {
+        panic!("map")
+    };
+    assert_eq!(
+        map.get("entries"),
+        Some(&Value::list(vec![Value::Int(9), Value::Int(8)]))
+    );
+    assert!(
+        exec_encode(&ir, "rest", &[], &Value::map(Env::new()))
+            .unwrap_err()
+            .to_string()
+            .contains("until_end")
+    );
+
+    assert!(matches!(
+        ir.types.get("tagged_value"),
+        Some(TypeDef::Sum { .. })
+    ));
+    let tagged = exec_decode(&ir, "tagged", &[], &[1, 5]).unwrap();
+    let Value::Map(map) = tagged else {
+        panic!("map")
+    };
+    assert_eq!(map.get("value"), Some(&Value::Int(5)));
+
+    let bad = repo("schemas/std/integers.bps")
+        + "packet bad { kind: u8  match kind { 1 => { a: u8 }  2 => { a: u16be } } }\n";
+    assert!(lower(&bps::analyze(&bps::parse(&bad).unwrap()).unwrap()).is_err());
+
+    assert!(matches!(ir.types.get("intent"), Some(TypeDef::Enum { .. })));
+    assert_eq!(
+        exec_decode(&ir, "intent", &[], &[0]).unwrap(),
+        Value::Int(0)
+    );
+}

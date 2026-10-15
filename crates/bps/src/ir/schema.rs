@@ -70,6 +70,14 @@ pub enum Stmt {
         cond: Expr,
         then_body: Vec<Stmt>,
         else_body: Vec<Stmt>,
+        /// When the guard cannot be evaluated, keep the group if it is present.
+        /// Field `if` is false. A `Group`'s `if` is true.
+        fallback: bool,
+    },
+    /// Run `body` as a nested record and store the map in `dst`.
+    Block {
+        body: Vec<Stmt>,
+        dst: String,
     },
     Match {
         scrutinee: Expr,

@@ -6,7 +6,7 @@ use crate::interp::cursor::{Cursor, WriteCursor};
 use crate::interp::expr::int_of;
 use crate::value::{Env, Value};
 
-use super::schema::{IrSchema, Stmt, WireOp};
+use super::schema::{IrSchema, Stmt, TypeDef, WireOp};
 
 pub fn exec_decode(ir: &IrSchema, ty: &str, args: &[Value], bytes: &[u8]) -> BpsResult<Value> {
     let mut cur = Cursor::new(bytes);
@@ -19,9 +19,16 @@ pub fn exec_encode(ir: &IrSchema, ty: &str, args: &[Value], value: &Value) -> Bp
         .get(ty)
         .ok_or_else(|| encode(format!("no encode proc for {ty}")))?;
     let mut env = Env::new();
-    prebind(&proc.body, &mut env);
+    if matches!(ir.types.get(ty), Some(TypeDef::Scalar(_))) {
+        prebind(&proc.body, &mut env);
+    }
     bind_args(&proc.params, args, &mut env)?;
     env.insert("value", value.clone());
+    if let Value::Map(fields) = value {
+        for (k, v) in fields.iter() {
+            env.insert(k, v.clone());
+        }
+    }
     let mut w = WriteCursor::new();
     run_encode(ir, &proc.body, &mut env, &mut w)?;
     Ok(w.result())
@@ -38,12 +45,15 @@ fn exec_decode_at(
         .get(ty)
         .ok_or_else(|| crate::errors::decode(format!("no decode proc for {ty}")))?;
     let mut env = Env::new();
-    prebind(&proc.body, &mut env);
+    if matches!(ir.types.get(ty), Some(TypeDef::Scalar(_))) {
+        prebind(&proc.body, &mut env);
+    }
     bind_args(&proc.params, args, &mut env)?;
-    run_decode(ir, &proc.body, &mut env, cur)?;
+    let mut out = Env::new();
+    run_decode(ir, &proc.body, &mut env, &mut out, cur)?;
     match &proc.result {
         Some(expr) => eval_expr(expr, &env),
-        None => Ok(Value::map(env)),
+        None => Ok(Value::map(out)),
     }
 }
 
@@ -89,18 +99,30 @@ fn prebind(stmts: &[Stmt], env: &mut Env) {
             Stmt::RepeatCount { elem, .. }
             | Stmt::RepeatUntil { elem, .. }
             | Stmt::RepeatUntilEnd { elem, .. } => prebind(elem, env),
+            Stmt::Block { body, .. } => prebind(body, env),
             Stmt::Require(_) | Stmt::Write { .. } | Stmt::Utf8 { .. } | Stmt::CallEncode { .. } => {
             }
         }
     }
 }
 
-fn run_decode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, cur: &mut Cursor<'_>) -> BpsResult<()> {
+fn bind_out(env: &mut Env, out: &mut Env, name: &str, v: Value) {
+    env.insert(name, v.clone());
+    out.insert(name, v);
+}
+
+fn run_decode(
+    ir: &IrSchema,
+    stmts: &[Stmt],
+    env: &mut Env,
+    out: &mut Env,
+    cur: &mut Cursor<'_>,
+) -> BpsResult<()> {
     for stmt in stmts {
         match stmt {
             Stmt::Let { name, expr } => {
                 let v = eval_expr(expr, env)?;
-                env.insert(name, v);
+                bind_out(env, out, name, v);
             }
             Stmt::Require(expr) => {
                 if !eval_expr(expr, env)?.truthy() {
@@ -114,34 +136,85 @@ fn run_decode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, cur: &mut Cursor<'_>
                 cond,
                 then_body,
                 else_body,
+                fallback,
             } => {
-                let branch = if eval_expr(cond, env)?.truthy() {
-                    then_body
-                } else {
-                    else_body
+                let branch = match eval_expr(cond, env) {
+                    Ok(v) if v.truthy() => then_body,
+                    Ok(_) => else_body,
+                    Err(_) if *fallback && cur.remaining() == 0 => continue,
+                    Err(_) if *fallback => then_body,
+                    Err(e) => return Err(e),
                 };
-                run_decode(ir, branch, env, cur)?;
+                run_decode(ir, branch, env, out, cur)?;
             }
             Stmt::Read { dst, op } => {
                 let v = read_op(op, env, cur)?;
-                env.insert(dst, v);
+                bind_out(env, out, dst, v);
             }
             Stmt::CallDecode { dst, callee, args } => {
                 let vals = eval_args(args, env)?;
                 let v = exec_decode_at(ir, &callee.0, &vals, cur)?;
-                env.insert(dst, v);
+                bind_out(env, out, dst, v);
             }
             Stmt::Utf8 { dst, src } => {
                 let raw = match env.get(src) {
                     Some(Value::Bytes(b)) => b.to_vec(),
                     Some(Value::Str(s)) => s.as_bytes().to_vec(),
-                    _ => {
-                        return Err(crate::errors::decode(format!("utf8 needs bytes in {src}")));
-                    }
+                    _ => return Err(crate::errors::decode(format!("utf8 needs bytes in {src}"))),
                 };
                 let s = std::str::from_utf8(&raw)
                     .map_err(|_| crate::errors::decode("bytes are not valid utf-8"))?;
-                env.insert(dst, Value::str(s.to_string()));
+                bind_out(env, out, dst, Value::str(s.to_string()));
+            }
+            Stmt::Match {
+                scrutinee,
+                arms,
+                default,
+            } => {
+                let tag = int_of(&eval_expr(scrutinee, env)?)?;
+                let body = arms
+                    .iter()
+                    .find(|arm| arm.tags.contains(&tag))
+                    .map(|arm| &arm.body)
+                    .or(default.as_ref())
+                    .ok_or_else(|| crate::errors::decode(format!("no match arm for tag {tag}")))?;
+                run_decode(ir, body, env, out, cur)?;
+            }
+            Stmt::RepeatCount { n, elem, dst } => {
+                let count = usize_len(&eval_expr(n, env)?)?;
+                let mut items = Vec::with_capacity(count);
+                for _ in 0..count {
+                    items.push(decode_elem(ir, elem, env, cur)?);
+                }
+                bind_out(env, out, dst, Value::list(items));
+            }
+            Stmt::RepeatUntil { term, elem, dst } => {
+                let term = int_of(&eval_expr(term, env)?)?;
+                let mut items = Vec::new();
+                loop {
+                    if cur.remaining() == 0 {
+                        break;
+                    }
+                    if i128::from(cur.peek_u8()?) == term {
+                        cur.read(1)?;
+                        break;
+                    }
+                    items.push(decode_elem(ir, elem, env, cur)?);
+                }
+                bind_out(env, out, dst, Value::list(items));
+            }
+            Stmt::RepeatUntilEnd { elem, dst } => {
+                let mut items = Vec::new();
+                while cur.remaining() > 0 {
+                    items.push(decode_elem(ir, elem, env, cur)?);
+                }
+                bind_out(env, out, dst, Value::list(items));
+            }
+            Stmt::Block { body, dst } => {
+                let mut child = env.clone();
+                let mut produced = Env::new();
+                run_decode(ir, body, &mut child, &mut produced, cur)?;
+                bind_out(env, out, dst, Value::map(produced));
             }
             other => {
                 return Err(crate::errors::decode(format!(
@@ -151,6 +224,16 @@ fn run_decode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, cur: &mut Cursor<'_>
         }
     }
     Ok(())
+}
+
+fn decode_elem(ir: &IrSchema, elem: &[Stmt], env: &Env, cur: &mut Cursor<'_>) -> BpsResult<Value> {
+    let mut child = env.clone();
+    let mut produced = Env::new();
+    run_decode(ir, elem, &mut child, &mut produced, cur)?;
+    if let Some(v) = produced.get("__elem") {
+        return Ok(v.clone());
+    }
+    Ok(Value::map(produced))
 }
 
 fn run_encode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, w: &mut WriteCursor) -> BpsResult<()> {
@@ -169,11 +252,14 @@ fn run_encode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, w: &mut WriteCursor)
                 cond,
                 then_body,
                 else_body,
+                fallback,
             } => {
-                let branch = if eval_expr(cond, env)?.truthy() {
-                    then_body
-                } else {
-                    else_body
+                let branch = match eval_expr(cond, env) {
+                    Ok(v) if v.truthy() => then_body,
+                    Ok(_) => else_body,
+                    Err(_) if *fallback && stmt_names_present(then_body, env) => then_body,
+                    Err(_) if *fallback => continue,
+                    Err(e) => return Err(e),
                 };
                 run_encode(ir, branch, env, w)?;
             }
@@ -191,10 +277,104 @@ fn run_encode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, w: &mut WriteCursor)
                 let bytes = exec_encode(ir, &callee.0, &vals, &v)?;
                 w.emit(&bytes);
             }
-            other => return Err(encode(format!("encode cannot run {other:?}"))),
+            Stmt::Match {
+                scrutinee,
+                arms,
+                default,
+            } => {
+                let tag = int_of(&eval_expr(scrutinee, env)?)?;
+                let body = arms
+                    .iter()
+                    .find(|arm| arm.tags.contains(&tag))
+                    .map(|arm| &arm.body)
+                    .or(default.as_ref())
+                    .ok_or_else(|| encode(format!("no match arm for tag {tag}")))?;
+                run_encode(ir, body, env, w)?;
+            }
+            Stmt::RepeatCount { elem, dst, .. } => encode_list(ir, elem, env, w, dst)?,
+            Stmt::RepeatUntil { term, elem, dst } => {
+                encode_list(ir, elem, env, w, dst)?;
+                let term = int_of(&eval_expr(term, env)?)?;
+                w.emit(&[(term & 0xFF) as u8]);
+            }
+            Stmt::RepeatUntilEnd { .. } => {
+                return Err(encode("encode not supported for repeat mode until_end"));
+            }
+            Stmt::Block { body, dst } => {
+                let mut child = env.clone();
+                if let Some(Value::Map(fields)) = env.get(dst) {
+                    for (key, val) in fields.iter() {
+                        child.insert(key, val.clone());
+                    }
+                }
+                run_encode(ir, body, &mut child, w)?;
+            }
+            Stmt::Read { .. } | Stmt::Utf8 { .. } | Stmt::CallDecode { .. } => {
+                return Err(encode(format!("encode cannot run {stmt:?}")));
+            }
         }
     }
     Ok(())
+}
+
+fn encode_list(
+    ir: &IrSchema,
+    elem: &[Stmt],
+    env: &mut Env,
+    w: &mut WriteCursor,
+    dst: &str,
+) -> BpsResult<()> {
+    let list = env
+        .get(dst)
+        .cloned()
+        .unwrap_or_else(|| Value::list(Vec::new()));
+    let Value::List(items) = list else {
+        return Err(encode(format!("expected list for {dst}")));
+    };
+    for item in items.iter() {
+        env.insert("__elem", item.clone());
+        run_encode(ir, elem, env, w)?;
+    }
+    Ok(())
+}
+
+fn stmt_names_present(stmts: &[Stmt], env: &Env) -> bool {
+    fn walk(stmts: &[Stmt], env: &Env) -> bool {
+        for stmt in stmts {
+            let name = match stmt {
+                Stmt::Let { name, .. }
+                | Stmt::Read { dst: name, .. }
+                | Stmt::CallDecode { dst: name, .. }
+                | Stmt::RepeatCount { dst: name, .. }
+                | Stmt::RepeatUntil { dst: name, .. }
+                | Stmt::RepeatUntilEnd { dst: name, .. } => Some(name.as_str()),
+                Stmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    if walk(then_body, env) || walk(else_body, env) {
+                        return true;
+                    }
+                    None
+                }
+                Stmt::Match { arms, default, .. } => {
+                    if arms.iter().any(|arm| walk(&arm.body, env))
+                        || default.as_ref().is_some_and(|body| walk(body, env))
+                    {
+                        return true;
+                    }
+                    None
+                }
+                _ => None,
+            };
+            if name.is_some_and(|n| env.contains_key(n)) {
+                return true;
+            }
+        }
+        false
+    }
+    walk(stmts, env)
 }
 
 fn eval_args(args: &[Expr], env: &Env) -> BpsResult<Vec<Value>> {

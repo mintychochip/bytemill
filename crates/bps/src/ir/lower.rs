@@ -4,12 +4,15 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{BlockItem, EncBody, EncodingDecl, Expr, FieldType, ResolvedSchema, TypeRef};
+use super::schema::{Field, IrArm, IrSchema, Proc, Stmt, Ty, TypeDef, TypeId, Variant, WireOp};
+use crate::ast::{
+    BlockItem, EncBody, EncodingDecl, Expr, FieldType, MatchArm as AstArm, RepeatMode,
+    ResolvedSchema, Tag, TypeRef, WireField,
+};
 use crate::errors::{BpsResult, emit};
 use crate::ordmap::OrderedMap;
 use crate::primitives::is_bare_primitive;
 
-use super::schema::{Field, IrSchema, Proc, Stmt, Ty, TypeDef, TypeId, WireOp};
 use super::width::{Storage, storage_of};
 
 const BUILTINS: &[&str] = &["u8", "f32be", "f64be", "bytes", "rest"];
@@ -36,8 +39,10 @@ pub fn lower(resolved: &ResolvedSchema) -> BpsResult<IrSchema> {
         }
     }
     lower_strings(resolved, &mut ir)?;
+    lower_enums(resolved, &mut ir)?;
+    lower_records(resolved, &mut ir)?;
     for pkt in resolved.packets.values() {
-        lower_packet(&pkt.name, &pkt.items, resolved, &mut ir)?;
+        install_record(&pkt.name, &[], &pkt.items, resolved, &mut ir)?;
     }
     Ok(ir)
 }
@@ -160,45 +165,29 @@ fn lower_scalar(enc: &EncodingDecl, resolved: &ResolvedSchema, ir: &mut IrSchema
     Ok(())
 }
 
-fn lower_packet(
+fn install_record(
     name: &str,
+    params: &[String],
     items: &[BlockItem],
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
 ) -> BpsResult<()> {
-    let mut fields = Vec::new();
-    for item in items {
-        let BlockItem::Field(wf) = item else {
-            return Err(emit(format!(
-                "packet {name}: only plain fields are lowered so far"
-            )));
-        };
-        let FieldType::Ref(r) = &wf.type_ref else {
-            return Err(emit(format!(
-                "packet {name} field {}: not a named type",
-                wf.name
-            )));
-        };
-        fields.push(Field {
-            name: wf.name.clone(),
-            ty: Ty::Named(TypeId(r.name.clone())),
-            optional: wf.if_expr.is_some(),
-        });
-    }
+    let items = expand_spreads(items, resolved)?;
+    let fields = collect_fields(name, &items, resolved, ir)?;
     ir.types.insert(name, TypeDef::Record { fields });
     ir.decode.insert(
         name,
         Proc {
-            params: Vec::new(),
-            body: lower_items(items, true, resolved, name)?,
+            params: params.to_vec(),
+            body: lower_items(&items, true, resolved, name)?,
             result: None,
         },
     );
     ir.encode.insert(
         name,
         Proc {
-            params: Vec::new(),
-            body: lower_items(items, false, resolved, name)?,
+            params: params.to_vec(),
+            body: lower_items(&items, false, resolved, name)?,
             result: None,
         },
     );
@@ -227,7 +216,9 @@ fn lower_items(
                 });
             }
             BlockItem::Field(wf) => {
-                let inner = if decode {
+                let inner = if wf.repeat.is_some() {
+                    vec![repeat_stmt(wf, decode, resolved, owner)?]
+                } else if decode {
                     decode_field(&wf.name, &wf.type_ref, resolved, owner)?
                 } else {
                     let value = wf
@@ -241,15 +232,28 @@ fn lower_items(
                         cond: cond.clone(),
                         then_body: inner,
                         else_body: Vec::new(),
+                        fallback: false,
                     });
                 } else {
                     out.extend(inner);
                 }
             }
-            BlockItem::Spread { .. } | BlockItem::Group { .. } | BlockItem::MatchStmt(_) => {
-                return Err(emit(format!(
-                    "{owner}: spread, group, and statement match are not lowered yet"
-                )));
+            BlockItem::Group { cond, items } => {
+                let inner = lower_items(items, decode, resolved, owner)?;
+                if let Some(cond) = cond {
+                    out.push(Stmt::If {
+                        cond: cond.clone(),
+                        then_body: inner,
+                        else_body: Vec::new(),
+                        fallback: true,
+                    });
+                } else {
+                    out.extend(inner);
+                }
+            }
+            BlockItem::MatchStmt(m) => out.push(stmt_match(m, decode, resolved, owner)?),
+            BlockItem::Spread { .. } => {
+                return Err(emit(format!("{owner}: spread survived expansion")));
             }
         }
     }
@@ -262,11 +266,22 @@ fn decode_field(
     resolved: &ResolvedSchema,
     owner: &str,
 ) -> BpsResult<Vec<Stmt>> {
-    let FieldType::Ref(r) = ty else {
-        return Err(emit(format!(
-            "{owner} field {dst}: inline type is not lowered yet"
-        )));
-    };
+    match ty {
+        FieldType::Ref(r) => ref_decode(dst, r, resolved, owner),
+        FieldType::Match(mt) => Ok(vec![typed_match(dst, mt, true, resolved, owner)?]),
+        FieldType::Block(block) => Ok(vec![Stmt::Block {
+            body: lower_items(&block.items, true, resolved, owner)?,
+            dst: dst.to_string(),
+        }]),
+    }
+}
+
+fn ref_decode(
+    dst: &str,
+    r: &TypeRef,
+    resolved: &ResolvedSchema,
+    owner: &str,
+) -> BpsResult<Vec<Stmt>> {
     check_transform(r, owner)?;
     let mut stmts = vec![Stmt::CallDecode {
         dst: dst.to_string(),
@@ -289,11 +304,23 @@ fn encode_field(
     resolved: &ResolvedSchema,
     owner: &str,
 ) -> BpsResult<Vec<Stmt>> {
-    let FieldType::Ref(r) = ty else {
-        return Err(emit(format!(
-            "{owner} field {name}: inline type is not lowered yet"
-        )));
-    };
+    match ty {
+        FieldType::Ref(r) => ref_encode(name, r, value, resolved, owner),
+        FieldType::Match(mt) => Ok(vec![typed_match(name, mt, false, resolved, owner)?]),
+        FieldType::Block(block) => Ok(vec![Stmt::Block {
+            body: lower_items(&block.items, false, resolved, owner)?,
+            dst: name.to_string(),
+        }]),
+    }
+}
+
+fn ref_encode(
+    name: &str,
+    r: &TypeRef,
+    value: Expr,
+    resolved: &ResolvedSchema,
+    owner: &str,
+) -> BpsResult<Vec<Stmt>> {
     check_transform(r, owner)?;
     Ok(vec![
         Stmt::Let {
@@ -318,7 +345,7 @@ fn check_transform(r: &TypeRef, owner: &str) -> BpsResult<()> {
 }
 
 fn call_args(resolved: &ResolvedSchema, r: &TypeRef, owner: &str) -> BpsResult<Vec<Expr>> {
-    if is_builtin(&r.name) || is_bare_primitive(&r.name) {
+    if is_builtin(&r.name) || is_bare_primitive(&r.name) || resolved.enums.contains_key(&r.name) {
         return Ok(r.args.clone());
     }
     let Some(enc) = resolved.encodings.get(&r.name) else {
@@ -557,4 +584,538 @@ fn string_procs(shape: &StringShape, params: &[String]) -> (Proc, Proc) {
         result: None,
     };
     (decode, encode)
+}
+
+fn lower_enums(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+    for en in resolved.enums.values() {
+        let base = match ir.types.get(&en.base) {
+            Some(TypeDef::Scalar(class)) => *class,
+            _ => Storage::I128,
+        };
+        let members = en
+            .members
+            .iter()
+            .map(|m| (m.name.clone(), m.value))
+            .collect();
+        ir.types.insert(&en.name, TypeDef::Enum { base, members });
+        ir.decode.insert(
+            &en.name,
+            Proc {
+                params: Vec::new(),
+                body: vec![Stmt::CallDecode {
+                    dst: "value".into(),
+                    callee: TypeId(en.base.clone()),
+                    args: Vec::new(),
+                }],
+                result: Some(Expr::Ident("value".into())),
+            },
+        );
+        ir.encode.insert(
+            &en.name,
+            Proc {
+                params: Vec::new(),
+                body: vec![Stmt::CallEncode {
+                    callee: TypeId(en.base.clone()),
+                    args: Vec::new(),
+                    value: Expr::Ident("value".into()),
+                }],
+                result: None,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn lower_records(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+    let mut progress = true;
+    while progress {
+        progress = false;
+        for enc in resolved.encodings.values() {
+            if enc.yield_expr.is_some() || ir.types.contains_key(&enc.name) {
+                continue;
+            }
+            match &enc.body {
+                EncBody::Ref(inner) => {
+                    if ir.types.contains_key(&inner.name) || is_builtin(&inner.name) {
+                        install_alias(enc, inner, ir);
+                        progress = true;
+                    }
+                }
+                EncBody::Block(block) => {
+                    let params: Vec<String> = enc.params.iter().map(|p| p.name.clone()).collect();
+                    ir.types
+                        .insert(&enc.name, TypeDef::Record { fields: Vec::new() });
+                    install_record(&enc.name, &params, &block.items, resolved, ir)?;
+                    progress = true;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn install_alias(enc: &EncodingDecl, inner: &TypeRef, ir: &mut IrSchema) {
+    let def = match ir.types.get(&inner.name) {
+        Some(TypeDef::Scalar(class)) => TypeDef::Scalar(*class),
+        Some(TypeDef::String) => TypeDef::String,
+        _ => TypeDef::Record { fields: Vec::new() },
+    };
+    ir.types.insert(&enc.name, def);
+    ir.decode.insert(
+        &enc.name,
+        Proc {
+            params: Vec::new(),
+            body: vec![Stmt::CallDecode {
+                dst: "value".into(),
+                callee: TypeId(inner.name.clone()),
+                args: inner.args.clone(),
+            }],
+            result: Some(Expr::Ident("value".into())),
+        },
+    );
+    ir.encode.insert(
+        &enc.name,
+        Proc {
+            params: Vec::new(),
+            body: vec![Stmt::CallEncode {
+                callee: TypeId(inner.name.clone()),
+                args: inner.args.clone(),
+                value: Expr::Ident("value".into()),
+            }],
+            result: None,
+        },
+    );
+}
+
+fn repeat_stmt(
+    wf: &WireField,
+    decode: bool,
+    resolved: &ResolvedSchema,
+    owner: &str,
+) -> BpsResult<Stmt> {
+    let rep = wf.repeat.as_ref().unwrap();
+    let elem = if decode {
+        decode_field("__elem", &wf.type_ref, resolved, owner)?
+    } else {
+        encode_element(&wf.type_ref, resolved, owner)?
+    };
+    let expr = rep.expr.clone().unwrap_or(Expr::Int(0));
+    Ok(match rep.mode {
+        RepeatMode::Count => Stmt::RepeatCount {
+            n: expr,
+            elem,
+            dst: wf.name.clone(),
+        },
+        RepeatMode::Until => Stmt::RepeatUntil {
+            term: expr,
+            elem,
+            dst: wf.name.clone(),
+        },
+        RepeatMode::UntilEnd => Stmt::RepeatUntilEnd {
+            elem,
+            dst: wf.name.clone(),
+        },
+    })
+}
+
+fn encode_element(ty: &FieldType, resolved: &ResolvedSchema, owner: &str) -> BpsResult<Vec<Stmt>> {
+    match ty {
+        FieldType::Ref(r) => Ok(vec![Stmt::CallEncode {
+            callee: TypeId(r.name.clone()),
+            args: call_args(resolved, r, owner)?,
+            value: Expr::Ident("__elem".into()),
+        }]),
+        FieldType::Block(block) => Ok(vec![Stmt::Block {
+            body: lower_items(&block.items, false, resolved, owner)?,
+            dst: "__elem".into(),
+        }]),
+        FieldType::Match(mt) => Ok(vec![typed_match("__elem", mt, false, resolved, owner)?]),
+    }
+}
+
+fn typed_match(
+    dst: &str,
+    mt: &crate::ast::MatchType,
+    decode: bool,
+    resolved: &ResolvedSchema,
+    owner: &str,
+) -> BpsResult<Stmt> {
+    let mut arms = Vec::new();
+    let mut default = None;
+    for arm in &mt.arms {
+        let body = match &arm.type_ref {
+            None => Vec::new(),
+            Some(ty) if decode => decode_field(dst, ty, resolved, owner)?,
+            Some(ty) => encode_element(ty, resolved, owner)?,
+        };
+        // encode_element writes `__elem`, but a match field's value is the field itself.
+        let body = if decode {
+            body
+        } else {
+            rewrite_elem_value(&body, dst)
+        };
+        match arm_tags(arm)? {
+            None => default = Some(body),
+            Some(tags) => arms.push(IrArm { tags, body }),
+        }
+    }
+    Ok(Stmt::Match {
+        scrutinee: mt.tag_expr.clone(),
+        arms,
+        default,
+    })
+}
+
+fn rewrite_elem_value(stmts: &[Stmt], dst: &str) -> Vec<Stmt> {
+    stmts
+        .iter()
+        .map(|stmt| match stmt {
+            Stmt::CallEncode {
+                callee,
+                args,
+                value: Expr::Ident(n),
+            } if *n == "__elem" => Stmt::CallEncode {
+                callee: callee.clone(),
+                args: args.clone(),
+                value: Expr::Ident(dst.to_string()),
+            },
+            other => other.clone(),
+        })
+        .collect()
+}
+
+fn stmt_match(
+    mt: &crate::ast::MatchType,
+    decode: bool,
+    resolved: &ResolvedSchema,
+    owner: &str,
+) -> BpsResult<Stmt> {
+    let mut arms = Vec::new();
+    let mut default = None;
+    for arm in &mt.arms {
+        let body = match &arm.type_ref {
+            Some(FieldType::Block(block)) => lower_items(&block.items, decode, resolved, owner)?,
+            None => Vec::new(),
+            Some(_) => {
+                return Err(emit(format!(
+                    "{owner}: statement match arm must be a block"
+                )));
+            }
+        };
+        match arm_tags(arm)? {
+            None => default = Some(body),
+            Some(tags) => arms.push(IrArm { tags, body }),
+        }
+    }
+    Ok(Stmt::Match {
+        scrutinee: mt.tag_expr.clone(),
+        arms,
+        default,
+    })
+}
+
+fn arm_tags(arm: &AstArm) -> BpsResult<Option<Vec<i128>>> {
+    if arm.tag.is_none() && arm.tags.is_empty() {
+        return Ok(None);
+    }
+    let mut tags = Vec::new();
+    if let Some(tag) = &arm.tag {
+        tags.push(tag_int(tag)?);
+    }
+    for tag in &arm.tags {
+        tags.push(tag_int(tag)?);
+    }
+    Ok(Some(tags))
+}
+
+fn tag_int(tag: &Tag) -> BpsResult<i128> {
+    match tag {
+        Tag::Int(v) => Ok(*v),
+        Tag::Str(s) => Err(emit(format!("string match tag {s} is not lowered"))),
+    }
+}
+
+fn expand_spreads(items: &[BlockItem], resolved: &ResolvedSchema) -> BpsResult<Vec<BlockItem>> {
+    let mut out = Vec::new();
+    for item in items {
+        if let BlockItem::Spread { name, args } = item {
+            let Some(enc) = resolved.encodings.get(name) else {
+                return Err(emit(format!("unknown spread {name}")));
+            };
+            let EncBody::Block(block) = &enc.body else {
+                return Err(emit(format!("spread {name}: alias body is not lowered")));
+            };
+            let mut map = HashMap::new();
+            for (i, param) in enc.params.iter().enumerate() {
+                if let Some(arg) = args.get(i) {
+                    map.insert(param.name.clone(), arg.clone());
+                } else if let Some(default) = param.default {
+                    map.insert(param.name.clone(), Expr::Int(default));
+                }
+            }
+            let substituted = subst_items(&block.items, &map);
+            out.extend(expand_spreads(&substituted, resolved)?);
+        } else {
+            out.push(item.clone());
+        }
+    }
+    Ok(out)
+}
+
+fn subst_items(items: &[BlockItem], map: &HashMap<String, Expr>) -> Vec<BlockItem> {
+    items.iter().map(|item| subst_item(item, map)).collect()
+}
+
+fn subst_item(item: &BlockItem, map: &HashMap<String, Expr>) -> BlockItem {
+    match item {
+        BlockItem::Require(expr) => BlockItem::Require(subst_expr(expr, map)),
+        BlockItem::Computed { name, expr } => BlockItem::Computed {
+            name: name.clone(),
+            expr: subst_expr(expr, map),
+        },
+        BlockItem::Field(wf) => BlockItem::Field(Box::new(WireField {
+            name: wf.name.clone(),
+            type_ref: subst_type(&wf.type_ref, map),
+            if_expr: wf.if_expr.as_ref().map(|expr| subst_expr(expr, map)),
+            repeat: wf.repeat.clone().map(|mut rep| {
+                rep.expr = rep.expr.map(|expr| subst_expr(&expr, map));
+                rep
+            }),
+            encode_expr: wf.encode_expr.as_ref().map(|expr| subst_expr(expr, map)),
+        })),
+        BlockItem::Spread { name, args } => BlockItem::Spread {
+            name: name.clone(),
+            args: args.iter().map(|arg| subst_expr(arg, map)).collect(),
+        },
+        BlockItem::Group { cond, items } => BlockItem::Group {
+            cond: cond.as_ref().map(|expr| subst_expr(expr, map)),
+            items: subst_items(items, map),
+        },
+        BlockItem::MatchStmt(mt) => BlockItem::MatchStmt(crate::ast::MatchType {
+            tag_expr: subst_expr(&mt.tag_expr, map),
+            arms: mt
+                .arms
+                .iter()
+                .map(|arm| AstArm {
+                    tag: arm.tag.clone(),
+                    tags: arm.tags.clone(),
+                    type_ref: arm.type_ref.as_ref().map(|ty| subst_type(ty, map)),
+                })
+                .collect(),
+        }),
+    }
+}
+
+fn subst_type(ty: &FieldType, map: &HashMap<String, Expr>) -> FieldType {
+    match ty {
+        FieldType::Ref(r) => FieldType::Ref(TypeRef {
+            name: r.name.clone(),
+            args: r.args.iter().map(|arg| subst_expr(arg, map)).collect(),
+            transforms: r.transforms.clone(),
+        }),
+        FieldType::Block(block) => FieldType::Block(crate::ast::BlockType {
+            items: subst_items(&block.items, map),
+        }),
+        FieldType::Match(mt) => FieldType::Match(crate::ast::MatchType {
+            tag_expr: subst_expr(&mt.tag_expr, map),
+            arms: mt
+                .arms
+                .iter()
+                .map(|arm| AstArm {
+                    tag: arm.tag.clone(),
+                    tags: arm.tags.clone(),
+                    type_ref: arm.type_ref.as_ref().map(|ty| subst_type(ty, map)),
+                })
+                .collect(),
+        }),
+    }
+}
+
+fn subst_expr(expr: &Expr, map: &HashMap<String, Expr>) -> Expr {
+    match expr {
+        Expr::Ident(name) => map.get(name).cloned().unwrap_or_else(|| expr.clone()),
+        Expr::Unop(op, inner) => Expr::Unop(op.clone(), Box::new(subst_expr(inner, map))),
+        Expr::Binop(op, left, right) => Expr::Binop(
+            op.clone(),
+            Box::new(subst_expr(left, map)),
+            Box::new(subst_expr(right, map)),
+        ),
+        Expr::Ternary(cond, yes, no) => Expr::Ternary(
+            Box::new(subst_expr(cond, map)),
+            Box::new(subst_expr(yes, map)),
+            Box::new(subst_expr(no, map)),
+        ),
+        Expr::Call(name, args) => Expr::Call(
+            name.clone(),
+            args.iter().map(|arg| subst_expr(arg, map)).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn collect_fields(
+    owner: &str,
+    items: &[BlockItem],
+    resolved: &ResolvedSchema,
+    ir: &mut IrSchema,
+) -> BpsResult<Vec<Field>> {
+    let mut fields = Vec::new();
+    for item in items {
+        match item {
+            BlockItem::Require(_) | BlockItem::Spread { .. } => {}
+            BlockItem::Computed { name, expr } => fields.push(Field {
+                name: name.clone(),
+                ty: Ty::Scalar(storage_of(expr, &HashMap::new())),
+                optional: false,
+            }),
+            BlockItem::Field(wf) => fields.push(field_desc(owner, wf, false, resolved, ir)?),
+            BlockItem::Group { cond, items } => {
+                let mut inner = collect_fields(owner, items, resolved, ir)?;
+                if cond.is_some() {
+                    for field in &mut inner {
+                        field.optional = true;
+                    }
+                }
+                fields.extend(inner);
+            }
+            BlockItem::MatchStmt(mt) => fields.extend(match_stmt_fields(owner, mt, resolved, ir)?),
+        }
+    }
+    Ok(fields)
+}
+
+fn field_desc(
+    owner: &str,
+    wf: &WireField,
+    force_opt: bool,
+    resolved: &ResolvedSchema,
+    ir: &mut IrSchema,
+) -> BpsResult<Field> {
+    let ty = match &wf.type_ref {
+        FieldType::Ref(r) => ty_of(&r.name, ir),
+        FieldType::Match(mt) => {
+            let id = format!("{owner}_{}", wf.name);
+            let arms = sum_arms(&id, mt, resolved, ir)?;
+            ir.types.insert(&id, TypeDef::Sum { arms });
+            Ty::Named(TypeId(id))
+        }
+        FieldType::Block(block) => {
+            let id = format!("{owner}_{}_block", wf.name);
+            let fields = collect_fields(&id, &block.items, resolved, ir)?;
+            ir.types.insert(&id, TypeDef::Record { fields });
+            Ty::Named(TypeId(id))
+        }
+    };
+    let ty = if wf.repeat.is_some() {
+        Ty::List(Box::new(ty))
+    } else {
+        ty
+    };
+    Ok(Field {
+        name: wf.name.clone(),
+        ty,
+        optional: force_opt || wf.if_expr.is_some(),
+    })
+}
+
+fn ty_of(name: &str, ir: &IrSchema) -> Ty {
+    match ir.types.get(name) {
+        Some(TypeDef::Scalar(class)) => Ty::Scalar(*class),
+        Some(TypeDef::String) => Ty::Scalar(Storage::Str),
+        _ => Ty::Named(TypeId(name.to_string())),
+    }
+}
+
+fn sum_arms(
+    owner: &str,
+    mt: &crate::ast::MatchType,
+    resolved: &ResolvedSchema,
+    ir: &mut IrSchema,
+) -> BpsResult<Vec<Variant>> {
+    let mut arms = Vec::new();
+    for (i, arm) in mt.arms.iter().enumerate() {
+        let ty = match &arm.type_ref {
+            None => Ty::Scalar(Storage::U8),
+            Some(FieldType::Ref(r)) => ty_of(&r.name, ir),
+            Some(FieldType::Block(block)) => {
+                let id = format!("{owner}_arm{i}");
+                let fields = collect_fields(&id, &block.items, resolved, ir)?;
+                ir.types.insert(&id, TypeDef::Record { fields });
+                Ty::Named(TypeId(id))
+            }
+            Some(FieldType::Match(_)) => Ty::Named(TypeId(format!("{owner}_arm{i}_match"))),
+        };
+        let tag = match &arm.tag {
+            None if arm.tags.is_empty() => None,
+            Some(Tag::Int(v)) => Some(*v),
+            Some(Tag::Str(s)) => return Err(emit(format!("string match tag {s}"))),
+            None => arm.tags.iter().find_map(|tag| match tag {
+                Tag::Int(v) => Some(*v),
+                Tag::Str(_) => None,
+            }),
+        };
+        arms.push(Variant { tag, ty });
+    }
+    Ok(arms)
+}
+
+fn match_stmt_fields(
+    owner: &str,
+    mt: &crate::ast::MatchType,
+    resolved: &ResolvedSchema,
+    ir: &mut IrSchema,
+) -> BpsResult<Vec<Field>> {
+    let mut per_arm = Vec::new();
+    for arm in &mt.arms {
+        let items = match &arm.type_ref {
+            Some(FieldType::Block(block)) => &block.items,
+            None => {
+                per_arm.push(Vec::new());
+                continue;
+            }
+            Some(_) => {
+                return Err(emit(format!(
+                    "{owner}: statement match arm must be a block"
+                )));
+            }
+        };
+        per_arm.push(collect_fields(owner, items, resolved, ir)?);
+    }
+    let mut order = Vec::new();
+    let mut seen: HashMap<String, (Ty, usize, bool)> = HashMap::new();
+    for arm in &per_arm {
+        let mut in_arm = HashMap::new();
+        for field in arm {
+            if let Some((prev, _, _)) = seen.get(&field.name)
+                && prev != &field.ty
+            {
+                return Err(emit(format!(
+                    "{owner}: match arms disagree on {}",
+                    field.name
+                )));
+            }
+            in_arm.insert(field.name.clone(), field.optional);
+            if !seen.contains_key(&field.name) {
+                order.push(field.name.clone());
+                seen.insert(field.name.clone(), (field.ty.clone(), 0, field.optional));
+            }
+        }
+        for (name, optional) in in_arm {
+            let entry = seen.get_mut(&name).unwrap();
+            entry.1 += 1;
+            entry.2 = entry.2 || optional;
+        }
+    }
+    let arms = per_arm.len();
+    Ok(order
+        .into_iter()
+        .map(|name| {
+            let (ty, count, optional) = seen.remove(&name).unwrap();
+            Field {
+                name,
+                ty,
+                optional: optional || count < arms,
+            }
+        })
+        .collect())
 }
