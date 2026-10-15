@@ -149,6 +149,7 @@ Python parity run need Node and Python.
 | Rust ↔ Python | `dump-json` of every generated schema is byte-identical in the Rust and Python implementations, and the same random packets decode to identical JSON in both | `scripts/python_parity_versions.py` |
 | 26.3 vs the hand-written schema | 6 240 packets drawn from the hand-written, Java-probe-validated `schemas/minecraft_26_3*.bps`: 6 069 decode and re-encode unchanged under `v26_3.bps`; the other 171 are 13 packet types where the hand-written schema is deliberately looser (it stops at registry boundaries), each listed with its reason in the test. The comparison found one bug in the hand-written schema (`commands_node`), now fixed | `test_versions_cross.rs` |
 | Vanilla, 26.1 to 26.3 | the corrections in `patches/`, each citing the decompiled vanilla source that decides it | `patches/*.json` |
+| Live game, every version | `game_probe` boots Mojang's dedicated server (JDK 8 / 17 / 21 / 25) and speaks status and login from the schema: the server's clientbound packets decode, and the server accepts the serverbound handshake and login. 26.1 and later also compare the client jar's protocol classes with the server jar's | `cargo run -q -p bps --bin game_probe` |
 
 The last full oracle run, `scripts/verify_versions.py --count 100 --seeds 100`:
 
