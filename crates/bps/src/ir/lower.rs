@@ -35,6 +35,7 @@ pub fn lower(resolved: &ResolvedSchema) -> BpsResult<IrSchema> {
             lower_scalar(enc, resolved, &mut ir)?;
         }
     }
+    lower_strings(resolved, &mut ir)?;
     for pkt in resolved.packets.values() {
         lower_packet(&pkt.name, &pkt.items, resolved, &mut ir)?;
     }
@@ -343,4 +344,217 @@ fn call_args(resolved: &ResolvedSchema, r: &TypeRef, owner: &str) -> BpsResult<V
 
 fn is_builtin(name: &str) -> bool {
     BUILTINS.contains(&name)
+}
+
+/// Encodings whose wire is a length plus `bytes(length) as utf8`, and spreads of those.
+fn lower_strings(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+    let mut progressed = true;
+    while progressed {
+        progressed = false;
+        for enc in resolved.encodings.values() {
+            if enc.yield_expr.is_some() || ir.types.contains_key(&enc.name) {
+                continue;
+            }
+            if install_string(enc, resolved, ir)? {
+                progressed = true;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn install_string(
+    enc: &EncodingDecl,
+    resolved: &ResolvedSchema,
+    ir: &mut IrSchema,
+) -> BpsResult<bool> {
+    let EncBody::Block(block) = &enc.body else {
+        return Ok(false);
+    };
+    let params: Vec<String> = enc.params.iter().map(|p| p.name.clone()).collect();
+    if let Some(shape) = direct_string(&block.items, ir) {
+        let (decode, encode) = string_procs(&shape, &params);
+        ir.types.insert(&enc.name, TypeDef::String);
+        ir.decode.insert(&enc.name, decode);
+        ir.encode.insert(&enc.name, encode);
+        return Ok(true);
+    }
+    if let Some((callee, args)) = string_spread(&block.items, resolved, ir, &enc.name)? {
+        let decode = Proc {
+            params: params.clone(),
+            body: vec![Stmt::CallDecode {
+                dst: "value".into(),
+                callee: TypeId(callee.clone()),
+                args: args.clone(),
+            }],
+            result: Some(Expr::Ident("value".into())),
+        };
+        let encode = Proc {
+            params,
+            body: vec![Stmt::CallEncode {
+                callee: TypeId(callee),
+                args,
+                value: Expr::Ident("value".into()),
+            }],
+            result: None,
+        };
+        ir.types.insert(&enc.name, TypeDef::String);
+        ir.decode.insert(&enc.name, decode);
+        ir.encode.insert(&enc.name, encode);
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+struct StringShape {
+    len_name: String,
+    len_ty: String,
+    val_name: String,
+    requires: Vec<Expr>,
+}
+
+fn direct_string(items: &[BlockItem], ir: &IrSchema) -> Option<StringShape> {
+    let mut len_name = None;
+    let mut len_ty = None;
+    let mut val_name = None;
+    let mut bytes_of = None;
+    let mut requires = Vec::new();
+    for item in items {
+        match item {
+            BlockItem::Require(expr) => requires.push(expr.clone()),
+            BlockItem::Field(wf) if wf.if_expr.is_none() && wf.repeat.is_none() => {
+                let FieldType::Ref(r) = &wf.type_ref else {
+                    return None;
+                };
+                let int_len =
+                    r.transforms.is_empty() && r.args.is_empty() && is_int_scalar(ir, &r.name);
+                let utf8_bytes =
+                    r.name == "bytes" && r.transforms == ["utf8".to_string()] && r.args.len() == 1;
+                if int_len {
+                    if len_name.is_some() {
+                        return None;
+                    }
+                    len_name = Some(wf.name.clone());
+                    len_ty = Some(r.name.clone());
+                } else if utf8_bytes {
+                    if val_name.is_some() {
+                        return None;
+                    }
+                    let Expr::Ident(arg) = &r.args[0] else {
+                        return None;
+                    };
+                    val_name = Some(wf.name.clone());
+                    bytes_of = Some(arg.clone());
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    if bytes_of.as_ref() != len_name.as_ref() {
+        return None;
+    }
+    Some(StringShape {
+        len_name: len_name?,
+        len_ty: len_ty?,
+        val_name: val_name?,
+        requires,
+    })
+}
+
+fn is_int_scalar(ir: &IrSchema, name: &str) -> bool {
+    match ir.types.get(name) {
+        Some(TypeDef::Scalar(class)) => matches!(
+            class,
+            Storage::I8
+                | Storage::I16
+                | Storage::I32
+                | Storage::I64
+                | Storage::I128
+                | Storage::U8
+                | Storage::U16
+                | Storage::U32
+                | Storage::U64
+        ),
+        _ => false,
+    }
+}
+
+fn string_spread(
+    items: &[BlockItem],
+    resolved: &ResolvedSchema,
+    ir: &IrSchema,
+    owner: &str,
+) -> BpsResult<Option<(String, Vec<Expr>)>> {
+    if items.len() != 1 {
+        return Ok(None);
+    }
+    let BlockItem::Spread { name, args } = &items[0] else {
+        return Ok(None);
+    };
+    if !matches!(ir.types.get(name), Some(TypeDef::String)) {
+        return Ok(None);
+    }
+    let r = TypeRef {
+        name: name.clone(),
+        args: args.clone(),
+        transforms: Vec::new(),
+    };
+    Ok(Some((name.clone(), call_args(resolved, &r, owner)?)))
+}
+
+fn string_procs(shape: &StringShape, params: &[String]) -> (Proc, Proc) {
+    let mut decode = vec![
+        Stmt::CallDecode {
+            dst: shape.len_name.clone(),
+            callee: TypeId(shape.len_ty.clone()),
+            args: Vec::new(),
+        },
+        Stmt::CallDecode {
+            dst: shape.val_name.clone(),
+            callee: TypeId("bytes".into()),
+            args: vec![Expr::Ident(shape.len_name.clone())],
+        },
+        Stmt::Utf8 {
+            dst: shape.val_name.clone(),
+            src: shape.val_name.clone(),
+        },
+    ];
+    let mut encode = Vec::new();
+    if shape.val_name != "value" {
+        encode.push(Stmt::Let {
+            name: shape.val_name.clone(),
+            expr: Expr::Ident("value".into()),
+        });
+    }
+    encode.push(Stmt::Let {
+        name: shape.len_name.clone(),
+        expr: Expr::Call("utf8_len".into(), vec![Expr::Ident("value".into())]),
+    });
+    encode.push(Stmt::CallEncode {
+        callee: TypeId(shape.len_ty.clone()),
+        args: Vec::new(),
+        value: Expr::Ident(shape.len_name.clone()),
+    });
+    encode.push(Stmt::CallEncode {
+        callee: TypeId("bytes".into()),
+        args: vec![Expr::Ident(shape.len_name.clone())],
+        value: Expr::Ident("value".into()),
+    });
+    for req in &shape.requires {
+        decode.push(Stmt::Require(req.clone()));
+        encode.push(Stmt::Require(req.clone()));
+    }
+    let decode = Proc {
+        params: params.to_vec(),
+        body: decode,
+        result: Some(Expr::Ident(shape.val_name.clone())),
+    };
+    let encode = Proc {
+        params: params.to_vec(),
+        body: encode,
+        result: None,
+    };
+    (decode, encode)
 }

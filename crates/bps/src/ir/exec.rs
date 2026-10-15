@@ -3,7 +3,7 @@
 use crate::ast::Expr;
 use crate::errors::{BpsResult, encode};
 use crate::interp::cursor::{Cursor, WriteCursor};
-use crate::interp::expr::{eval_expr, int_of};
+use crate::interp::expr::int_of;
 use crate::value::{Env, Value};
 
 use super::schema::{IrSchema, Stmt, WireOp};
@@ -290,4 +290,22 @@ fn raw_bytes(value: &Value) -> Option<Vec<u8>> {
         }
         _ => None,
     }
+}
+
+/// Schema calls go to the interpreter. `utf8_len` is emitted by the lowerer for
+/// string-shaped encodings: UTF-8 byte length, not Unicode scalars (`len`).
+fn eval_expr(expr: &Expr, env: &Env) -> BpsResult<Value> {
+    if let Expr::Call(name, args) = expr
+        && name == "utf8_len"
+        && args.len() == 1
+    {
+        let v = eval_expr(&args[0], env)?;
+        let n = match &v {
+            Value::Str(s) => s.len(),
+            Value::Bytes(b) => b.len(),
+            _ => return Err(encode("utf8_len needs a string")),
+        };
+        return Ok(Value::Int(n as i128));
+    }
+    crate::interp::expr::eval_expr(expr, env)
 }

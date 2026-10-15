@@ -87,3 +87,59 @@ fn scalars_roundtrip_known_bytes() {
         Value::Bool(true)
     );
 }
+
+fn string_schema() -> bps::ast::ResolvedSchema {
+    let source = repo("schemas/std/integers.bps")
+        + &repo("schemas/std/varint.bps")
+        + r#"
+encoding string(max_chars = 32767) {
+    byte_len: varint
+    value: bytes(byte_len) as utf8
+    require utf16_units(value) <= max_chars
+}
+encoding identifier = { ...string(32767) }
+packet probe { s: string(16)  id: identifier }
+"#;
+    bps::analyze(&bps::parse(&source).unwrap()).unwrap()
+}
+
+#[test]
+fn string_shaped_is_one_string_not_a_record() {
+    use bps::Value;
+    use bps::ir::{TypeDef, exec_decode, exec_encode};
+    let ir = lower(&string_schema()).unwrap();
+    assert!(matches!(ir.types.get("string"), Some(TypeDef::String)));
+    assert!(matches!(ir.types.get("identifier"), Some(TypeDef::String)));
+
+    let hi = Value::str("hi");
+    let enc = exec_encode(&ir, "string", &[Value::Int(16)], &hi).unwrap();
+    assert_eq!(enc, vec![0x02, b'h', b'i']);
+    assert_eq!(
+        exec_decode(&ir, "string", &[Value::Int(16)], &enc).unwrap(),
+        hi
+    );
+
+    let mut too_long = vec![0x11];
+    too_long.extend(std::iter::repeat_n(b'a', 17));
+    assert!(exec_decode(&ir, "string", &[Value::Int(16)], &too_long).is_err());
+
+    let id = exec_encode(&ir, "identifier", &[], &hi).unwrap();
+    assert_eq!(id, enc);
+}
+
+#[test]
+fn minecraft_core_string_shapes_are_exactly_these() {
+    use bps::ir::TypeDef;
+    let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../"))
+        .join("schemas/minecraft_core.bps");
+    let resolved = bps::analyze(&bps::load_schema(&[path]).unwrap()).unwrap();
+    let ir = lower(&resolved).unwrap();
+    let mut names: Vec<&str> = ir
+        .types
+        .iter()
+        .filter(|(_, def)| matches!(def, TypeDef::String))
+        .map(|(name, _)| name)
+        .collect();
+    names.sort();
+    assert_eq!(names, vec!["identifier", "nbt_string", "string"]);
+}
