@@ -9,6 +9,7 @@ pub mod analyze;
 pub mod ast;
 pub mod cli;
 pub mod emit_json;
+pub mod emit_go;
 pub mod emit_rust;
 pub mod emit_rstom;
 pub mod emit_tree;

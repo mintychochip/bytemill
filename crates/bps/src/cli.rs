@@ -305,9 +305,12 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                 return Err("emit: the following arguments are required: target".to_string());
             }
             a.target = Some(argv.remove(0));
-            if !matches!(a.target.as_deref(), Some("rust") | Some("rstom") | Some("rstom-tree")) {
+            if !matches!(
+                a.target.as_deref(),
+                Some("rust") | Some("rstom") | Some("rstom-tree") | Some("go")
+            ) {
                 return Err(format!(
-                    "emit: argument target: invalid choice: {:?} (choose from 'rust', 'rstom', 'rstom-tree')",
+                    "emit: argument target: invalid choice: {:?} (choose from 'rust', 'rstom', 'rstom-tree', 'go')",
                     a.target.unwrap()
                 ));
             }
@@ -468,6 +471,8 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
             let out_dir = PathBuf::from(out);
             if target == "rust" {
                 emit_rust(&resolved, &out_dir)?;
+            } else if target == "go" {
+                crate::emit_go::emit_go(&resolved, &out_dir)?;
             } else {
                 let classes = class_table(a.packets_json.as_deref(), &out_dir, "rstom")?;
                 emit_rstom(&resolved, &out_dir, &classes, "../rstom")?;
