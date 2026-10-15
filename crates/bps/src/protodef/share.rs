@@ -293,9 +293,363 @@ fn check_pieces(text: &str, s: &Split) -> Res<()> {
     Ok(())
 }
 
+impl Decl {
+    /// Fill `refs`: parse the piece, take its one declaration, collect the names it references
+    /// that are neither packet routes nor bare primitives, deduplicated and sorted.
+    pub fn fill_refs(&mut self) -> Res<()> {
+        let parsed = crate::parse(&self.text)
+            .map_err(|e| format!("{} {}: {e}", self.kind.keyword().trim(), self.name))?;
+        let mut schema = crate::ast::Schema::default();
+        match self.kind {
+            Kind::Encoding => schema.encodings = parsed.encodings,
+            Kind::Packet => schema.packets = parsed.packets,
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for r in crate::refs::references(&schema) {
+            if r.kind == crate::refs::RefKind::Packet
+                || crate::primitives::is_bare_primitive(&r.name)
+            {
+                continue;
+            }
+            names.insert(r.name);
+        }
+        self.refs = names.into_iter().collect();
+        Ok(())
+    }
+}
+
+/// The identity id of one declaration within one version. Equal ids across all versions mean
+/// the declaration and everything reachable from it is textually identical.
+pub type Id = u32;
+
+/// Per version: `(kind, name) -> id`. Ids are interned from exact string keys, so equal keys
+/// give equal ids across every version and different keys never collide.
+///
+/// The key of a declaration outside any cycle is its `(kind, name, text, sorted ids of the
+/// declarations it references)`. A strongly connected component (two or more members, or a
+/// self reference) gets one component key from its members' `(kind, name, text)` and the
+/// sorted ids of the outside declarations they reference; each member's key is `(component
+/// id, kind, name)`. Components are keyed children first, so a child's id is final before any
+/// parent's key is built.
+pub fn identity(versions: &[Vec<Decl>]) -> Res<Vec<BTreeMap<(Kind, String), Id>>> {
+    // Nodes by name across the whole run; ids interned in one shared table.
+    let mut intern: BTreeMap<String, Id> = BTreeMap::new();
+    let mut next: Id = 0;
+    let mut out = Vec::with_capacity(versions.len());
+    for decls in versions {
+        // Tarjan's SCC, iterative. Nodes are (kind, name); edges are the declaration's refs
+        // that exist in this version (external and std names are ignored: they do not affect
+        // identity).
+        let index: BTreeMap<(Kind, &str), usize> = decls
+            .iter()
+            .enumerate()
+            .map(|(i, d)| ((d.kind, d.name.as_str()), i))
+            .collect();
+        let n = decls.len();
+        let mut edges: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (i, d) in decls.iter().enumerate() {
+            for r in &d.refs {
+                if let Some(&j) = index.get(&(d.kind, r.as_str())) {
+                    // A declaration only references its own kind through a type ref? No: a
+                    // packet references encodings. Resolve across both kinds: try the same
+                    // kind first, then any kind (names are unique per kind, and an encoding
+                    // and a packet never share a name in one version — the lint forbids it).
+                    edges[i].push(j);
+                } else {
+                    let other = match d.kind {
+                        Kind::Encoding => Kind::Packet,
+                        Kind::Packet => Kind::Encoding,
+                    };
+                    if let Some(&j) = index.get(&(other, r.as_str())) {
+                        edges[i].push(j);
+                    }
+                }
+            }
+        }
+
+        // Iterative Tarjan.
+        let mut on_stack = vec![false; n];
+        let mut stack: Vec<usize> = Vec::new();
+        let mut low = vec![0u32; n];
+        let mut disc = vec![u32::MAX; n];
+        let mut components: Vec<Vec<usize>> = Vec::new();
+        let mut self_loop = vec![false; n];
+        for start in 0..n {
+            if disc[start] != u32::MAX {
+                continue;
+            }
+            // Each frame: (node, next edge index to try).
+            let mut call: Vec<(usize, usize)> = vec![(start, 0)];
+            let mut counter: u32 = 0;
+            while let Some((v, mut ei)) = call.pop() {
+                if ei == 0 {
+                    disc[v] = counter;
+                    low[v] = counter;
+                    counter += 1;
+                    stack.push(v);
+                    on_stack[v] = true;
+                }
+                let mut recurse = None;
+                while let Some(&w) = edges[v].get(ei) {
+                    if disc[w] == u32::MAX {
+                        call.push((v, ei + 1));
+                        recurse = Some(w);
+                        break;
+                    }
+                    if on_stack[w] {
+                        low[v] = low[v].min(disc[w]);
+                        if w == v {
+                            self_loop[v] = true;
+                        }
+                    }
+                    ei += 1;
+                }
+                if let Some(w) = recurse {
+                    call.push((w, 0));
+                    continue;
+                }
+                // All edges done: close the frame.
+                if low[v] == disc[v] {
+                    let mut comp = Vec::new();
+                    while let Some(w) = stack.pop() {
+                        on_stack[w] = false;
+                        comp.push(w);
+                        if w == v {
+                            break;
+                        }
+                    }
+                    comp.sort_unstable();
+                    components.push(comp);
+                }
+                if let Some(&(parent, _)) = call.last() {
+                    low[parent] = low[parent].min(low[v]);
+                }
+            }
+        }
+
+        // Components in discovery order are children first (Tarjan pops a component only
+        // after all components it can reach are popped). Key each component.
+        let mut ids: Vec<Option<Id>> = vec![None; n];
+        for comp in &components {
+            if comp.len() == 1 && !self_loop[comp[0]] {
+                let v = comp[0];
+                let d = &decls[v];
+                let mut refs: Vec<String> = Vec::new();
+                for &w in &edges[v] {
+                    refs.push(
+                        ids[w]
+                            .expect("children are keyed before their parents")
+                            .to_string(),
+                    );
+                }
+                refs.sort_unstable();
+                let key = format!(
+                    "d\x1f{}\x1f{}\x1f{}\x1f{}",
+                    d.kind.keyword().trim(),
+                    d.name,
+                    d.text,
+                    refs.join("\x1e")
+                );
+                let id = *intern.entry(key).or_insert_with(|| {
+                    let id = next;
+                    next += 1;
+                    id
+                });
+                ids[v] = Some(id);
+            } else {
+                let mut members: Vec<(String, String, String)> = comp
+                    .iter()
+                    .map(|&v| {
+                        (
+                            decls[v].kind.keyword().trim().to_string(),
+                            decls[v].name.clone(),
+                            decls[v].text.clone(),
+                        )
+                    })
+                    .collect();
+                members.sort();
+                let mut outside: Vec<String> = Vec::new();
+                for &v in comp {
+                    for &w in &edges[v] {
+                        if !comp.contains(&w) {
+                            outside.push(
+                                ids[w]
+                                    .expect("children are keyed before their parents")
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+                outside.sort();
+                outside.dedup();
+                let ckey = format!(
+                    "c\x1f{}\x1f{}",
+                    members
+                        .iter()
+                        .map(|(k, n, t)| format!("{k}\x1e{n}\x1e{t}"))
+                        .collect::<Vec<_>>()
+                        .join("\x1d"),
+                    outside.join("\x1e")
+                );
+                let cid = *intern.entry(ckey).or_insert_with(|| {
+                    let id = next;
+                    next += 1;
+                    id
+                });
+                for &v in comp {
+                    let d = &decls[v];
+                    let key = format!(
+                        "m\x1f{cid}\x1f{}\x1f{}",
+                        d.kind.keyword().trim(),
+                        d.name
+                    );
+                    let id = *intern.entry(key).or_insert_with(|| {
+                        let id = next;
+                        next += 1;
+                        id
+                    });
+                    ids[v] = Some(id);
+                }
+            }
+        }
+
+        let mut map = BTreeMap::new();
+        for (i, d) in decls.iter().enumerate() {
+            map.insert(
+                (d.kind, d.name.clone()),
+                ids[i].expect("every node belongs to exactly one component"),
+            );
+        }
+        out.push(map);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decl(kind: Kind, name: &str, body: &str) -> Decl {
+        let mut d = Decl {
+            kind,
+            name: name.into(),
+            text: format!("{body}\n"),
+            refs: Vec::new(),
+        };
+        d.fill_refs().unwrap();
+        d
+    }
+
+    #[test]
+    fn identical_declarations_get_one_id_and_a_change_splits_the_dependants() {
+        // Two versions; `wrapper` references `inner` in both, but `inner` differs. All four
+        // ids are distinct: `wrapper` differs across versions because its referenced id
+        // differs even though its text is equal.
+        let v0 = vec![
+            decl(Kind::Encoding, "inner", "encoding inner = {\n    a: u8\n}"),
+            decl(
+                Kind::Encoding,
+                "wrapper",
+                "encoding wrapper = {\n    x: inner\n}",
+            ),
+        ];
+        let v1 = vec![
+            decl(Kind::Encoding, "inner", "encoding inner = {\n    a: u16be\n}"),
+            decl(
+                Kind::Encoding,
+                "wrapper",
+                "encoding wrapper = {\n    x: inner\n}",
+            ),
+        ];
+        let ids = identity(&[v0.clone(), v1.clone()]).unwrap();
+        let w0 = ids[0][&(Kind::Encoding, "wrapper".into())];
+        let w1 = ids[1][&(Kind::Encoding, "wrapper".into())];
+        assert_ne!(w0, w1);
+        let i0 = ids[0][&(Kind::Encoding, "inner".into())];
+        let i1 = ids[1][&(Kind::Encoding, "inner".into())];
+        assert_ne!(i0, i1);
+    }
+
+    #[test]
+    fn a_recursive_group_shares_as_a_unit() {
+        // `node` references `entry`, `entry` references `node`: one SCC. Versions 0 and 1 are
+        // identical; version 2 changes `node`, so both members move.
+        let mk = |long: bool| -> Vec<Decl> {
+            vec![
+                decl(
+                    Kind::Encoding,
+                    "node",
+                    if long {
+                        "encoding node = {\n    tag: u8\n    next: entry\n}"
+                    } else {
+                        "encoding node = {\n    next: entry\n}"
+                    },
+                ),
+                decl(
+                    Kind::Encoding,
+                    "entry",
+                    "encoding entry = {\n    value: node\n}",
+                ),
+            ]
+        };
+        let ids = identity(&[mk(false), mk(false), mk(true)]).unwrap();
+        assert_eq!(
+            ids[0][&(Kind::Encoding, "node".into())],
+            ids[1][&(Kind::Encoding, "node".into())]
+        );
+        assert_eq!(
+            ids[0][&(Kind::Encoding, "entry".into())],
+            ids[1][&(Kind::Encoding, "entry".into())]
+        );
+        assert_ne!(
+            ids[0][&(Kind::Encoding, "entry".into())],
+            ids[2][&(Kind::Encoding, "entry".into())]
+        );
+        assert_ne!(
+            ids[0][&(Kind::Encoding, "node".into())],
+            ids[2][&(Kind::Encoding, "node".into())]
+        );
+    }
+
+    #[test]
+    fn a_packet_referencing_a_changed_encoding_is_not_identical() {
+        let v0 = vec![
+            decl(Kind::Encoding, "slot", "encoding slot = {\n    a: u8\n}"),
+            decl(
+                Kind::Packet,
+                "set_slot",
+                "packet set_slot {\n    s: slot\n}",
+            ),
+        ];
+        let v1 = vec![
+            decl(Kind::Encoding, "slot", "encoding slot = {\n    a: i32be\n}"),
+            decl(
+                Kind::Packet,
+                "set_slot",
+                "packet set_slot {\n    s: slot\n}",
+            ),
+        ];
+        let ids = identity(&[v0, v1]).unwrap();
+        assert_ne!(
+            ids[0][&(Kind::Packet, "set_slot".into())],
+            ids[1][&(Kind::Packet, "set_slot".into())]
+        );
+    }
+
+    #[test]
+    fn a_name_absent_from_its_own_version_does_not_affect_identity() {
+        // `wrapper` references `missing`, declared nowhere: external, ignored.
+        let v0 = vec![decl(
+            Kind::Encoding,
+            "wrapper",
+            "encoding wrapper = {\n    x: missing\n}",
+        )];
+        let ids = identity(&[v0.clone(), v0]).unwrap();
+        assert_eq!(
+            ids[0][&(Kind::Encoding, "wrapper".into())],
+            ids[1][&(Kind::Encoding, "wrapper".into())]
+        );
+    }
 
     const SAMPLE: &str = "\
 // Minecraft Java Edition 1.13 (protocol 393).
