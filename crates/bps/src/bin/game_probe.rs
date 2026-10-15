@@ -826,7 +826,9 @@ fn launch_vanilla_client_inner(
 ) -> Result<Value, String> {
     let meta = version_json(release)?;
     let main = str_field(&meta, "mainClass")?;
+    let shim = ensure_client_shim()?;
     let (classpath, native_jars) = client_classpath(release, &meta)?;
+    let classpath = format!("{}:{}", shim.display(), classpath);
     let natives = cache_root().join("clients").join(release).join("natives");
     fs::create_dir_all(&natives).map_err(|e| e.to_string())?;
     for jar in &native_jars {
@@ -846,10 +848,13 @@ fn launch_vanilla_client_inner(
     let proxy = RecordProxy::start(server_port)?;
     fs::write(
         game_dir.join("options.txt"),
-        "version:9999\nskipMultiplayerWarning:true\npauseOnLostFocus:false\nlang:en_us\n",
+        "skipMultiplayerWarning:true\npauseOnLostFocus:false\nlang:en_us\n",
     )
     .map_err(|e| e.to_string())?;
     let mut cmd = Command::new(java);
+    if release == "1.17" {
+        cmd.arg(format!("-javaagent:{}=1.17", shim.display()));
+    }
     cmd.arg("-Xmx1G")
         .arg(format!("-Djava.library.path={}", natives.display()))
         .arg(format!("-Dorg.lwjgl.system.SharedLibraryExtractPath={}", natives.display()))
@@ -963,6 +968,90 @@ fn ensure_assets(meta: &Value) -> Result<PathBuf, String> {
     }
     curl_many(&jobs)?;
     Ok(root)
+}
+
+fn ensure_client_shim() -> Result<PathBuf, String> {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("probe");
+    let dest = cache_root().join("probe-shim.jar");
+    let src_mtime = newest_mtime(&src)?;
+    if dest.is_file() && dest.metadata().and_then(|m| m.modified()).ok() > src_mtime {
+        return Ok(dest);
+    }
+    let authlib = newest_authlib()?;
+    let javac = cache_root().join("jdk/17/bin/javac");
+    let jar_bin = cache_root().join("jdk/17/bin/jar");
+    let out = cache_root().join("probe-shim-classes");
+    let _ = fs::remove_dir_all(&out);
+    fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let sources = [
+        src.join("src/com/mojang/authlib/yggdrasil/YggdrasilSocialInteractionsService.java"),
+        src.join("src/probe/ClassPatch.java"),
+        src.join("src/probe/ClientPatch.java"),
+    ];
+    let status = Command::new(&javac)
+        .arg("--release")
+        .arg("8")
+        .arg("-cp")
+        .arg(&authlib)
+        .arg("-d")
+        .arg(&out)
+        .args(&sources)
+        .status()
+        .map_err(|e| format!("javac: {e}"))?;
+    if !status.success() {
+        return Err("javac probe shim failed".into());
+    }
+    let status = Command::new(&jar_bin)
+        .arg("cfm")
+        .arg(&dest)
+        .arg(src.join("MANIFEST.MF"))
+        .arg("-C")
+        .arg(&out)
+        .arg(".")
+        .status()
+        .map_err(|e| format!("jar: {e}"))?;
+    if !status.success() {
+        return Err("jar probe shim failed".into());
+    }
+    Ok(dest)
+}
+
+fn newest_mtime(dir: &Path) -> Result<Option<std::time::SystemTime>, String> {
+    let mut newest = None;
+    for entry in walk_files(dir)? {
+        let modified = entry.metadata().and_then(|m| m.modified()).ok();
+        if modified > newest {
+            newest = modified;
+        }
+    }
+    Ok(newest)
+}
+
+fn walk_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(walk_files(&path)?);
+        } else {
+            out.push(path);
+        }
+    }
+    Ok(out)
+}
+
+fn newest_authlib() -> Result<PathBuf, String> {
+    for version in ["2.3.31", "2.1.28"] {
+        let path = cache_root().join(format!(
+            "libraries/com/mojang/authlib/{version}/authlib-{version}.jar"
+        ));
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    Err("authlib 2.1.28 or 2.3.31 is not cached".into())
 }
 
 fn client_classpath(release: &str, meta: &Value) -> Result<(String, Vec<PathBuf>), String> {
