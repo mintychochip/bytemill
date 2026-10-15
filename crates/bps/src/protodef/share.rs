@@ -525,6 +525,282 @@ pub fn identity(versions: &[Vec<Decl>]) -> Res<Vec<BTreeMap<(Kind, String), Id>>
     Ok(out)
 }
 
+/// The complete output tree: relative path (from the versions directory) -> file text. Keys
+/// are `v1_13.bps` roots and `common/<set>.bps` shared files.
+#[derive(Debug, Default)]
+pub struct Layout {
+    pub files: BTreeMap<String, String>,
+}
+
+/// The runs of consecutive manifest indices in a version set, e.g. `{0,1,4}` ->
+/// `[[0,1],[4]]`.
+fn runs_of(set: &[usize], last_index: usize) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut iter = set.iter().copied().peekable();
+    while let Some(first) = iter.next() {
+        let mut last = first;
+        while last < last_index && iter.peek() == Some(&(last + 1)) {
+            last += 1;
+            iter.next();
+        }
+        runs.push((first, last));
+    }
+    runs
+}
+
+/// The piece name of one run: `from_<first>` when it reaches the last entry, `only_<first>`
+/// for a single entry, else `<first>_to_<last>`. `<id>` is the release with `.` -> `_`.
+fn run_name(run: (usize, usize), releases: &[&str], last_index: usize) -> String {
+    let id = |i: usize| releases[i].replace('.', "_");
+    let (first, last) = run;
+    if last == last_index {
+        format!("from_{}", id(first))
+    } else if first == last {
+        format!("only_{}", id(first))
+    } else {
+        format!("{}_to_{}", id(first), id(last))
+    }
+}
+
+/// The file name of a version set: its runs' names joined with `+`.
+fn set_name(set: &[usize], releases: &[&str], last_index: usize) -> String {
+    let runs = runs_of(set, last_index);
+    let names: Vec<String> = runs.iter().map(|&r| run_name(r, releases, last_index)).collect();
+    names.join("+")
+}
+
+/// The `// Shared by: …` header line: each run reads `X (protocol N) onwards`, `X (protocol
+/// N) only` or `X (protocol N) to Y (protocol M)`, joined with `, `.
+fn shared_by_line(set: &[usize], releases: &[&str], protocols: &[u32], last_index: usize) -> String {
+    let one = |i: usize| format!("{} (protocol {})", releases[i], protocols[i]);
+    let parts: Vec<String> = runs_of(set, last_index)
+        .iter()
+        .map(|&(first, last)| {
+            if last == last_index {
+                format!("{} onwards", one(first))
+            } else if first == last {
+                format!("{} only", one(first))
+            } else {
+                format!("{} to {}", one(first), one(last))
+            }
+        })
+        .collect();
+    format!("// Shared by: {}.\n", parts.join(", "))
+}
+
+/// The `common/…` import path a file at depth uses for a shared file named `name`.
+fn common_import(name: &str, from_root: bool) -> String {
+    if from_root {
+        format!("common/{name}.bps")
+    } else {
+        format!("../../common/{name}.bps")
+    }
+}
+
+/// Assemble the layout. `splits[i]` and `ids[i]` belong to `entries[i]`, in manifest order.
+/// Errors when two occurrences of one id carry different texts.
+pub fn share(
+    entries: &[super::versions::VersionEntry],
+    splits: &[Split],
+    ids: &[BTreeMap<(Kind, String), Id>],
+) -> Res<Layout> {
+    assert_eq!(entries.len(), splits.len());
+    assert_eq!(entries.len(), ids.len());
+    let releases: Vec<&str> = entries.iter().map(|e| e.release.as_str()).collect();
+    let protocols: Vec<u32> = entries.iter().map(|e| e.protocol).collect();
+    let last = releases.len().saturating_sub(1);
+
+    // id -> (text, set of version indices). A second text for one id is an import failure.
+    let mut by_id: BTreeMap<Id, (Kind, String, String, Vec<usize>)> = BTreeMap::new();
+    for (vi, map) in ids.iter().enumerate() {
+        for (key, id) in map {
+            let d = splits[vi]
+                .decls
+                .iter()
+                .find(|d| (d.kind, d.name.as_str()) == (key.0, key.1.as_str()))
+                .expect("every id maps back to a declaration of its version");
+            match by_id.get_mut(id) {
+                Some((_, _, text, set)) => {
+                    if *text != d.text {
+                        return Err(format!(
+                            "id {id} carries two different texts: {} and {}",
+                            text.lines().next().unwrap_or_default(),
+                            d.text.lines().next().unwrap_or_default()
+                        ));
+                    }
+                    set.push(vi);
+                }
+                None => {
+                    by_id.insert(
+                        *id,
+                        (d.kind, d.name.clone(), d.text.clone(), vec![vi]),
+                    );
+                }
+            }
+        }
+    }
+
+    // id -> refs (as ids, restricted to ids that exist in every version the id occurs in).
+    // A declaration's references have sets that contain its own, so each referenced id is
+    // present in every version of the set.
+    let mut refs_of: BTreeMap<Id, Vec<Id>> = BTreeMap::new();
+    for (vi, map) in ids.iter().enumerate() {
+        for d in &splits[vi].decls {
+            let id = map[&(d.kind, d.name.clone())];
+            let mut out_refs: Vec<Id> = Vec::new();
+            for r in &d.refs {
+                // The referenced name's id in this version; it must be in the set (or the
+                // reference is external and ignored).
+                let mut found = None;
+                for other_kind in [d.kind, match d.kind {
+                    Kind::Encoding => Kind::Packet,
+                    Kind::Packet => Kind::Encoding,
+                }] {
+                    if let Some(other_id) = map.get(&(other_kind, r.clone())) {
+                        found = Some(*other_id);
+                        break;
+                    }
+                }
+                if let Some(other_id) = found {
+                    out_refs.push(other_id);
+                }
+            }
+            out_refs.sort_unstable();
+            out_refs.dedup();
+            refs_of.entry(id).or_default().extend(out_refs);
+        }
+    }
+    for v in refs_of.values_mut() {
+        v.sort_unstable();
+        v.dedup();
+    }
+
+    // Group ids by their version set.
+    let mut by_set: BTreeMap<Vec<usize>, Vec<Id>> = BTreeMap::new();
+    for (id, (_, _, _, set)) in &by_id {
+        let mut set = set.clone();
+        set.sort_unstable();
+        by_set.entry(set).or_default().push(*id);
+    }
+
+    let mut layout = Layout::default();
+
+    // Shared files: one per set. Widest set first (largest |set|, then lexicographic name)
+    // decides the import order everywhere.
+    let mut sets: Vec<(Vec<usize>, Vec<Id>, String)> = by_set
+        .into_iter()
+        .map(|(set, ids)| {
+            let name = set_name(&set, &releases, last);
+            (set, ids, name)
+        })
+        .collect();
+    sets.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.2.cmp(&b.2)));
+
+    // For each shared file: the ids it defines, the ids its declarations reference, and
+    // whether that referenced id's file imports into it (a referenced id whose set contains
+    // this file's set is defined in an earlier, wider file).
+    let file_of: BTreeMap<Id, String> = sets
+        .iter()
+        .flat_map(|(_, ids, name)| ids.iter().map(move |id| (*id, name.clone())))
+        .collect();
+
+    for (set, set_ids, name) in &sets {
+        let mut body = String::new();
+        body.push_str(&shared_by_line(set, &releases, &protocols, last));
+        body.push_str(
+            "// GENERATED by `bpsc import-versions` from data/minecraft-data (PrismarineJS/minecraft-data).\n",
+        );
+        body.push_str("// Do not edit: change the importer or schemas/versions/manifest.json and regenerate.\n");
+        body.push_str("\nimport \"../../std/integers.bps\"\nimport \"../../std/varint.bps\"\n");
+
+        // Which referenced ids live in other shared files?
+        let mut needed: BTreeSet<String> = BTreeSet::new();
+        for id in set_ids {
+            for r in &refs_of[id] {
+                let other = &file_of[r];
+                if other != name {
+                    needed.insert(other.clone());
+                }
+            }
+        }
+        // Order: widest set first, then file name. `needed` holds names; recover widths.
+        let mut imports: Vec<(usize, String)> = needed
+            .into_iter()
+            .map(|n| {
+                let width = sets
+                    .iter()
+                    .find(|(_, _, name)| *name == n)
+                    .map(|(set, _, _)| set.len())
+                    .unwrap_or(0);
+                (width, n)
+            })
+            .collect();
+        imports.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, n) in imports {
+            body.push_str(&format!("import \"{}\"\n", common_import(&n, false)));
+        }
+        body.push('\n');
+
+        // Declarations: encodings before packets, each group sorted by name.
+        let encs: BTreeMap<String, String> = set_ids
+            .iter()
+            .filter(|id| by_id[id].0 == Kind::Encoding)
+            .map(|id| (by_id[id].1.clone(), by_id[id].2.clone()))
+            .collect();
+        let pkts: BTreeMap<String, String> = set_ids
+            .iter()
+            .filter(|id| by_id[id].0 == Kind::Packet)
+            .map(|id| (by_id[id].1.clone(), by_id[id].2.clone()))
+            .collect();
+        let mut first = true;
+        for text in encs.values() {
+            if first && !encs.is_empty() {
+                first = false;
+            }
+            body.push_str(text);
+            body.push('\n');
+        }
+        if !pkts.is_empty() && !encs.is_empty() {
+            // Keep the section banner the single-file files had.
+            body.push_str("// --- packets ---\n\n");
+        }
+        for text in pkts.values() {
+            body.push_str(text);
+            body.push('\n');
+        }
+        layout.files.insert(format!("common/{name}.bps"), body);
+    }
+
+    // Roots: header, std imports, shared imports, protocol block.
+    for (vi, s) in splits.iter().enumerate() {
+        let mut root = String::new();
+        root.push_str(&s.header);
+        let std_imports: Vec<&String> = s.imports.iter().collect();
+        for p in &std_imports {
+            root.push_str(&format!("import \"{p}\"\n"));
+        }
+        // The shared files whose set contains this version: widest first, then name.
+        let mut mine: Vec<(usize, String)> = sets
+            .iter()
+            .filter(|(set, _, _)| set.binary_search(&vi).is_ok())
+            .map(|(set, _, name)| (set.len(), name.clone()))
+            .collect();
+        mine.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        for (_, n) in &mine {
+            root.push_str(&format!("import \"{}\"\n", common_import(n, true)));
+        }
+        root.push('\n');
+        root.push_str(&s.protocol_block);
+        layout
+            .files
+            .insert(entries[vi].file_name(), root);
+    }
+
+    Ok(layout)
+}
+
+use std::collections::BTreeSet;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -758,5 +1034,236 @@ protocol minecraft @ v1_13 {
         assert_eq!(s.decls.len(), 1);
         assert_eq!(s.decls[0].name, "quoted");
         assert!(s.decls[0].text.contains("note: bytes(1)"));
+    }
+
+    // -- layout ------------------------------------------------------------------
+
+    fn entry(release: &str, protocol: u32) -> super::super::versions::VersionEntry {
+        super::super::versions::VersionEntry {
+            protocol,
+            release: release.into(),
+            also: Vec::new(),
+            data: format!("pc/{release}"),
+            patches: None,
+            note: None,
+        }
+    }
+
+    /// Wrap decls into a splittable single-file text.
+    fn render_of(decls: &[Decl], release: &str, protocol: u32) -> String {
+        let mut out = format!("// header {release}\n\nimport \"../std/integers.bps\"\n\n");
+        for d in decls {
+            out.push_str(&d.text);
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "protocol minecraft @ v{}_x {{\n    id = {protocol}\n}}\n",
+            release.replace('.', "_")
+        ));
+        out
+    }
+
+    fn layout_for(entries: &[super::super::versions::VersionEntry], versions: &[Vec<Decl>]) -> super::Layout {
+        let mut splits = Vec::new();
+        for (i, v) in versions.iter().enumerate() {
+            let text = render_of(v, &entries[i].release, entries[i].protocol);
+            let mut s = split(&text).unwrap();
+            for d in &mut s.decls {
+                d.fill_refs().unwrap();
+            }
+            splits.push(s);
+        }
+        let ids = identity(versions).unwrap();
+        share(entries, &splits, &ids).unwrap()
+    }
+
+    #[test]
+    fn contiguous_and_non_contiguous_sets_get_the_spec_names() {
+        // Three versions: 0 and 1 share `a`; 0 and 2 share `b`.
+        let mk = |a: u8, b: u8| -> Vec<Decl> {
+            let width = |w: u8| if w == 0 { "u8" } else { "u16be" };
+            vec![
+                decl(Kind::Encoding, "a", &format!("encoding a = {{\n    x: {}\n}}", width(a))),
+                decl(Kind::Encoding, "b", &format!("encoding b = {{\n    x: {}\n}}", width(b))),
+            ]
+        };
+        let entries = vec![entry("1.13", 393), entry("1.13.1", 401), entry("1.13.2", 404)];
+        let versions = vec![mk(0, 0), mk(0, 1), mk(1, 0)];
+        let layout = layout_for(&entries, &versions);
+        // `a` occurs in versions {0,1}: one run -> `1_13_to_1_13_1.bps`.
+        // `b` occurs in versions {0,2}: two runs; the second reaches the last entry ->
+        // `only_1_13+from_1_13_2.bps`. The changed variants make two more singleton files.
+        assert!(
+            layout.files.contains_key("common/1_13_to_1_13_1.bps"),
+            "{:?}",
+            layout.files.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            layout
+                .files
+                .contains_key("common/only_1_13+from_1_13_2.bps"),
+            "{:?}",
+            layout.files.keys().collect::<Vec<_>>()
+        );
+        assert!(layout.files.contains_key("common/only_1_13_1.bps"));
+        assert!(layout.files.contains_key("common/from_1_13_2.bps"));
+        for r in ["v1_13.bps", "v1_13_1.bps", "v1_13_2.bps"] {
+            assert!(layout.files.contains_key(r));
+        }
+    }
+
+    #[test]
+    fn a_set_reaching_the_last_entry_has_no_end_so_appending_renames_nothing() {
+        let mk = |a: u8| -> Vec<Decl> {
+            let width = if a == 0 { "u8" } else { "u16be" };
+            vec![decl(
+                Kind::Encoding,
+                "a",
+                &format!("encoding a = {{\n    x: {width}\n}}"),
+            )]
+        };
+        let entries3 = vec![entry("1.13", 393), entry("1.13.1", 401), entry("1.13.2", 404)];
+        let versions3 = vec![mk(0), mk(0), mk(0)];
+        let l3 = layout_for(&entries3, &versions3);
+        assert!(l3.files.contains_key("common/from_1_13.bps"), "{:?}", l3.files.keys().collect::<Vec<_>>());
+        let entries4 = vec![
+            entry("1.13", 393),
+            entry("1.13.1", 401),
+            entry("1.13.2", 404),
+            entry("1.14", 477),
+        ];
+        let versions4 = vec![mk(0), mk(0), mk(0), mk(0)];
+        let l4 = layout_for(&entries4, &versions4);
+        assert!(l4.files.contains_key("common/from_1_13.bps"), "{:?}", l4.files.keys().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn shared_files_import_what_they_reference_and_the_header_lists_the_runs() {
+        // `a` (versions {0}) references `b` (versions {0,1}): a's file imports b's file.
+        let mk = |a: u8| -> Vec<Decl> {
+            let width = if a == 0 { "u8" } else { "u16be" };
+            vec![
+                decl(
+                    Kind::Encoding,
+                    "b",
+                    "encoding b = {\n    x: u8\n}",
+                ),
+                decl(
+                    Kind::Encoding,
+                    "a",
+                    &format!("encoding a = {{\n    x: b\n    y: {}\n}}", width),
+                ),
+            ]
+        };
+        let entries = vec![entry("1.13", 393), entry("1.13.1", 401)];
+        let versions = vec![mk(0), mk(1)];
+        let layout = layout_for(&entries, &versions);
+        let a_file = layout
+            .files
+            .get("common/only_1_13.bps")
+            .expect("a is only in version 0");
+        assert!(
+            a_file.starts_with("// Shared by: 1.13 (protocol 393) only.\n"),
+            "{a_file}"
+        );
+        assert!(a_file.contains("// GENERATED by `bpsc import-versions`"));
+        assert!(a_file.contains("import \"../../std/integers.bps\""));
+        assert!(a_file.contains("import \"../../std/varint.bps\""));
+        // a references b: the shared file holding b is imported.
+        assert!(
+            a_file.contains("import \"../../common/from_1_13.bps\""),
+            "{a_file}"
+        );
+        let b_file = layout
+            .files
+            .get("common/from_1_13.bps")
+            .expect("b is in both versions");
+        assert!(
+            b_file.starts_with("// Shared by: 1.13 (protocol 393) onwards.\n"),
+            "{b_file}"
+        );
+    }
+
+    #[test]
+    fn roots_import_the_files_defining_their_declarations_then_the_protocol_block() {
+        // `a` is identical in both versions (one shared file); `b` differs (two singletons).
+        let mk = |_a: u8, b: u8| -> Vec<Decl> {
+            let width = |w: u8| if w == 0 { "u8" } else { "u16be" };
+            vec![
+                decl(Kind::Encoding, "a", "encoding a = {\n    x: u8\n}"),
+                decl(Kind::Encoding, "b", &format!("encoding b = {{\n    x: {}\n}}", width(b))),
+            ]
+        };
+        let entries = vec![entry("1.13", 393), entry("1.13.1", 401)];
+        let versions = vec![mk(0, 0), mk(0, 1)];
+        let layout = layout_for(&entries, &versions);
+        let root = &layout.files["v1_13.bps"];
+        // The header, then the two std imports, then the shared file's import, then the block.
+        assert!(root.starts_with("// header 1.13\n\n"), "{root}");
+        assert!(root.contains("import \"../std/integers.bps\""));
+        assert!(root.contains("import \"common/from_1_13.bps\""), "{root}");
+        let block_at = root.find("protocol minecraft").unwrap();
+        let imports_end = root.rfind("import \"").unwrap();
+        assert!(imports_end < block_at);
+        assert!(root[imports_end..block_at].contains("common/"));
+    }
+
+    #[test]
+    fn two_occurrences_of_one_id_with_different_texts_are_an_error() {
+        // Hand-build ids maps that claim equal ids for different texts.
+        let entries = vec![entry("1.13", 393), entry("1.13.1", 401)];
+        let versions = vec![
+            vec![decl(Kind::Encoding, "a", "encoding a = {\n    x: u8\n}")],
+            vec![decl(Kind::Encoding, "a", "encoding a = {\n    x: u16be\n}")],
+        ];
+        let mut ids = identity(&versions).unwrap();
+        // Overwrite: claim v1's `a` has v0's id.
+        let id0 = ids[0][&(Kind::Encoding, "a".to_string())];
+        ids[1].insert((Kind::Encoding, "a".to_string()), id0);
+        let mut splits = Vec::new();
+        for (i, v) in versions.iter().enumerate() {
+            let text = render_of(v, &entries[i].release, entries[i].protocol);
+            let mut s = split(&text).unwrap();
+            for d in &mut s.decls {
+                d.fill_refs().unwrap();
+            }
+            splits.push(s);
+        }
+        assert!(share(&entries, &splits, &ids).is_err());
+    }
+
+    #[test]
+    fn a_recursive_group_shares_as_a_file_unit() {
+        // `node` <-> `entry` cycle; versions 0,1 share both, version 2 differs: the two
+        // members land in the same file per set.
+        let mk = |long: bool| -> Vec<Decl> {
+            vec![
+                decl(
+                    Kind::Encoding,
+                    "node",
+                    if long {
+                        "encoding node = {\n    tag: u8\n    next: entry\n}"
+                    } else {
+                        "encoding node = {\n    next: entry\n}"
+                    },
+                ),
+                decl(
+                    Kind::Encoding,
+                    "entry",
+                    "encoding entry = {\n    value: node\n}",
+                ),
+            ]
+        };
+        let entries = vec![entry("1.13", 393), entry("1.13.1", 401), entry("1.13.2", 404)];
+        let versions = vec![mk(false), mk(false), mk(true)];
+        let layout = layout_for(&entries, &versions);
+        let shared = layout
+            .files
+            .get("common/1_13_to_1_13_1.bps")
+            .unwrap_or_else(|| panic!("keys: {:?}", layout.files.keys().collect::<Vec<_>>()));
+        assert!(shared.contains("encoding node"));
+        assert!(shared.contains("encoding entry"));
+        // The recursive group's file imports nothing for the cycle itself.
+        assert!(!shared.contains("import \"common/"));
     }
 }
