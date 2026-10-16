@@ -32,6 +32,7 @@ is server to client.
   reachable by seeking does not decode here.
 - Zstd applies only when `IS_COMPRESSED` is set. These four packets are not.
 
-`bpsc decode --state` does not use the frame block in `2026_02_17.bps`. The
-interpreter still reads a Minecraft varint length that includes the packet id.
-Use `--packet` for the payload.
+`bpsc decode --state` reads the frame block: `payload: bytes(length)` takes
+exactly `length` bytes, so the length here counts the payload only. A
+`payload: rest` frame instead counts everything after the length field (id
+bytes included), which is the Minecraft shape.

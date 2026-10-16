@@ -1,63 +1,149 @@
-//! `emit go` produces a package `go test` can round-trip.
+//! `emit go` produces a gofmt-clean package whose codecs agree with the
+//! interpreter byte-for-byte.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn repo(rel: &str) -> String {
-    let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../")).join(rel);
-    std::fs::read_to_string(path).unwrap()
+use bps::ir::typed::{CodecIdx, Program};
+
+fn repo(rel: &str) -> PathBuf {
+    Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../")).join(rel)
+}
+
+/// The codec for a schema packet, trying the packet, encoding, and
+/// `packet:`-prefixed IR keys.
+fn packet_codec(program: &Program, name: &str) -> Option<CodecIdx> {
+    program
+        .packet_codec(name)
+        .or_else(|| program.codec_by_ir(name))
+        .or_else(|| program.codec_by_ir(&format!("packet:{name}")))
+}
+
+fn run(dir: &Path, tool: &str, args: &[&str]) -> std::process::Output {
+    Command::new(tool)
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|e| panic!("{tool} not installed: {e}"))
+}
+
+/// The guide's local gates: gofmt-canonical output and a clean `go vet`.
+fn assert_go_gates(dir: &Path) {
+    let out = run(dir, "gofmt", &["-l", "."]);
+    assert!(
+        out.status.success(),
+        "gofmt failed\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let flagged = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        flagged.trim().is_empty(),
+        "gofmt would reformat:\n{flagged}"
+    );
+    let out = run(dir, "go", &["vet", "./..."]);
+    assert!(
+        out.status.success(),
+        "go vet failed\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn scratch(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("bps-go-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
 }
 
 #[test]
-fn go_varint_roundtrip() {
-    let source = repo("schemas/std/varint.bps") + "packet probe { n: varint }\n";
+fn go_unit_codecs() {
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "packet probe { n: varint }\npacket floats { a: f32be, b: f64be }\npacket gated { v: varint\n require v == 777 }\n";
     let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
-    let dir = std::env::temp_dir().join(format!("bps-go-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = scratch("unit");
     bps::emit_go::emit_go(&resolved, &dir).unwrap();
+    assert_go_gates(&dir);
     std::fs::write(
-        dir.join("varint_test.go"),
+        dir.join("unit_test.go"),
         r#"package bpsgen
 
+import "errors"
 import "testing"
 
 func TestVarint(t *testing.T) {
-    w := &Writer{}
-    if err := Encode_varint(w, 300); err != nil {
-        t.Fatal(err)
-    }
-    if got, want := w.Buf, []byte{0xac, 0x02}; string(got) != string(want) {
-        t.Fatalf("300: %x", got)
-    }
-    v, err := Decode_varint(&Cursor{Data: w.Buf})
-    if err != nil {
-        t.Fatal(err)
-    }
-    if v != 300 {
-        t.Fatalf("decode 300: %d", v)
-    }
-    w = &Writer{}
-    if err := Encode_varint(w, -1); err != nil {
-        t.Fatal(err)
-    }
-    if got, want := w.Buf, []byte{0xff, 0xff, 0xff, 0xff, 0x0f}; string(got) != string(want) {
-        t.Fatalf("-1: %x", got)
-    }
-    v, err = Decode_varint(&Cursor{Data: w.Buf})
-    if err != nil {
-        t.Fatal(err)
-    }
-    if v != -1 {
-        t.Fatalf("decode -1: %d", v)
-    }
+	w := &Writer{}
+	if err := EncodeVarint(w, 300); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := w.Bytes(), []byte{0xac, 0x02}; string(got) != string(want) {
+		t.Fatalf("300: %x", got)
+	}
+	v, err := DecodeVarint(NewReader(w.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 300 {
+		t.Fatalf("decode 300: %d", v)
+	}
+	w = &Writer{}
+	if err := EncodeVarint(w, -1); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := w.Bytes(), []byte{0xff, 0xff, 0xff, 0xff, 0x0f}; string(got) != string(want) {
+		t.Fatalf("-1: %x", got)
+	}
+	v, err = DecodeVarint(NewReader(w.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != -1 {
+		t.Fatalf("decode -1: %d", v)
+	}
+}
+
+func TestFloats(t *testing.T) {
+	w := &Writer{}
+	if err := EncodeFloats(w, Floats{A: 1.5, B: -2.25}); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{0x3f, 0xc0, 0x00, 0x00, 0xc0, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	if got := w.Bytes(); string(got) != string(want) {
+		t.Fatalf("floats: %x", got)
+	}
+	v, err := DecodeFloats(NewReader(w.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.A != 1.5 || v.B != -2.25 {
+		t.Fatalf("decode floats: %+v", v)
+	}
+}
+
+func TestShortBuffer(t *testing.T) {
+	_, err := DecodeProbe(NewReader([]byte{0xac}))
+	if !errors.Is(err, ErrShortBuffer) {
+		t.Fatalf("expected short buffer, got %v", err)
+	}
+}
+
+func TestRequire(t *testing.T) {
+	_, err := DecodeGated(NewReader([]byte{0x8a, 0x06}))
+	if !errors.Is(err, ErrRequire) {
+		t.Fatalf("expected require failure, got %v", err)
+	}
+	v, err := DecodeGated(NewReader([]byte{0x89, 0x06}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.V != 777 {
+		t.Fatalf("decode gated: %+v", v)
+	}
 }
 "#,
     )
     .unwrap();
-    let out = Command::new("go")
-        .args(["test"])
-        .current_dir(&dir)
-        .output()
-        .unwrap();
+    let out = run(&dir, "go", &["test", "-count=1", "."]);
     assert!(
         out.status.success(),
         "go test failed\n{}\n{}",
@@ -67,53 +153,73 @@ func TestVarint(t *testing.T) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-#[test]
-fn go_26_3_packets_roundtrip() {
-    use bps::interp::encode_packet;
-    use bps::synth::synthesize_packet;
-    let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../"))
-        .join("schemas/minecraft_26_3_wiki.bps");
-    let resolved = bps::analyze(&bps::load_schema(&[path]).unwrap()).unwrap();
-    let dir = std::env::temp_dir().join(format!("bps-go-all-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+/// Round-trip every synthesizable packet of `schema_rel`: interpreter bytes
+/// into generated decode, back through generated encode, byte-compare.
+fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) -> usize {
+    let resolved = bps::analyze(&bps::load_schema(&[repo(schema_rel)]).unwrap()).unwrap();
+    let program = bps::ir::typed(&resolved).unwrap();
+    let dir = scratch(tag);
     bps::emit_go::emit_go(&resolved, &dir).unwrap();
+    assert_go_gates(&dir);
     let mut body = String::from(
-        "package bpsgen\nimport \"bytes\"\nimport \"testing\"\nfunc TestPackets(t *testing.T) {\n",
+        "package bpsgen\n\nimport (\n\t\"bytes\"\n\t\"testing\"\n)\n\nfunc TestPackets(t *testing.T) {\n",
     );
-    let generated = std::fs::read_to_string(dir.join("packets.go")).unwrap();
     let mut n = 0;
     for packet in resolved.packets.values() {
-        let value = match synthesize_packet(&resolved, packet) {
-            Ok(v) => v,
+        let Some(codec) = packet_codec(&program, &packet.name) else {
+            continue;
+        };
+        let value = match bps::synth::synthesize_packet(&resolved, packet) {
+            Ok(value) => value,
             Err(_) => continue,
         };
-        let bytes = match encode_packet(&resolved, &packet.name, &value) {
-            Ok(b) => b,
+        let bytes = match bps::interp::encode_packet(&resolved, &packet.name, &value) {
+            Ok(bytes) => bytes,
             Err(_) => continue,
         };
-        let alt = format!("packet_{}", packet.name);
-        let goname = if generated.contains(&format!("func Decode_{alt}(")) {
-            alt
-        } else {
-            packet.name.clone()
-        };
-        let list = bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(",");
+        let decode = bps::emit_go::decode_fn(&program, codec);
+        let encode = bps::emit_go::encode_fn(&program, codec);
+        let list = bytes
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         let dec = format!("{} decode %v", packet.name);
         let enc = format!("{} encode %v", packet.name);
-        let msg = format!("{} bytes", packet.name);
+        let msg = format!("{} bytes differ", packet.name);
         body.push_str(&format!(
-            "\tfunc() {{\n\t\traw := []byte{{{list}}}\n\t\tv, err := Decode_{goname}(&Cursor{{Data: raw}})\n\t\tif err != nil {{ t.Errorf({dec:?}, err); return }}\n\t\tw := &Writer{{}}\n\t\tif err = Encode_{goname}(w, v); err != nil {{ t.Errorf({enc:?}, err); return }}\n\t\tif !bytes.Equal(w.Buf, raw) {{ t.Errorf({msg:?}) }}\n\t}}()\n"
+            "\tfunc() {{\n\t\traw := []byte{{{list}}}\n\t\tv, err := {decode}(NewReader(raw))\n\t\tif err != nil {{ t.Errorf({dec:?}, err); return }}\n\t\tw := &Writer{{}}\n\t\tif err = {encode}(w, v); err != nil {{ t.Errorf({enc:?}, err); return }}\n\t\tif !bytes.Equal(w.Bytes(), raw) {{ t.Errorf({msg:?}) }}\n\t}}()\n"
         ));
         n += 1;
     }
     body.push_str("}\n");
-    assert!(n > 100, "only {n} packets");
+    assert!(
+        n >= min_packets,
+        "only {n} packets round-tripped for {schema_rel}"
+    );
     std::fs::write(dir.join("round_test.go"), body).unwrap();
-    let out = Command::new("go").args(["test", "-count=1"]).current_dir(&dir).output().unwrap();
+    let out = run(&dir, "go", &["test", "-count=1", "."]);
     assert!(
         out.status.success(),
-        "go test failed\n{}\n{}",
+        "go test failed for {schema_rel}\n{}\n{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    let _ = std::fs::remove_dir_all(&dir);
+    n
+}
+
+#[test]
+fn go_26_3_packets_roundtrip() {
+    roundtrip_schema("schemas/minecraft_26_3_wiki.bps", "26-3", 100);
+}
+
+#[test]
+fn go_v1_20_1_packets_roundtrip() {
+    roundtrip_schema("schemas/versions/v1_20_1.bps", "v1-20-1", 100);
+}
+
+#[test]
+fn go_hytale_packets_roundtrip() {
+    roundtrip_schema("schemas/hytale/2026_02_17.bps", "hytale", 1);
 }

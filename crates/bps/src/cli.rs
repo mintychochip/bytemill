@@ -307,10 +307,10 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
             a.target = Some(argv.remove(0));
             if !matches!(
                 a.target.as_deref(),
-                Some("rust") | Some("rstom") | Some("rstom-tree") | Some("go") | Some("python") | Some("c")
+                Some("rust") | Some("rust-typed") | Some("rstom") | Some("rstom-tree") | Some("go") | Some("python") | Some("c") | Some("typescript") | Some("cpp") | Some("zig")
             ) {
                 return Err(format!(
-                    "emit: argument target: invalid choice: {:?} (choose from 'rust', 'rstom', 'rstom-tree', 'go', 'python', 'c')",
+                    "emit: argument target: invalid choice: {:?} (choose from 'rust', 'rust-typed', 'rstom', 'rstom-tree', 'go', 'python', 'c', 'typescript', 'cpp', 'zig')",
                     a.target.unwrap()
                 ));
             }
@@ -471,12 +471,20 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
             let out_dir = PathBuf::from(out);
             if target == "rust" {
                 emit_rust(&resolved, &out_dir)?;
+            } else if target == "rust-typed" {
+                crate::emit_rust_typed::emit_rust_typed(&resolved, &out_dir)?;
             } else if target == "go" {
                 crate::emit_go::emit_go(&resolved, &out_dir)?;
             } else if target == "python" {
                 crate::emit_python::emit_python(&resolved, &out_dir)?;
             } else if target == "c" {
                 crate::emit_c::emit_c(&resolved, &out_dir)?;
+            } else if target == "typescript" {
+                crate::emit_ts::emit_typescript(&resolved, &out_dir)?;
+            } else if target == "cpp" {
+                crate::emit_cpp::emit_cpp(&resolved, &out_dir)?;
+            } else if target == "zig" {
+                crate::emit_zig::emit_zig(&resolved, &out_dir)?;
             } else {
                 let classes = class_table(a.packets_json.as_deref(), &out_dir, "rstom")?;
                 emit_rstom(&resolved, &out_dir, &classes, "../rstom")?;

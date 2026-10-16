@@ -1,0 +1,2263 @@
+//! `emit zig`: one `bpsgen.zig` of typed structs, unions, enums, and codecs.
+//!
+//! The printer reads the typed program (`bps::ir::typed`), never the IR or
+//! the AST. Every encoding, packet, frame, and enum becomes either free
+//! `decodeX`/`encodeX` functions (scalars and strings) or `decode`/`encode`
+//!/`deinit` methods on a `struct`, `union(enum)`, or `enum`. Statements print
+//! in the typed program's order: a sum encode matches on its tag parameter
+//! and checks the active variant with `ExpectVariant`; `require`s stay where
+//! the program puts them. The runtime is only `Reader`/`Writer` over the
+//! typed program's wire ops (`u8`, `f32`, `f64`, `bytes`, `rest`); multibyte
+//! integers are schema codecs like `u16be`.
+//!
+//! Memory: decode takes an allocator exactly when the decoded value owns
+//! memory (strings, bytes, lists, or records/sums holding those); every owner
+//! has `deinit`, decode unwinds partial values with `errdefer`, and encode
+//! only borrows. Recursive types box the back edge (`*T` via
+//! `allocator.create`), chosen greedily so one box breaks each by-value
+//! cycle. Integers use plain operators, `@divFloor`/`@mod` for `/`/`%`, and
+//! `@intCast`/`@truncate`/`@bitCast` for the program's explicit casts, so
+//! nothing traps in Debug on a value the interpreter can produce.
+
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
+
+use crate::ResolvedSchema;
+use crate::errors::{BpsResult, emit};
+use crate::ir::typed::{
+    Bind, Body, CodecIdx, Expr, Func, IntTy, LocalId, Origin, Program, ReadOp, RepeatMode, Stmt,
+    Ty, TypeIdx, WriteOp,
+};
+
+/// Emit `bpsgen.zig` for `resolved` into `out_dir`.
+pub fn emit_zig(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+    let program = crate::ir::typed(resolved)?;
+    let printer = Printer::build(&program)?;
+    let src = printer.print()?;
+    fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
+    fs::write(out_dir.join("bpsgen.zig"), src).map_err(|e| emit(e.to_string()))?;
+    Ok(())
+}
+
+/// The emitted identifier of a codec's decode function: `decodeVarint` for a
+/// scalar or string codec, `Handshake.decode` for a type codec (an alias maps
+/// to its target's method). Tests call through this instead of grepping.
+pub fn decode_fn(program: &Program, codec: CodecIdx) -> String {
+    let target = decode_target(program, codec);
+    match program.codecs[codec].ty {
+        None => format!("decode{}", program.codecs[codec].name.pascal()),
+        Some(_) => format!("{}.decode", program.types[target].name.pascal()),
+    }
+}
+
+/// The emitted identifier of a codec's encode function; see [`decode_fn`].
+pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
+    let target = decode_target(program, codec);
+    match program.codecs[codec].ty {
+        None => format!("encode{}", program.codecs[codec].name.pascal()),
+        Some(_) => format!("{}.encode", program.types[target].name.pascal()),
+    }
+}
+
+/// Whether a codec's decode takes an allocator and its type has `deinit`.
+pub fn has_deinit(program: &Program, codec: CodecIdx) -> bool {
+    let (boxed_field, boxed_variant) = boxed_edges(program);
+    let owns = owns_fixpoint(program, &boxed_field, &boxed_variant);
+    owns_ty(&owns, &program.codecs[codec].value)
+}
+
+/// The type whose methods implement `codec`: aliases delegate to their target.
+fn decode_target(program: &Program, codec: CodecIdx) -> TypeIdx {
+    match program.codecs[codec].ty {
+        Some(t) => match program.types[t].kind {
+            crate::ir::typed::TypeKind::Alias { target } => target,
+            _ => t,
+        },
+        None => 0,
+    }
+}
+
+/// Whether decoded values of `ty` own memory (need an allocator and `deinit`).
+/// Slices always own (reads dupe, lists allocate); boxed pointers always own
+/// (the allocation itself).
+fn owns_value(printer: &Printer<'_>, ty: &Ty) -> bool {
+    match ty {
+        Ty::Named(t) => printer.owns[*t],
+        _ => owns_ty(&printer.owns, ty),
+    }
+}
+
+/// Ownership per type, least fixpoint: a record owns when a field owns, a sum
+/// when a payload owns. Boxed cycle edges own through the allocation itself.
+fn owns_fixpoint(
+    prog: &Program,
+    boxed_field: &HashSet<(TypeIdx, usize)>,
+    boxed_variant: &HashSet<(TypeIdx, usize)>,
+) -> Vec<bool> {
+    let mut owns = vec![false; prog.types.len()];
+    loop {
+        let mut changed = false;
+        for t in 0..prog.types.len() {
+            let v = match &prog.types[t].kind {
+                crate::ir::typed::TypeKind::Record { fields } => fields
+                    .iter()
+                    .enumerate()
+                    .any(|(f, d)| boxed_field.contains(&(t, f)) || owns_ty(&owns, &d.ty)),
+                crate::ir::typed::TypeKind::Sum { variants } => {
+                    variants.iter().enumerate().any(|(v, d)| {
+                        boxed_variant.contains(&(t, v))
+                            || d.payload.as_ref().is_some_and(|p| owns_ty(&owns, p))
+                    })
+                }
+                crate::ir::typed::TypeKind::Enum { .. } => false,
+                crate::ir::typed::TypeKind::Alias { target } => owns[*target],
+            };
+            if v && !owns[t] {
+                owns[t] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return owns;
+        }
+    }
+}
+
+fn owns_ty(owns: &[bool], ty: &Ty) -> bool {
+    match ty {
+        Ty::Int(_) | Ty::Bool | Ty::F32 | Ty::F64 => false,
+        Ty::Str | Ty::Bytes => true,
+        Ty::List(_) => true,
+        Ty::Named(t) => owns[*t],
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Names
+// ---------------------------------------------------------------------------
+
+/// Zig keywords plus the primitive type names: identifiers escaping with a
+/// trailing `_`. Real 26.3 hits are fields `type` and `test`.
+const KEYWORDS: &[&str] = &[
+    "addrspace",
+    "align",
+    "allowzero",
+    "and",
+    "anyframe",
+    "anytype",
+    "asm",
+    "async",
+    "await",
+    "break",
+    "catch",
+    "comptime",
+    "const",
+    "continue",
+    "defer",
+    "else",
+    "enum",
+    "errdefer",
+    "error",
+    "export",
+    "extern",
+    "fn",
+    "for",
+    "if",
+    "inline",
+    "linksection",
+    "noalias",
+    "noinline",
+    "nosuspend",
+    "opaque",
+    "or",
+    "orelse",
+    "packed",
+    "pub",
+    "resume",
+    "return",
+    "struct",
+    "suspend",
+    "switch",
+    "test",
+    "threadlocal",
+    "try",
+    "union",
+    "unreachable",
+    "usingnamespace",
+    "var",
+    "volatile",
+    "while",
+    "bool",
+    "c_char",
+    "c_int",
+    "c_long",
+    "c_longdouble",
+    "c_longlong",
+    "c_short",
+    "c_uint",
+    "c_ulong",
+    "c_ulonglong",
+    "c_ushort",
+    "comptime_float",
+    "comptime_int",
+    "f16",
+    "f32",
+    "f64",
+    "f128",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "void",
+    "type",
+    "anyerror",
+    "noreturn",
+    "null",
+    "undefined",
+    "true",
+    "false",
+    "self",
+];
+
+/// Extra names reserved for locals and parameters: the function signatures
+/// already bind `reader`, `writer`, and `allocator`.
+const LOCAL_RESERVED: &[&str] = &["reader", "writer", "allocator"];
+
+fn ident(name: &crate::ir::typed::Name, extra: &[&str]) -> String {
+    let snake = name.snake();
+    if KEYWORDS.contains(&snake.as_str()) || extra.contains(&snake.as_str()) {
+        format!("{snake}_")
+    } else {
+        snake
+    }
+}
+
+fn field_name(name: &crate::ir::typed::Name) -> String {
+    ident(name, &[])
+}
+
+fn local_name(name: &crate::ir::typed::Name) -> String {
+    ident(name, LOCAL_RESERVED)
+}
+
+// ---------------------------------------------------------------------------
+// Runtime
+// ---------------------------------------------------------------------------
+
+const RUNTIME: &str = r#"const std = @import("std");
+/// Decode/encode failures. Offset of a decode failure is left in `reader.pos`.
+pub const Error = error{ Short, RequireFailed, InvalidUtf8, NoMatchArm, MissingField, WrongVariant, NegativeLength, BytesTooLong, UntilEnd, OutOfMemory };
+/// Big-endian cursor over a borrowed buffer.
+pub const Reader = struct {
+    data: []const u8,
+    pos: usize = 0,
+    pub fn remaining(self: *const Reader) usize {
+        return self.data.len - self.pos;
+    }
+    pub fn readU8(self: *Reader) Error!u8 {
+        if (self.pos >= self.data.len) return error.Short;
+        const b = self.data[self.pos];
+        self.pos += 1;
+        return b;
+    }
+    pub fn readBytes(self: *Reader, allocator: std.mem.Allocator, n: usize) Error![]u8 {
+        if (self.pos + n > self.data.len) return error.Short;
+        const out = allocator.dupe(u8, self.data[self.pos..][0..n]) catch return error.OutOfMemory;
+        self.pos += n;
+        return out;
+    }
+    /// Lengths arrive signed; negative is its own error.
+    pub fn readSized(self: *Reader, allocator: std.mem.Allocator, n: i64) Error![]u8 {
+        if (n < 0) return error.NegativeLength;
+        return self.readBytes(allocator, @intCast(n));
+    }
+    pub fn readF32Be(self: *Reader) Error!f32 {
+        if (self.remaining() < 4) return error.Short;
+        const u = std.mem.readInt(u32, self.data[self.pos..][0..4], .big);
+        self.pos += 4;
+        return @bitCast(u);
+    }
+    pub fn readF64Be(self: *Reader) Error!f64 {
+        if (self.remaining() < 8) return error.Short;
+        const u = std.mem.readInt(u64, self.data[self.pos..][0..8], .big);
+        self.pos += 8;
+        return @bitCast(u);
+    }
+};
+pub const Writer = struct {
+    buf: std.ArrayList(u8),
+    pub fn init(allocator: std.mem.Allocator) Writer {
+        return .{ .buf = std.ArrayList(u8).init(allocator) };
+    }
+    pub fn toOwnedSlice(self: *Writer) Error![]u8 {
+        return self.buf.toOwnedSlice() catch return error.OutOfMemory;
+    }
+    pub fn writeU8(self: *Writer, v: u8) Error!void {
+        self.buf.append(v) catch return error.OutOfMemory;
+    }
+    pub fn writeBytes(self: *Writer, b: []const u8) Error!void {
+        self.buf.appendSlice(b) catch return error.OutOfMemory;
+    }
+    /// `bytes(n)`: overlong errors, short zero-pads.
+    pub fn writeSized(self: *Writer, b: []const u8, n: usize) Error!void {
+        if (b.len > n) return error.BytesTooLong;
+        try self.writeBytes(b);
+        var i = b.len;
+        while (i < n) : (i += 1) try self.writeU8(0);
+    }
+    pub fn writeF32Be(self: *Writer, v: f32) Error!void {
+        var tmp: [4]u8 = undefined;
+        std.mem.writeInt(u32, &tmp, @bitCast(v), .big);
+        try self.writeBytes(&tmp);
+    }
+    pub fn writeF64Be(self: *Writer, v: f64) Error!void {
+        var tmp: [8]u8 = undefined;
+        std.mem.writeInt(u64, &tmp, @bitCast(v), .big);
+        try self.writeBytes(&tmp);
+    }
+};
+/// Two's-complement sign extension of a `bits`-wide field (`varlong` uses the
+/// full 64-bit width, which is the identity).
+pub fn signExtend(raw: u64, bits: u7) i64 {
+    if (bits == 0 or bits >= 64) return @bitCast(raw);
+    const b: u6 = @truncate(bits);
+    const sign: u64 = @as(u64, 1) << (b - 1);
+    const mask: u64 = (@as(u64, 1) << b) - 1;
+    var out = raw & mask;
+    if ((out & sign) != 0) out |= ~mask;
+    return @bitCast(out);
+}
+/// UTF-16 units of validated UTF-8 (0.14.1 std has no counter; validated
+/// first, so every lead byte starts a well-formed sequence here).
+fn utf16Units(s: []const u8) usize {
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        var cp: u32 = 0;
+        var len: usize = 1;
+        if (c < 0x80) {
+            cp = c;
+        } else if (c < 0xe0) {
+            cp = c & 0x1f;
+            len = 2;
+        } else if (c < 0xf0) {
+            cp = c & 0x0f;
+            len = 3;
+        } else {
+            cp = c & 0x07;
+            len = 4;
+        }
+        var j: usize = 1;
+        while (j < len) : (j += 1) cp = (cp << 6) | (s[i + j] & 0x3f);
+        i += len;
+        n += if (cp > 0xffff) 2 else 1;
+    }
+    return n;
+}
+"#;
+
+/// `str_len` helper, emitted only when a schema uses it.
+const STRLEN_HELPER: &str = r#"/// Unicode scalars of a validated UTF-8 string.
+fn strLen(s: []const u8) i64 {
+    var n: i64 = 0;
+    for (s) |c| {
+        if ((c & 0xc0) != 0x80) n += 1;
+    }
+    return n;
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// Printer
+// ---------------------------------------------------------------------------
+
+struct Printer<'a> {
+    prog: &'a Program,
+    /// Fields stored as pointers to break by-value recursion cycles.
+    boxed_field: HashSet<(TypeIdx, usize)>,
+    /// Sum variant payloads stored as pointers, same reason.
+    boxed_variant: HashSet<(TypeIdx, usize)>,
+    owns: Vec<bool>,
+    /// Pointer-marked locals per codec body: `(codec, is_decode)`.
+    ptr: HashMap<(CodecIdx, bool), HashSet<LocalId>>,
+    needs_strlen: bool,
+}
+
+impl<'a> Printer<'a> {
+    fn build(prog: &'a Program) -> BpsResult<Self> {
+        let (boxed_field, boxed_variant) = boxed_edges(prog);
+        let owns = owns_fixpoint(prog, &boxed_field, &boxed_variant);
+        let needs_strlen = prog
+            .codecs
+            .iter()
+            .any(|c| body_uses_strlen(&c.decode.stmts) || body_uses_strlen(&c.encode.stmts));
+        let mut printer = Self {
+            prog,
+            boxed_field,
+            boxed_variant,
+            owns,
+            ptr: HashMap::new(),
+            needs_strlen,
+        };
+        for c in 0..prog.codecs.len() {
+            printer
+                .ptr
+                .insert((c, true), ptr_marks(&printer, &prog.codecs[c].decode));
+            printer
+                .ptr
+                .insert((c, false), ptr_marks(&printer, &prog.codecs[c].encode));
+        }
+        Ok(printer)
+    }
+
+    fn print(mut self) -> BpsResult<String> {
+        let mut out = String::new();
+        out.push_str(RUNTIME);
+        // Scalar and string codecs are free functions, in codec order.
+        for c in 0..self.prog.codecs.len() {
+            if self.prog.codecs[c].ty.is_none() {
+                out.push_str(&self.free_codec(c)?);
+            }
+        }
+        // Declared types, in type order, with their codec's methods.
+        for t in 0..self.prog.types.len() {
+            out.push_str(&self.type_decl(t)?);
+        }
+        if self.needs_strlen {
+            out.push_str(STRLEN_HELPER);
+        }
+        Ok(out)
+    }
+}
+
+/// By-value `Named` references that must be boxed (`*T`) so the emitted
+/// structs and unions have finite size. Lists already break cycles (slices);
+/// optional and plain references do not. Edges are boxed greedily in type
+/// order: an edge is boxed when its target already reaches its container
+/// through kept edges, so one box breaks each cycle.
+/// Field/variant positions stored as pointers to break by-value cycles.
+type EdgeSet = HashSet<(TypeIdx, usize)>;
+
+fn boxed_edges(prog: &Program) -> (EdgeSet, EdgeSet) {
+    /// Direct by-value named references of a type, omitting list elements.
+    fn direct(ty: &Ty, out: &mut Vec<TypeIdx>) {
+        match ty {
+            Ty::Named(t) => out.push(*t),
+            Ty::List(inner) => {
+                let _ = inner;
+            }
+            _ => {}
+        }
+    }
+    // Reachability over kept edges.
+    fn reaches(kept: &[Vec<TypeIdx>], from: TypeIdx, to: TypeIdx) -> bool {
+        let mut seen = HashSet::new();
+        let mut stack = vec![from];
+        while let Some(n) = stack.pop() {
+            if n == to {
+                return true;
+            }
+            if seen.insert(n) {
+                stack.extend(kept[n].iter().copied());
+            }
+        }
+        false
+    }
+    let mut kept: Vec<Vec<TypeIdx>> = vec![Vec::new(); prog.types.len()];
+    let mut boxed_field = HashSet::new();
+    let mut boxed_variant = HashSet::new();
+    for t in 0..prog.types.len() {
+        match &prog.types[t].kind {
+            crate::ir::typed::TypeKind::Record { fields } => {
+                for (f, decl) in fields.iter().enumerate() {
+                    let mut refs = Vec::new();
+                    direct(&decl.ty, &mut refs);
+                    for target in refs {
+                        if target == t || reaches(&kept, target, t) {
+                            boxed_field.insert((t, f));
+                        } else {
+                            kept[t].push(target);
+                        }
+                    }
+                }
+            }
+            crate::ir::typed::TypeKind::Sum { variants } => {
+                for (v, decl) in variants.iter().enumerate() {
+                    let mut refs = Vec::new();
+                    if let Some(p) = &decl.payload {
+                        direct(p, &mut refs);
+                    }
+                    for target in refs {
+                        if target == t || reaches(&kept, target, t) {
+                            boxed_variant.insert((t, v));
+                        } else {
+                            kept[t].push(target);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    (boxed_field, boxed_variant)
+}
+
+impl Printer<'_> {
+    // -- types ----------------------------------------------------------
+
+    fn type_decl(&mut self, t: TypeIdx) -> BpsResult<String> {
+        let mut out = String::new();
+        out.push_str(&self.doc(t));
+        let name = self.prog.types[t].name.pascal();
+        match &self.prog.types[t].kind {
+            crate::ir::typed::TypeKind::Record { .. } => {
+                out.push_str(&format!("pub const {name} = struct {{\n"));
+                let fields = match &self.prog.types[t].kind {
+                    crate::ir::typed::TypeKind::Record { fields } => fields.clone(),
+                    _ => unreachable!(),
+                };
+                for (f, decl) in fields.iter().enumerate() {
+                    let fname = field_name(&decl.name);
+                    out.push_str(&format!("    {fname}: {},\n", self.field_ty(t, f, decl)?));
+                }
+                if let Some(codec) = self.prog.types[t].codec {
+                    if self.prog.codecs[codec].kind == crate::ir::typed::CodecKind::Alias {
+                        // Aliases emit no methods here; the const below aliases.
+                    } else {
+                        out.push_str(&self.decode_method(codec, &name)?);
+                        out.push_str(&self.encode_method(codec, &name)?);
+                        out.push_str(&self.deinit_record(t, &name));
+                    }
+                }
+                out.push_str("};\n");
+            }
+            crate::ir::typed::TypeKind::Sum { .. } => {
+                out.push_str(&format!("pub const {name} = union(enum) {{\n"));
+                let variants = match &self.prog.types[t].kind {
+                    crate::ir::typed::TypeKind::Sum { variants } => variants.clone(),
+                    _ => unreachable!(),
+                };
+                for (v, decl) in variants.iter().enumerate() {
+                    let vname = field_name(&decl.name);
+                    match &decl.payload {
+                        Some(p) => {
+                            out.push_str(&format!("    {vname}: {},\n", self.payload_ty(t, v, p)?))
+                        }
+                        None => out.push_str(&format!("    {vname}: void,\n")),
+                    }
+                }
+                if let Some(codec) = self.prog.types[t].codec {
+                    out.push_str(&self.decode_method(codec, &name)?);
+                    out.push_str(&self.encode_method(codec, &name)?);
+                    out.push_str(&self.deinit_sum(t, &name));
+                }
+                out.push_str("};\n");
+            }
+            crate::ir::typed::TypeKind::Enum { base, members } => {
+                let base = *base;
+                let members = members.clone();
+                out.push_str(&format!("pub const {name} = enum({}) {{\n", int_ty(base)));
+                for m in &members {
+                    out.push_str(&format!("    {} = {},\n", field_name(&m.name), m.value));
+                }
+                out.push_str("    _,\n");
+                if let Some(codec) = self.prog.types[t].codec {
+                    out.push_str(&self.decode_method(codec, &name)?);
+                    out.push_str(&self.encode_method(codec, &name)?);
+                }
+                out.push_str("};\n");
+            }
+            crate::ir::typed::TypeKind::Alias { target } => {
+                let target = *target;
+                let tname = self.prog.types[target].name.pascal();
+                out.push_str(&format!("pub const {name} = {tname};\n"));
+            }
+        }
+        Ok(out)
+    }
+
+    fn doc(&self, t: TypeIdx) -> String {
+        format!("/// {}\n", self.origin_doc(&self.prog.types[t].origin))
+    }
+
+    fn origin_doc(&self, origin: &Origin) -> String {
+        match origin {
+            Origin::Packet { name, routes } => {
+                let r = routes
+                    .iter()
+                    .map(|r| format!("{} {} {}", r.state, r.direction, r.id))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("Packet `{name}` ({r}).")
+            }
+            Origin::Encoding { name } => format!("Encoding `{name}`."),
+            Origin::Enum { name } => format!("Enum `{name}`."),
+            Origin::Frame { name } => format!("Frame `{name}`."),
+            Origin::Field { parent, field } => {
+                format!(
+                    "Field `{field}` of `{}`.",
+                    self.prog.types[*parent].name.pascal()
+                )
+            }
+            Origin::Variant { sum, variant } => {
+                let vname = match &self.prog.types[*sum].kind {
+                    crate::ir::typed::TypeKind::Sum { variants } => variants[*variant].name.snake(),
+                    _ => "?".into(),
+                };
+                format!(
+                    "Arm `{vname}` of sum `{}`.",
+                    self.prog.types[*sum].name.pascal()
+                )
+            }
+        }
+    }
+
+    /// Zig type of a record field, boxing cycle edges.
+    fn field_ty(
+        &self,
+        t: TypeIdx,
+        f: usize,
+        decl: &crate::ir::typed::FieldDecl,
+    ) -> BpsResult<String> {
+        let inner = self.zig_ty(&decl.ty)?;
+        let boxed = self.boxed_field.contains(&(t, f));
+        Ok(wrap_optional(wrap_boxed(inner, boxed), decl.optional))
+    }
+
+    /// Zig type of a sum variant payload.
+    fn payload_ty(&self, t: TypeIdx, v: usize, payload: &Ty) -> BpsResult<String> {
+        Ok(wrap_boxed(
+            self.zig_ty(payload)?,
+            self.boxed_variant.contains(&(t, v)),
+        ))
+    }
+
+    fn zig_ty(&self, ty: &Ty) -> BpsResult<String> {
+        match ty {
+            Ty::Int(t) => Ok(int_ty(*t).into()),
+            Ty::Bool => Ok("bool".into()),
+            Ty::F32 => Ok("f32".into()),
+            Ty::F64 => Ok("f64".into()),
+            Ty::Str | Ty::Bytes => Ok("[]u8".into()),
+            Ty::List(inner) => Ok(format!("[]{}", self.zig_ty(inner)?)),
+            Ty::Named(t) => Ok(self.prog.types[*t].name.pascal()),
+        }
+    }
+}
+
+/// `*T` when the position is boxed.
+fn wrap_boxed(inner: String, boxed: bool) -> String {
+    if boxed { format!("*{inner}") } else { inner }
+}
+
+/// `?T` for optional fields and locals.
+fn wrap_optional(inner: String, optional: bool) -> String {
+    if optional { format!("?{inner}") } else { inner }
+}
+
+fn int_ty(ty: IntTy) -> &'static str {
+    match ty {
+        IntTy::I8 => "i8",
+        IntTy::I16 => "i16",
+        IntTy::I32 => "i32",
+        IntTy::I64 => "i64",
+        IntTy::I128 => "i128",
+        IntTy::U8 => "u8",
+        IntTy::U16 => "u16",
+        IntTy::U32 => "u32",
+        IntTy::U64 => "u64",
+    }
+}
+impl Printer<'_> {
+    // -- codecs ---------------------------------------------------------
+
+    fn free_codec(&self, c: CodecIdx) -> BpsResult<String> {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "/// {}\n",
+            self.origin_doc(&self.prog.codecs[c].origin)
+        ));
+        let name = self.prog.codecs[c].name.pascal();
+        let ret = self.zig_ty(&self.prog.codecs[c].value)?;
+        out.push_str(&self.function(c, None, &format!("decode{name}"), &ret, true)?);
+        let value_ty = self.borrow_ty(&self.prog.codecs[c].value.clone())?;
+        out.push_str(&self.function(c, None, &format!("encode{name}"), &value_ty, false)?);
+        Ok(out)
+    }
+
+    /// A decode or encode function. `recv` is `Some(type)` for methods and
+    /// `None` for free functions (named `fn_name`); `extra` is the encode
+    /// input type for free encode functions (borrowed slices).
+    fn function(
+        &self,
+        c: CodecIdx,
+        recv: Option<&str>,
+        fn_name: &str,
+        extra: &str,
+        decode: bool,
+    ) -> BpsResult<String> {
+        let codec = &self.prog.codecs[c];
+        let body = if decode { &codec.decode } else { &codec.encode };
+        let info = analyze_body(self, body);
+        let mut sig = String::new();
+        sig.push_str(&format!("pub fn {fn_name}("));
+        let mut first = true;
+        let mut param = |sig: &mut String, s: &str| {
+            if !first {
+                sig.push_str(", ");
+            }
+            first = false;
+            sig.push_str(s);
+        };
+        if decode && owns_value(self, &codec.value) {
+            param(&mut sig, "allocator: std.mem.Allocator");
+        }
+        match recv {
+            Some(t) if !decode => param(&mut sig, &format!("self: {t}")),
+            _ => {}
+        }
+        if decode {
+            param(&mut sig, "reader: *Reader");
+        } else if recv.is_none() {
+            param(&mut sig, "writer: *Writer");
+            param(&mut sig, &format!("value: {extra}"));
+        } else {
+            param(&mut sig, "writer: *Writer");
+        }
+        for pid in &body.params {
+            let p = &body.locals[*pid];
+            param(
+                &mut sig,
+                &format!("{}: {}", local_name(&p.name), self.param_ty(p)?),
+            );
+        }
+        let ret = if decode {
+            match recv {
+                Some(t) => t.to_string(),
+                None => self.zig_ty(&codec.value)?,
+            }
+        } else {
+            "void".to_string()
+        };
+        let mut fgen = FnGen::new(self, body, c, decode, info);
+        fgen.depth += if recv.is_some() { 1 } else { 0 };
+        fgen.stmts(&body.stmts)?;
+        let pad = if recv.is_some() { "    " } else { "" };
+        let mut out = format!("{pad}{sig}) Error!{ret} {{\n");
+        // `_ = x;` for signature names the body never reads.
+        if decode {
+            if !fgen.uses_reader {
+                out.push_str(&format!("{pad}    _ = reader;\n"));
+            }
+            if owns_value(self, &codec.value) && !fgen.uses_alloc {
+                out.push_str(&format!("{pad}    _ = allocator;\n"));
+            }
+        } else {
+            if !fgen.uses_writer {
+                out.push_str(&format!("{pad}    _ = writer;\n"));
+            }
+            if let Some(v) = body.value
+                && body.locals[v].uses == 0
+            {
+                out.push_str(&format!("{pad}    _ = {};\n", self.value_name(c, body, v)));
+            }
+        }
+        for pid in &body.params {
+            if body.locals[*pid].uses == 0 {
+                out.push_str(&format!(
+                    "{pad}    _ = {};\n",
+                    local_name(&body.locals[*pid].name)
+                ));
+            }
+        }
+        out.push_str(&fgen.out);
+        out.push_str(&format!("{pad}}}\n"));
+        Ok(out)
+    }
+
+    /// How body `value` prints in an encode signature: `self` in methods.
+    fn value_name(&self, c: CodecIdx, body: &Body, v: LocalId) -> String {
+        if self.prog.codecs[c].ty.is_some() {
+            return "self".into();
+        }
+        local_name(&body.locals[v].name)
+    }
+
+    fn decode_method(&self, c: CodecIdx, recv: &str) -> BpsResult<String> {
+        self.function(c, Some(recv), "decode", "", true)
+    }
+
+    fn encode_method(&self, c: CodecIdx, recv: &str) -> BpsResult<String> {
+        self.function(c, Some(recv), "encode", "", false)
+    }
+
+    /// Borrowed form of a type for free encode inputs: slices become const.
+    fn borrow_ty(&self, ty: &Ty) -> BpsResult<String> {
+        match ty {
+            Ty::Str | Ty::Bytes => Ok("[]const u8".into()),
+            Ty::List(inner) => Ok(format!("[]const {}", self.zig_ty(inner)?)),
+            _ => self.zig_ty(ty),
+        }
+    }
+
+    /// Zig type of a codec parameter (never a boxed pointer in practice).
+    fn param_ty(&self, p: &crate::ir::typed::Local) -> BpsResult<String> {
+        Ok(wrap_optional(self.zig_ty(&p.ty)?, p.optional))
+    }
+}
+impl Printer<'_> {
+    // -- deinit ---------------------------------------------------------
+
+    /// `deinit` for a record, if any field owns memory.
+    fn deinit_record(&self, t: TypeIdx, recv: &str) -> String {
+        let fields = match &self.prog.types[t].kind {
+            crate::ir::typed::TypeKind::Record { fields } => fields.clone(),
+            _ => return String::new(),
+        };
+        let mut body = String::new();
+        for (f, decl) in fields.iter().enumerate() {
+            let boxed = self.boxed_field.contains(&(t, f));
+            for s in cleanup(
+                &self.owns,
+                &format!("self.{}", field_name(&decl.name)),
+                &decl.ty,
+                boxed,
+                decl.optional,
+            ) {
+                body.push_str(&format!("        {s}\n"));
+            }
+        }
+        if body.is_empty() {
+            return String::new();
+        }
+        format!(
+            "    pub fn deinit(self: {recv}, allocator: std.mem.Allocator) void {{\n{body}    }}\n"
+        )
+    }
+
+    /// `deinit` for a sum, if any payload owns memory.
+    fn deinit_sum(&self, t: TypeIdx, recv: &str) -> String {
+        let variants = match &self.prog.types[t].kind {
+            crate::ir::typed::TypeKind::Sum { variants } => variants.clone(),
+            _ => return String::new(),
+        };
+        let mut arms = String::new();
+        for (v, decl) in variants.iter().enumerate() {
+            let vname = field_name(&decl.name);
+            let boxed = self.boxed_variant.contains(&(t, v));
+            match &decl.payload {
+                None => arms.push_str(&format!("            .{vname} => {{}},\n")),
+                Some(p) => {
+                    let steps = cleanup(&self.owns, "bps_v", p, boxed, false);
+                    if steps.is_empty() {
+                        arms.push_str(&format!("            .{vname} => {{}},\n"));
+                    } else if steps.len() == 1 {
+                        let step = steps[0].trim_end_matches(';');
+                        arms.push_str(&format!("            .{vname} => |bps_v| {step},\n"));
+                    } else {
+                        arms.push_str(&format!("            .{vname} => |bps_v| {{\n"));
+                        for s in &steps {
+                            arms.push_str(&format!("                {s}\n"));
+                        }
+                        arms.push_str("            },\n");
+                    }
+                }
+            }
+        }
+        if !arms.contains("bps_v") {
+            return String::new();
+        }
+        format!(
+            "    pub fn deinit(self: {recv}, allocator: std.mem.Allocator) void {{\n        switch (self) {{\n{arms}        }}\n    }}\n"
+        )
+    }
+}
+
+/// Statements freeing the value `x` of type `ty` (`boxed`: `x` is a `*T`
+/// made by this printer). Optionals unwrap first. Returns no statements
+/// when nothing owns memory.
+fn cleanup(owns: &[bool], x: &str, ty: &Ty, boxed: bool, optional: bool) -> Vec<String> {
+    if !optional {
+        return cleanup_inner(owns, x, ty, boxed);
+    }
+    let inner = cleanup_inner(owns, "bps_v", ty, boxed);
+    if inner.is_empty() {
+        return Vec::new();
+    }
+    if inner.len() == 1 {
+        return vec![format!("if ({x}) |bps_v| {}", inner[0])];
+    }
+    let mut out = vec![format!("if ({x}) |bps_v| {{")];
+    out.extend(inner.into_iter().map(|s| format!("    {s}")));
+    out.push("}".into());
+    out
+}
+
+fn cleanup_inner(owns: &[bool], x: &str, ty: &Ty, boxed: bool) -> Vec<String> {
+    if boxed {
+        // Boxed positions hold named types. `deinit` exists exactly when the
+        // target owns; the allocation itself always needs destroying.
+        if matches!(ty, Ty::Named(t) if owns[*t]) {
+            return vec![
+                format!("{x}.*.deinit(allocator);"),
+                format!("allocator.destroy({x});"),
+            ];
+        }
+        return vec![format!("allocator.destroy({x});")];
+    }
+    match ty {
+        Ty::Str | Ty::Bytes => vec![format!("allocator.free({x});")],
+        Ty::List(elem) => {
+            let mut out = Vec::new();
+            let steps = elem_cleanup(owns, "bps_e", elem);
+            if steps.is_empty() {
+                out.push(format!("allocator.free({x});"));
+            } else if steps.len() == 1 {
+                out.push(format!("for ({x}) |*bps_e| {}", steps[0]));
+                out.push(format!("allocator.free({x});"));
+            } else {
+                out.push(format!("for ({x}) |*bps_e| {{"));
+                for s in steps {
+                    out.push(format!("    {s}"));
+                }
+                out.push("}".into());
+                out.push(format!("allocator.free({x});"));
+            }
+            out
+        }
+        Ty::Named(t) if owns[*t] => vec![format!("{x}.deinit(allocator);")],
+        Ty::Named(_) => Vec::new(),
+        _ => Vec::new(),
+    }
+}
+
+/// Cleanup of a list element behind `|*bps_e|`: `bps_e.*` is the element.
+fn elem_cleanup(owns: &[bool], e: &str, elem: &Ty) -> Vec<String> {
+    match elem {
+        Ty::Str | Ty::Bytes => vec![format!("allocator.free({e}.*);")],
+        Ty::List(inner) => {
+            let mut out = Vec::new();
+            let steps = elem_cleanup(owns, "bps_f", inner);
+            if steps.is_empty() {
+                out.push(format!("allocator.free({e}.*);"));
+            } else {
+                out.push(format!("for ({e}.*) |*bps_f| {{"));
+                for s in steps {
+                    out.push(format!("    {s}"));
+                }
+                out.push("}".into());
+                out.push(format!("allocator.free({e}.*);"));
+            }
+            out
+        }
+        Ty::Named(t) if owns[*t] => vec![format!("{e}.deinit(allocator);")],
+        _ => Vec::new(),
+    }
+}
+// ---------------------------------------------------------------------------
+// Bodies
+// ---------------------------------------------------------------------------
+
+/// Per-body facts the statement printer needs.
+struct BodyInfo {
+    /// Locals held as `*T`: used in a boxed field or variant position, or
+    /// unwrapped/expected from one.
+    ptr: HashSet<LocalId>,
+    /// `bytes` locals consumed once by `Utf8`: no `errdefer` at the read,
+    /// ownership moves into the string.
+    donors: HashSet<LocalId>,
+}
+
+/// Collect [`BodyInfo`]: pointer marks plus single-use `Utf8` donors.
+fn analyze_body(printer: &Printer<'_>, body: &Body) -> BodyInfo {
+    let ptr = ptr_marks(printer, body);
+    let mut donors = HashSet::new();
+    walk_stmts(&body.stmts, &mut |s| {
+        if let Stmt::Utf8 {
+            dst: _,
+            src: Expr::Local(id),
+        } = s
+            && body.locals[*id].uses == 1
+            && is_fresh_bytes(body, &body.stmts, *id)
+        {
+            donors.insert(*id);
+        }
+    });
+    BodyInfo { ptr, donors }
+}
+
+/// Pointer-marked locals: boxed-position uses, then `Unwrap`/`ExpectVariant`
+/// destinations inheriting pointer-ness, to a fixpoint.
+fn ptr_marks(printer: &Printer<'_>, body: &Body) -> HashSet<LocalId> {
+    let mut ptr = HashSet::new();
+    mark_boxed_uses(printer, body, &body.stmts, &mut ptr);
+    loop {
+        let mut changed = false;
+        walk_stmts(&body.stmts, &mut |s| match s {
+            Stmt::Unwrap { dst, src, .. } => {
+                if expr_ptr(printer, body, &ptr, src) && ptr.insert(dst.local) {
+                    changed = true;
+                }
+            }
+            Stmt::ExpectVariant {
+                dst: Some(dst),
+                ty,
+                variant,
+                ..
+            } if printer.boxed_variant.contains(&(*ty, *variant)) && ptr.insert(dst.local) => {
+                changed = true;
+            }
+            _ => {}
+        });
+        if !changed {
+            break;
+        }
+    }
+    ptr
+}
+
+/// Whether `id` is bound once by a `bytes`/`rest` read (a transferable buffer).
+fn is_fresh_bytes(body: &Body, stmts: &[Stmt], id: LocalId) -> bool {
+    let mut found = false;
+    walk_stmts(stmts, &mut |s| match s {
+        Stmt::Read {
+            dst,
+            op: ReadOp::Bytes(_) | ReadOp::Rest,
+        } if dst.local == id && dst.declare => {
+            found = true;
+        }
+        _ => {}
+    });
+    let _ = body;
+    found
+}
+
+/// Mark locals appearing in boxed field or variant-payload positions.
+fn mark_boxed_uses(printer: &Printer<'_>, body: &Body, stmts: &[Stmt], ptr: &mut HashSet<LocalId>) {
+    walk_stmts(stmts, &mut |s| match s {
+        Stmt::Let { value, .. } | Stmt::Return(value) => {
+            walk_expr(value, &mut |e| match e {
+                Expr::Construct { ty, fields } => {
+                    for (f, e) in fields.iter().enumerate() {
+                        if printer.boxed_field.contains(&(*ty, f))
+                            && let Expr::Local(id) = e
+                        {
+                            ptr.insert(*id);
+                        }
+                    }
+                }
+                Expr::Variant {
+                    ty,
+                    variant,
+                    payload: Some(payload),
+                } if printer.boxed_variant.contains(&(*ty, *variant))
+                    && let Expr::Local(id) = payload.as_ref() =>
+                {
+                    ptr.insert(*id);
+                }
+                _ => {}
+            });
+        }
+        _ => {}
+    });
+    let _ = body;
+}
+
+/// Whether an expression already has pointer type (`*T`).
+fn expr_ptr(printer: &Printer<'_>, _body: &Body, ptr: &HashSet<LocalId>, e: &Expr) -> bool {
+    match e {
+        Expr::Local(id) => ptr.contains(id),
+        Expr::Field { ty, field, .. } => printer.boxed_field.contains(&(*ty, *field)),
+        Expr::Get(inner) => expr_ptr(printer, _body, ptr, inner),
+        _ => false,
+    }
+}
+
+fn walk_stmts(stmts: &[Stmt], f: &mut impl FnMut(&Stmt)) {
+    for s in stmts {
+        f(s);
+        match s {
+            Stmt::If { then, els, .. } => {
+                walk_stmts(then, f);
+                walk_stmts(els, f);
+            }
+            Stmt::Match { arms, other, .. } => {
+                for a in arms {
+                    walk_stmts(&a.body, f);
+                }
+                if let Some(o) = other {
+                    walk_stmts(o, f);
+                }
+            }
+            Stmt::Repeat { body, .. } | Stmt::ForEach { body, .. } => walk_stmts(body, f),
+            _ => {}
+        }
+    }
+}
+
+fn walk_expr(e: &Expr, f: &mut impl FnMut(&Expr)) {
+    f(e);
+    match e {
+        Expr::Field { base, .. }
+        | Expr::Present(base)
+        | Expr::Get(base)
+        | Expr::Not(base)
+        | Expr::StrBytes(base) => walk_expr(base, f),
+        Expr::Binary { lhs, rhs, .. } => {
+            walk_expr(lhs, f);
+            walk_expr(rhs, f);
+        }
+        Expr::Cond {
+            cond, then, els, ..
+        } => {
+            walk_expr(cond, f);
+            walk_expr(then, f);
+            walk_expr(els, f);
+        }
+        Expr::Cast { expr, .. } => walk_expr(expr, f),
+        Expr::Call { args, .. } => {
+            for a in args {
+                walk_expr(a, f);
+            }
+        }
+        Expr::Construct { fields, .. } => {
+            for x in fields {
+                walk_expr(x, f);
+            }
+        }
+        Expr::Variant {
+            payload: Some(p), ..
+        } => {
+            walk_expr(p, f);
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Statement printer
+// ---------------------------------------------------------------------------
+
+/// How a repeat body binds its item: into a preallocated slot (`Count`) or a
+/// fresh const for `ArrayList::append` (`Push`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ItemMode {
+    Count,
+    Push,
+}
+
+struct FnGen<'a, 'p> {
+    printer: &'a Printer<'p>,
+    body: &'p Body,
+    decode: bool,
+    /// Encode bodies of type codecs run as methods on `self`.
+    method: bool,
+    info: BodyInfo,
+    /// The repeat item being bound, if inside a repeat body.
+    item: Option<(LocalId, ItemMode)>,
+    /// Locals whose partial value already unwinds (optional vars).
+    covered: HashSet<LocalId>,
+    fresh: usize,
+    taken: HashSet<String>,
+    uses_reader: bool,
+    uses_writer: bool,
+    uses_alloc: bool,
+    out: String,
+    depth: usize,
+    rep_tmp: Option<String>,
+    rep_filled: Option<String>,
+}
+
+impl<'a, 'p> FnGen<'a, 'p> {
+    fn new(
+        printer: &'a Printer<'p>,
+        body: &'p Body,
+        codec: CodecIdx,
+        decode: bool,
+        info: BodyInfo,
+    ) -> Self {
+        let mut taken = HashSet::new();
+        for l in &body.locals {
+            taken.insert(local_name(&l.name));
+        }
+        let mut covered = HashSet::new();
+        for (id, l) in body.locals.iter().enumerate() {
+            if l.optional {
+                covered.insert(id);
+            }
+        }
+        Self {
+            printer,
+            body,
+            decode,
+            method: printer.prog.codecs[codec].ty.is_some() && !decode,
+            info,
+            item: None,
+            covered,
+            fresh: 0,
+            taken,
+            uses_reader: false,
+            uses_writer: false,
+            uses_alloc: false,
+            out: String::new(),
+            depth: 1,
+            rep_tmp: None,
+            rep_filled: None,
+        }
+    }
+
+    /// A collision-free temporary base name.
+    fn temp(&mut self, base: &str) -> String {
+        loop {
+            let n = format!("{base}{}", self.fresh);
+            self.fresh += 1;
+            if self.taken.insert(n.clone()) {
+                return n;
+            }
+        }
+    }
+
+    fn ln(&mut self, s: &str) {
+        for _ in 0..self.depth {
+            self.out.push_str("    ");
+        }
+        self.out.push_str(s);
+        self.out.push('\n');
+    }
+
+    fn stmts(&mut self, stmts: &[Stmt]) -> BpsResult<()> {
+        for s in stmts {
+            self.stmt(s)?;
+        }
+        Ok(())
+    }
+
+    /// Zig type of a local, pointer-aware.
+    fn local_ty(&self, id: LocalId) -> BpsResult<String> {
+        let l = &self.body.locals[id];
+        Ok(wrap_optional(
+            wrap_boxed(self.printer.zig_ty(&l.ty)?, self.info.ptr.contains(&id)),
+            l.optional,
+        ))
+    }
+
+    /// How a local prints: the encode input is `self` in methods.
+    fn value_ref(&self, id: LocalId) -> String {
+        if self.method && Some(id) == self.body.value {
+            return "self".into();
+        }
+        local_name(&self.body.locals[id].name)
+    }
+
+    /// `errdefer` freeing `name` (called right after its binding). A
+    /// multi-statement cleanup goes in one block so the statements keep
+    /// their order (`errdefer`s otherwise unwind in reverse).
+    fn errdefer(&mut self, name: &str, id: LocalId) {
+        let l = &self.body.locals[id];
+        let boxed = self.info.ptr.contains(&id);
+        let steps = cleanup(&self.printer.owns, name, &l.ty.clone(), boxed, l.optional);
+        self.errdefer_steps(&steps);
+    }
+
+    fn errdefer_steps(&mut self, steps: &[String]) {
+        if steps.is_empty() {
+            return;
+        }
+        if steps.len() == 1 && !steps[0].starts_with("if (") && !steps[0].starts_with("for (") {
+            self.ln(&format!("errdefer {}", steps[0]));
+            return;
+        }
+        self.ln("errdefer {");
+        self.depth += 1;
+        for s in steps {
+            self.ln(s);
+        }
+        self.depth -= 1;
+        self.ln("}");
+    }
+
+    /// Unwind the decoded prefix of a list being built: `slice` is the built
+    /// part (`tmp[0..filled]` or `arr.items`), `elem` the element type.
+    fn partial_deinit(&mut self, slice: &str, elem: &Ty) {
+        let steps = elem_cleanup(&self.printer.owns, "bps_e", elem);
+        if steps.is_empty() {
+            return;
+        }
+        if steps.len() == 1 {
+            self.ln("errdefer {");
+            self.depth += 1;
+            self.ln(&format!("for ({slice}) |*bps_e| {}", steps[0]));
+            self.depth -= 1;
+            self.ln("}");
+            return;
+        }
+        self.ln("errdefer {");
+        self.depth += 1;
+        self.ln(&format!("for ({slice}) |*bps_e| {{"));
+        self.depth += 1;
+        for s in &steps {
+            self.ln(s);
+        }
+        self.depth -= 1;
+        self.ln("}");
+        self.depth -= 1;
+        self.ln("}");
+    }
+
+    /// Bind `rhs` into `dst`: repeat slots, optional stores, declarations
+    /// with `errdefer` for fresh owned values, or plain stores.
+    /// `fresh_owned`: `rhs` newly allocates (read bytes, owning decode,
+    /// validated string). `rhs_ptr`: `rhs` already has pointer type.
+    fn bind(&mut self, dst: &Bind, rhs: String, fresh_owned: bool, rhs_ptr: bool) -> BpsResult<()> {
+        let id = dst.local;
+        let name = local_name(&self.body.locals[id].name);
+        // Repeat items go to the array, never to a named local.
+        if let Some((item, mode)) = self.item
+            && item == id
+        {
+            match mode {
+                ItemMode::Count => {
+                    let slot = format!(
+                        "{}[{}]",
+                        self.rep_tmp.clone().unwrap_or_default(),
+                        self.rep_filled.clone().unwrap_or_default()
+                    );
+                    self.ln(&format!("{slot} = {rhs};"));
+                }
+                ItemMode::Push => {
+                    let ty = self.local_ty(id)?;
+                    self.ln(&format!("const {name}: {ty} = {rhs};"));
+                }
+            }
+            return Ok(());
+        }
+        let marked = self.info.ptr.contains(&id);
+        // Pointer-marked destinations materialize through `create`.
+        let (rhs, fresh_owned) = if marked && !rhs_ptr {
+            (self.boxed(id, rhs)?, true)
+        } else {
+            (rhs, fresh_owned)
+        };
+        if dst.some {
+            self.ln(&format!("{name} = {rhs};"));
+            return Ok(());
+        }
+        if dst.declare {
+            let ty = self.local_ty(id)?;
+            self.ln(&format!("const {name}: {ty} = {rhs};"));
+            if fresh_owned && self.decode && !self.info.donors.contains(&id) {
+                self.errdefer(&name, id);
+            }
+            return Ok(());
+        }
+        self.ln(&format!("{name} = {rhs};"));
+        if fresh_owned && self.decode && !self.covered.contains(&id) {
+            self.errdefer(&name, id);
+            self.covered.insert(id);
+        }
+        Ok(())
+    }
+
+    /// `rhs` (a `T` value) boxed into a `*T` allocation expression for local
+    /// `id`, always expanded: `zig fmt` keeps the block form at any width.
+    fn boxed(&mut self, id: LocalId, rhs: String) -> BpsResult<String> {
+        let target = self.printer.zig_ty(&self.body.locals[id].ty.clone())?;
+        let blk = self.temp("bps_blk");
+        let ptr = self.temp("bps_p");
+        self.uses_alloc = true;
+        let pad0 = "    ".repeat(self.depth);
+        let pad1 = "    ".repeat(self.depth + 1);
+        Ok(format!(
+            "{blk}: {{\n{pad1}const {ptr} = allocator.create({target}) catch return error.OutOfMemory;\n{pad1}errdefer allocator.destroy({ptr});\n{pad1}{ptr}.* = {rhs};\n{pad1}break :{blk} {ptr};\n{pad0}}}"
+        ))
+    }
+}
+impl<'a, 'p> FnGen<'a, 'p> {
+    // -- statements ---------------------------------------------------
+
+    fn stmt(&mut self, s: &Stmt) -> BpsResult<()> {
+        match s {
+            Stmt::Declare { local, zero } => self.declare(*local, *zero),
+            Stmt::Let { dst, value } => {
+                let rhs = self.expr(value)?;
+                self.bind(dst, rhs, false, false)
+            }
+            Stmt::Read { dst, op } => {
+                let rhs = self.read(op)?;
+                let fresh = matches!(op, ReadOp::Bytes(_) | ReadOp::Rest);
+                self.bind(dst, rhs, fresh, false)
+            }
+            Stmt::Decode { dst, codec, args } => {
+                let rhs = self.decode_call(*codec, args)?;
+                let fresh = owns_value(self.printer, &self.printer.prog.codecs[*codec].value);
+                // A decode call returns a value; a pointer-marked destination
+                // boxes it in `bind`.
+                self.bind(dst, rhs, fresh, false)
+            }
+            Stmt::Utf8 { dst, src } => self.utf8(dst, src),
+            Stmt::Write { op, value } => {
+                let v = self.expr(value)?;
+                self.uses_writer = true;
+                match op {
+                    WriteOp::U8 => self.ln(&format!("try writer.writeU8({v});")),
+                    WriteOp::F32 => self.ln(&format!("try writer.writeF32Be({v});")),
+                    WriteOp::F64 => self.ln(&format!("try writer.writeF64Be({v});")),
+                    WriteOp::Bytes(n) => {
+                        let n = self.expr(n)?;
+                        self.ln(&format!(
+                            "try writer.writeSized({v}, @as(usize, @intCast({n})));"
+                        ));
+                    }
+                    WriteOp::Rest => self.ln(&format!("try writer.writeBytes({v});")),
+                }
+                Ok(())
+            }
+            Stmt::Encode { codec, args, value } => {
+                let call = self.encode_call(*codec, args, value)?;
+                self.ln(&format!("try {call};"));
+                Ok(())
+            }
+            Stmt::Require { cond, text } => {
+                let c = self.expr(cond)?;
+                self.ln(&format!(
+                    "if (!({c})) return error.RequireFailed; // require {text}"
+                ));
+                Ok(())
+            }
+            Stmt::Unwrap { dst, src, .. } => {
+                let s = self.expr(src)?;
+                let rhs = format!("({s}) orelse return error.MissingField");
+                let ptr = expr_ptr(self.printer, self.body, &self.info.ptr, src);
+                self.bind(dst, rhs, false, ptr)
+            }
+            Stmt::If { cond, then, els } => {
+                let c = self.expr(cond)?;
+                self.ln(&format!("if ({c}) {{"));
+                self.depth += 1;
+                self.stmts(then)?;
+                self.depth -= 1;
+                if els.is_empty() {
+                    self.ln("}");
+                } else {
+                    self.ln("} else {");
+                    self.depth += 1;
+                    self.stmts(els)?;
+                    self.depth -= 1;
+                    self.ln("}");
+                }
+                Ok(())
+            }
+            Stmt::Match {
+                scrutinee,
+                arms,
+                other,
+            } => self.match_stmt(scrutinee, arms, other),
+            Stmt::Repeat {
+                mode,
+                list,
+                item,
+                body,
+            } => self.repeat(mode, *list, *item, body),
+            Stmt::ForEach { list, item, body } => self.for_each(list, *item, body),
+            Stmt::ExpectVariant {
+                dst,
+                sum,
+                ty,
+                variant,
+            } => self.expect_variant(dst, sum, *ty, *variant),
+            Stmt::Return(e) => {
+                let r = self.return_expr(e)?;
+                self.ln(&format!("return {r};"));
+                Ok(())
+            }
+            Stmt::Fail(_) => {
+                self.ln("return error.UntilEnd;");
+                Ok(())
+            }
+        }
+    }
+
+    fn declare(&mut self, local: LocalId, zero: bool) -> BpsResult<()> {
+        let l = &self.body.locals[local];
+        let name = local_name(&l.name);
+        if l.optional {
+            let ty = self.local_ty(local)?;
+            self.ln(&format!("var {name}: {ty} = null;"));
+            if self.decode && owns_value(self.printer, &l.ty.clone()) {
+                self.errdefer(&name, local);
+            }
+            return Ok(());
+        }
+        let init = match &l.ty {
+            Ty::Int(_) => "0",
+            Ty::Bool => "false",
+            Ty::F32 | Ty::F64 => "0",
+            _ => "undefined",
+        };
+        let _ = zero;
+        let ty = self.local_ty(local)?;
+        self.ln(&format!("var {name}: {ty} = {init};"));
+        Ok(())
+    }
+
+    fn read(&mut self, op: &ReadOp) -> BpsResult<String> {
+        self.uses_reader = true;
+        match op {
+            ReadOp::U8 => Ok("try reader.readU8()".into()),
+            ReadOp::F32 => Ok("try reader.readF32Be()".into()),
+            ReadOp::F64 => Ok("try reader.readF64Be()".into()),
+            ReadOp::Bytes(n) => {
+                self.uses_alloc = true;
+                let n = self.expr(n)?;
+                Ok(format!("try reader.readSized(allocator, {n})"))
+            }
+            ReadOp::Rest => {
+                self.uses_alloc = true;
+                Ok("try reader.readBytes(allocator, reader.remaining())".into())
+            }
+        }
+    }
+
+    fn utf8(&mut self, dst: &Bind, src: &Expr) -> BpsResult<()> {
+        self.uses_alloc = true;
+        let s = self.expr(src)?;
+        let id = dst.local;
+        let name = local_name(&self.body.locals[id].name);
+        let donor = matches!(src, Expr::Local(l) if self.info.donors.contains(l));
+        // Repeat items bind into the array; validate first, then move or dupe.
+        if let Some((item, _)) = self.item
+            && item == id
+        {
+            return self.utf8_item(src, &s, donor);
+        }
+        let rhs = if donor {
+            s.clone()
+        } else {
+            format!("allocator.dupe(u8, {s}) catch return error.OutOfMemory")
+        };
+        let marked = self.info.ptr.contains(&id);
+        let (rhs, fresh) = if marked {
+            (self.boxed(id, rhs)?, true)
+        } else {
+            (rhs, true)
+        };
+        if dst.some {
+            self.ln(&format!("{name} = {rhs};"));
+        } else if dst.declare {
+            let ty = self.local_ty(id)?;
+            self.ln(&format!("const {name}: {ty} = {rhs};"));
+        } else {
+            self.ln(&format!("{name} = {rhs};"));
+        }
+        if fresh && self.decode && !self.covered.contains(&id) {
+            self.errdefer(&name, id);
+            self.covered.insert(id);
+        }
+        self.ln(&format!(
+            "if (!std.unicode.utf8ValidateSlice({name})) return error.InvalidUtf8;"
+        ));
+        Ok(())
+    }
+
+    /// `Utf8` whose destination is a repeat item.
+    fn utf8_item(&mut self, src: &Expr, s: &str, donor: bool) -> BpsResult<()> {
+        let (_, mode) = self.item.unwrap_or((0, ItemMode::Push));
+        self.ln(&format!(
+            "if (!std.unicode.utf8ValidateSlice({s})) return error.InvalidUtf8;"
+        ));
+        match mode {
+            ItemMode::Count => {
+                let slot = format!(
+                    "{}[{}]",
+                    self.rep_tmp.clone().unwrap_or_default(),
+                    self.rep_filled.clone().unwrap_or_default()
+                );
+                if donor {
+                    self.ln(&format!("{slot} = {s};"));
+                } else {
+                    self.ln(&format!(
+                        "{slot} = allocator.dupe(u8, {s}) catch return error.OutOfMemory;"
+                    ));
+                }
+            }
+            ItemMode::Push => {
+                let _ = src;
+                let name = self.item_name();
+                if donor {
+                    self.ln(&format!("const {name} = {s};"));
+                } else {
+                    self.ln(&format!(
+                        "const {name} = allocator.dupe(u8, {s}) catch return error.OutOfMemory;"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn item_name(&self) -> String {
+        match self.item {
+            Some((id, _)) => local_name(&self.body.locals[id].name),
+            None => "bps_item".into(),
+        }
+    }
+}
+impl<'a, 'p> FnGen<'a, 'p> {
+    fn match_stmt(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[crate::ir::typed::MatchArm],
+        other: &Option<Vec<Stmt>>,
+    ) -> BpsResult<()> {
+        let s = self.expr(scrutinee)?;
+        self.ln(&format!("switch ({s}) {{"));
+        self.depth += 1;
+        for arm in arms {
+            let tags = arm
+                .tags
+                .iter()
+                .map(|t| format!("{t}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.ln(&format!("{tags} => {{"));
+            self.depth += 1;
+            self.stmts(&arm.body)?;
+            self.depth -= 1;
+            self.ln("},");
+        }
+        match other {
+            Some(body) => {
+                self.ln("else => {");
+                self.depth += 1;
+                self.stmts(body)?;
+                self.depth -= 1;
+                self.ln("},");
+            }
+            None => {
+                self.ln("else => return error.NoMatchArm,");
+            }
+        }
+        self.depth -= 1;
+        self.ln("}");
+        Ok(())
+    }
+
+    fn for_each(&mut self, list: &Expr, item: LocalId, body: &[Stmt]) -> BpsResult<()> {
+        let l = self.expr(list)?;
+        self.uses_writer = true;
+        if self.body.locals[item].uses == 0 {
+            self.ln(&format!("for ({l}) |_| {{"));
+        } else {
+            let name = local_name(&self.body.locals[item].name);
+            self.ln(&format!("for ({l}) |{name}| {{"));
+        }
+        self.depth += 1;
+        self.stmts(body)?;
+        self.depth -= 1;
+        self.ln("}");
+        Ok(())
+    }
+
+    fn expect_variant(
+        &mut self,
+        dst: &Option<Bind>,
+        sum: &Expr,
+        ty: TypeIdx,
+        variant: usize,
+    ) -> BpsResult<()> {
+        let s = self.expr(sum)?;
+        let vname = match &self.printer.prog.types[ty].kind {
+            crate::ir::typed::TypeKind::Sum { variants } => field_name(&variants[variant].name),
+            _ => return Err(emit("zig: expect on non-sum".to_string())),
+        };
+        match dst {
+            Some(b) => {
+                let name = local_name(&self.body.locals[b.local].name);
+                let head = if b.declare {
+                    let ty = self.local_ty(b.local)?;
+                    format!("const {name}: {ty} = switch ({s}) {{")
+                } else {
+                    format!("{name} = switch ({s}) {{")
+                };
+                self.ln(&head);
+                self.depth += 1;
+                self.ln(&format!(".{vname} => |{name}| {name},"));
+                self.ln("else => return error.WrongVariant,");
+                self.depth -= 1;
+                self.ln("};");
+            }
+            None => {
+                self.ln(&format!("if ({s} != .{vname}) return error.WrongVariant;"));
+            }
+        }
+        Ok(())
+    }
+
+    fn return_expr(&mut self, e: &Expr) -> BpsResult<String> {
+        match e {
+            Expr::Construct { ty, fields } => {
+                let names = match &self.printer.prog.types[*ty].kind {
+                    crate::ir::typed::TypeKind::Record { fields } => fields
+                        .iter()
+                        .map(|f| field_name(&f.name))
+                        .collect::<Vec<_>>(),
+                    _ => return Err(emit("zig: construct of non-record".to_string())),
+                };
+                if names.is_empty() {
+                    return Ok(".{}".into());
+                }
+                let mut parts = Vec::new();
+                for (n, v) in names.iter().zip(fields.iter()) {
+                    parts.push(format!(".{n} = {}", self.expr(v)?));
+                }
+                Ok(format!(".{{ {} }}", parts.join(", ")))
+            }
+            Expr::Variant {
+                ty,
+                variant,
+                payload,
+            } => {
+                let vname = match &self.printer.prog.types[*ty].kind {
+                    crate::ir::typed::TypeKind::Sum { variants } => {
+                        field_name(&variants[*variant].name)
+                    }
+                    _ => return Err(emit("zig: variant of non-sum".to_string())),
+                };
+                match payload {
+                    Some(p) => Ok(format!(".{{ .{vname} = {} }}", self.expr(p)?)),
+                    None => Ok(format!(".{{ .{vname} = {{}} }}")),
+                }
+            }
+            _ => self.expr(e),
+        }
+    }
+
+    /// Call another codec's decode: `Type.decode(allocator?, reader, args)`.
+    fn decode_call(&mut self, codec: CodecIdx, args: &[Expr]) -> BpsResult<String> {
+        self.uses_reader = true;
+        let path = decode_fn(self.printer.prog, codec);
+        let mut parts = Vec::new();
+        if owns_value(self.printer, &self.printer.prog.codecs[codec].value) {
+            parts.push("allocator".to_string());
+            self.uses_alloc = true;
+        }
+        parts.push("reader".to_string());
+        let params = self.printer.prog.codecs[codec].decode.params.clone();
+        let callee_ptr = self
+            .printer
+            .ptr
+            .get(&(codec, true))
+            .cloned()
+            .unwrap_or_default();
+        for (a, p) in args.iter().zip(params.iter()) {
+            parts.push(self.call_arg(a, *p, &callee_ptr)?);
+        }
+        Ok(format!("try {path}({})", parts.join(", ")))
+    }
+
+    /// Call another codec's encode: free `encodeX(writer, value, args)` or
+    /// `value.encode(writer, args)`.
+    fn encode_call(&mut self, codec: CodecIdx, args: &[Expr], value: &Expr) -> BpsResult<String> {
+        self.uses_writer = true;
+        let ty = self.printer.prog.codecs[codec].ty;
+        let params = self.printer.prog.codecs[codec].encode.params.clone();
+        let callee_ptr = self
+            .printer
+            .ptr
+            .get(&(codec, false))
+            .cloned()
+            .unwrap_or_default();
+        let mut rest = Vec::new();
+        for (a, p) in args.iter().zip(params.iter()) {
+            rest.push(self.call_arg(a, *p, &callee_ptr)?);
+        }
+        match ty {
+            None => {
+                let path = encode_fn(self.printer.prog, codec);
+                let v = self.encode_value(value)?;
+                if rest.is_empty() {
+                    Ok(format!("{path}(writer, {v})"))
+                } else {
+                    Ok(format!("{path}(writer, {v}, {})", rest.join(", ")))
+                }
+            }
+            Some(_) => {
+                let v = self.encode_value(value)?;
+                let path = encode_fn(self.printer.prog, codec);
+                let method = path.rsplit('.').next().unwrap_or("encode");
+                if rest.is_empty() {
+                    Ok(format!("{v}.{method}(writer)"))
+                } else {
+                    Ok(format!("{v}.{method}(writer, {})", rest.join(", ")))
+                }
+            }
+        }
+    }
+
+    /// An encode input or call argument, dereferenced when the Zig value is a
+    /// boxed pointer but the callee takes it by value.
+    fn encode_value(&mut self, value: &Expr) -> BpsResult<String> {
+        let v = self.expr(value)?;
+        if expr_ptr(self.printer, self.body, &self.info.ptr, value) {
+            Ok(format!("{v}.*"))
+        } else {
+            Ok(v)
+        }
+    }
+
+    fn call_arg(
+        &mut self,
+        arg: &Expr,
+        param: LocalId,
+        callee_ptr: &HashSet<LocalId>,
+    ) -> BpsResult<String> {
+        let a = self.expr(arg)?;
+        let want_ptr = callee_ptr.contains(&param);
+        if expr_ptr(self.printer, self.body, &self.info.ptr, arg) && !want_ptr {
+            Ok(format!("{a}.*"))
+        } else {
+            Ok(a)
+        }
+    }
+}
+impl<'a, 'p> FnGen<'a, 'p> {
+    fn repeat(
+        &mut self,
+        mode: &RepeatMode,
+        list: LocalId,
+        item: LocalId,
+        body: &[Stmt],
+    ) -> BpsResult<()> {
+        if !self.decode {
+            return self.repeat_encode(mode, list, item, body);
+        }
+        self.uses_reader = true;
+        self.uses_alloc = true;
+        let list_name = local_name(&self.body.locals[list].name);
+        let list_ty = self.local_ty(list)?;
+        let elem_ty = match &self.body.locals[list].ty.clone() {
+            Ty::List(e) => self.printer.zig_ty(e)?,
+            _ => return Err(emit("zig: repeat list is not a list".to_string())),
+        };
+        let rep = self.temp("bps_rep");
+        match mode {
+            RepeatMode::Count(n) => {
+                let n = self.expr(n)?;
+                let tmp = self.temp("bps_tmp");
+                let filled = self.temp("bps_filled");
+                self.ln(&format!("const {list_name}: {list_ty} = {rep}: {{"));
+                self.depth += 1;
+                self.ln(&format!("if (({n}) < 0) return error.NegativeLength;"));
+                self.ln(&format!(
+                    "const {tmp} = allocator.alloc({elem_ty}, @as(usize, @intCast({n}))) catch return error.OutOfMemory;"
+                ));
+                self.ln(&format!("errdefer allocator.free({tmp});"));
+                self.ln(&format!("var {filled}: usize = 0;"));
+                self.partial_deinit(
+                    &format!("{tmp}[0..{filled}]"),
+                    &self.body.locals[item].ty.clone(),
+                );
+                self.ln(&format!(
+                    "while ({filled} < {tmp}.len) : ({filled} += 1) {{"
+                ));
+                self.depth += 1;
+                let outer = self.item.replace((item, ItemMode::Count));
+                let otmp = self.rep_tmp.replace(tmp.clone());
+                let ofill = self.rep_filled.replace(filled.clone());
+                self.stmts(body)?;
+                self.item = outer;
+                self.rep_tmp = otmp;
+                self.rep_filled = ofill;
+                self.depth -= 1;
+                self.ln("}");
+                self.ln(&format!("break :{rep} {tmp};"));
+                self.depth -= 1;
+                self.ln("};");
+            }
+            _ => {
+                let term = match mode {
+                    RepeatMode::Until(t) => Some(self.expr(t)?),
+                    _ => None,
+                };
+                let arr = self.temp("bps_arr");
+                self.ln(&format!("const {list_name}: {list_ty} = {rep}: {{"));
+                self.depth += 1;
+                if let Some(t) = term {
+                    let term_n = self.temp("bps_term");
+                    let cast = int_cast_expr(IntTy::I64, IntTy::U8, t);
+                    self.ln(&format!("const {term_n}: u8 = {cast};"));
+                    self.ln(&format!(
+                        "var {arr} = std.ArrayList({elem_ty}).init(allocator);"
+                    ));
+                    self.ln(&format!("errdefer {arr}.deinit();"));
+                    self.partial_deinit(
+                        &format!("{arr}.items"),
+                        &self.body.locals[item].ty.clone(),
+                    );
+                    self.ln("while (reader.remaining() > 0) {");
+                    self.depth += 1;
+                    self.ln(&format!("if (reader.data[reader.pos] == {term_n}) {{"));
+                    self.depth += 1;
+                    self.ln("reader.pos += 1;");
+                    self.ln("break;");
+                    self.depth -= 1;
+                    self.ln("}");
+                    let outer = self.item.replace((item, ItemMode::Push));
+                    self.stmts(body)?;
+                    self.item = outer;
+                    self.ln(&format!(
+                        "{arr}.append({}) catch return error.OutOfMemory;",
+                        local_name(&self.body.locals[item].name)
+                    ));
+                    self.depth -= 1;
+                    self.ln("}");
+                } else {
+                    self.ln(&format!(
+                        "var {arr} = std.ArrayList({elem_ty}).init(allocator);"
+                    ));
+                    self.ln(&format!("errdefer {arr}.deinit();"));
+                    self.partial_deinit(
+                        &format!("{arr}.items"),
+                        &self.body.locals[item].ty.clone(),
+                    );
+                    self.ln("while (reader.remaining() > 0) {");
+                    self.depth += 1;
+                    let outer = self.item.replace((item, ItemMode::Push));
+                    self.stmts(body)?;
+                    self.item = outer;
+                    self.ln(&format!(
+                        "{arr}.append({}) catch return error.OutOfMemory;",
+                        local_name(&self.body.locals[item].name)
+                    ));
+                    self.depth -= 1;
+                    self.ln("}");
+                }
+                self.ln(&format!(
+                    "break :{rep} {arr}.toOwnedSlice() catch return error.OutOfMemory;"
+                ));
+                self.depth -= 1;
+                self.ln("};");
+            }
+        }
+        // The owned slice now belongs to the caller-side value; unwind it on
+        // any later failure.
+        let ty = self.body.locals[list].ty.clone();
+        let boxed = self.info.ptr.contains(&list);
+        let steps = cleanup(
+            &self.printer.owns,
+            &list_name,
+            &ty,
+            boxed,
+            self.body.locals[list].optional,
+        );
+        self.errdefer_steps(&steps);
+        Ok(())
+    }
+
+    /// `Repeat` in an encode body (not produced by the builder, but harmless):
+    /// iterate the bound list, then write the terminator.
+    fn repeat_encode(
+        &mut self,
+        mode: &RepeatMode,
+        list: LocalId,
+        item: LocalId,
+        body: &[Stmt],
+    ) -> BpsResult<()> {
+        self.uses_writer = true;
+        let name = local_name(&self.body.locals[list].name);
+        if self.body.locals[item].uses == 0 {
+            self.ln(&format!("for ({name}) |_| {{"));
+        } else {
+            let item_name = local_name(&self.body.locals[item].name);
+            self.ln(&format!("for ({name}) |{item_name}| {{"));
+        }
+        self.depth += 1;
+        self.stmts(body)?;
+        self.depth -= 1;
+        self.ln("}");
+        match mode {
+            RepeatMode::Until(t) => {
+                let t = self.expr(t)?;
+                self.ln(&format!(
+                    "try writer.writeU8(@as(u8, @truncate(@as(u64, @bitCast({t})))));"
+                ));
+            }
+            RepeatMode::UntilEnd => {
+                self.ln("return error.UntilEnd;");
+            }
+            RepeatMode::Count(_) => {}
+        }
+        Ok(())
+    }
+}
+impl<'a, 'p> FnGen<'a, 'p> {
+    // -- expressions --------------------------------------------------
+
+    fn expr(&mut self, e: &Expr) -> BpsResult<String> {
+        match e {
+            Expr::Int { value, .. } => Ok(format!("{value}")),
+            Expr::Bool(b) => Ok(format!("{b}")),
+            Expr::Str(s) => Ok(format!("{s:?}")),
+            Expr::Local(id) => Ok(self.value_ref(*id)),
+            Expr::Field { base, ty, field } => {
+                let b = self.expr(base)?;
+                let (f, optional) = match &self.printer.prog.types[*ty].kind {
+                    crate::ir::typed::TypeKind::Record { fields } => {
+                        (field_name(&fields[*field].name), fields[*field].optional)
+                    }
+                    _ => return Err(emit("zig: field of non-record".to_string())),
+                };
+                // A boxed optional unwraps (`orelse`, `.?`) before the
+                // dereference; only dereference non-optional fields here.
+                if self.printer.boxed_field.contains(&(*ty, *field)) && !optional {
+                    Ok(format!("{b}.{f}.*"))
+                } else {
+                    Ok(format!("{b}.{f}"))
+                }
+            }
+            Expr::Present(inner) => Ok(format!("({} != null)", self.expr(inner)?)),
+            Expr::Get(inner) => Ok(format!("({}.?)", self.expr(inner)?)),
+            Expr::Not(inner) => Ok(format!("!({})", self.expr(inner)?)),
+            Expr::Binary {
+                op,
+                lhs,
+                rhs,
+                ty,
+                wraps,
+            } => self.binary(*op, lhs, rhs, ty, *wraps),
+            Expr::Cond {
+                cond,
+                then,
+                els,
+                ty,
+            } => Ok(format!(
+                "(@as({}, if ({}) {} else {}))",
+                self.printer.zig_ty(ty)?,
+                self.expr(cond)?,
+                self.expr(then)?,
+                self.expr(els)?
+            )),
+            Expr::Cast { expr, to } => {
+                let inner = self.expr(expr)?;
+                self.cast_expr(expr, inner, to)
+            }
+            Expr::Call { func, args } => self.call(*func, args),
+            Expr::StrBytes(inner) => self.expr(inner),
+            Expr::Remaining => {
+                self.uses_reader = true;
+                Ok("@as(i64, @intCast(reader.remaining()))".into())
+            }
+            Expr::Construct { .. } | Expr::Variant { .. } => self.return_expr(e),
+        }
+    }
+
+    fn binary(
+        &mut self,
+        op: crate::ir::typed::BinOp,
+        lhs: &Expr,
+        rhs: &Expr,
+        ty: &Ty,
+        wraps: bool,
+    ) -> BpsResult<String> {
+        use crate::ir::typed::BinOp::*;
+        let l = self.expr(lhs)?;
+        let r = self.expr(rhs)?;
+        // String equality is a library call.
+        if matches!(op, Eq | Ne) {
+            let (lt, _) = self.printer.prog.expr_ty(self.body, lhs);
+            if matches!(lt, Ty::Str) {
+                if matches!(op, Eq) {
+                    return Ok(format!("std.mem.eql(u8, {l}, {r})"));
+                }
+                return Ok(format!("(!std.mem.eql(u8, {l}, {r}))"));
+            }
+        }
+        let _ = ty;
+        match op {
+            Add if wraps => Ok(format!("({l} +% {r})")),
+            Sub if wraps => Ok(format!("({l} -% {r})")),
+            Mul if wraps => Ok(format!("({l} *% {r})")),
+            Add => Ok(format!("({l} + {r})")),
+            Sub => Ok(format!("({l} - {r})")),
+            Mul => Ok(format!("({l} * {r})")),
+            Div => Ok(format!("@divFloor({l}, {r})")),
+            Mod => Ok(format!("@mod({l}, {r})")),
+            Shl => Ok(format!("({l} << {r})")),
+            Shr => Ok(format!("({l} >> {r})")),
+            BitAnd => Ok(format!("({l} & {r})")),
+            BitOr => Ok(format!("({l} | {r})")),
+            BitXor => Ok(format!("({l} ^ {r})")),
+            Eq => Ok(format!("({l} == {r})")),
+            Ne => Ok(format!("({l} != {r})")),
+            Lt => Ok(format!("({l} < {r})")),
+            Le => Ok(format!("({l} <= {r})")),
+            Gt => Ok(format!("({l} > {r})")),
+            Ge => Ok(format!("({l} >= {r})")),
+            And => Ok(format!("({l} and {r})")),
+            Or => Ok(format!("({l} or {r})")),
+        }
+    }
+
+    fn cast_expr(&mut self, inner: &Expr, printed: String, to: &Ty) -> BpsResult<String> {
+        let (from, _) = self.printer.prog.expr_ty(self.body, inner);
+        if from == *to {
+            return Ok(printed);
+        }
+        match (&from, to) {
+            (_, Ty::Named(_)) => Ok(format!("@enumFromInt({printed})")),
+            (Ty::Named(_), _) => Ok(format!("@intFromEnum({printed})")),
+            (Ty::Bool, Ty::Int(_)) => Ok(format!("@intFromBool({printed})")),
+            (Ty::F32, Ty::F64) | (Ty::F64, Ty::F32) => Ok(format!(
+                "{}(@floatCast({printed}))",
+                self.printer.zig_ty(to)?
+            )),
+            (Ty::Int(_), Ty::F32 | Ty::F64) => Ok(format!(
+                "{}(@floatFromInt({printed}))",
+                self.printer.zig_ty(to)?
+            )),
+            (Ty::F32 | Ty::F64, Ty::Int(_)) => Ok(format!(
+                "{}(@intFromFloat({printed}))",
+                self.printer.zig_ty(to)?
+            )),
+            (Ty::Int(f), Ty::Int(t)) => Ok(int_cast_expr(*f, *t, printed)),
+            _ => Err(emit(format!("zig: cannot cast {from:?} to {to:?}"))),
+        }
+    }
+
+    fn call(&mut self, func: Func, args: &[Expr]) -> BpsResult<String> {
+        match func {
+            Func::SignExtend => {
+                if args.len() != 2 {
+                    return Err(emit("zig: sign_extend arity".to_string()));
+                }
+                let a = self.expr(&args[0])?;
+                let b = self.expr(&args[1])?;
+                Ok(format!(
+                    "signExtend(@as(u64, @bitCast({a})), @as(u7, @intCast({b})))"
+                ))
+            }
+            Func::Utf16Units => {
+                if args.len() != 1 {
+                    return Err(emit("zig: utf16_units arity".to_string()));
+                }
+                let s = self.expr(&args[0])?;
+                Ok(format!("@as(i64, @intCast(utf16Units({s})))"))
+            }
+            Func::Utf8Len => {
+                if args.len() != 1 {
+                    return Err(emit("zig: utf8_len arity".to_string()));
+                }
+                let s = self.expr(&args[0])?;
+                Ok(format!("@as(i64, @intCast(({s}).len))"))
+            }
+            Func::StrLen => {
+                if args.len() != 1 {
+                    return Err(emit("zig: str_len arity".to_string()));
+                }
+                let s = self.expr(&args[0])?;
+                Ok(format!("strLen({s})"))
+            }
+            Func::BytesLen | Func::ListLen => {
+                if args.len() != 1 {
+                    return Err(emit("zig: len arity".to_string()));
+                }
+                let s = self.expr(&args[0])?;
+                Ok(format!("@as(i64, @intCast(({s}).len))"))
+            }
+            Func::Min => {
+                if args.len() != 2 {
+                    return Err(emit("zig: min arity".to_string()));
+                }
+                Ok(format!(
+                    "@min({}, {})",
+                    self.expr(&args[0])?,
+                    self.expr(&args[1])?
+                ))
+            }
+            Func::Max => {
+                if args.len() != 2 {
+                    return Err(emit("zig: max arity".to_string()));
+                }
+                Ok(format!(
+                    "@max({}, {})",
+                    self.expr(&args[0])?,
+                    self.expr(&args[1])?
+                ))
+            }
+        }
+    }
+}
+
+/// Integer-to-integer cast: widening is `@intCast` (values fit), same-width
+/// cross-sign is `@bitCast`, narrowing truncates through the unsigned domain
+/// (`@truncate` only accepts unsigned operands).
+fn int_cast_expr(from: IntTy, to: IntTy, x: String) -> String {
+    if from == to {
+        return x;
+    }
+    // `@bitCast` rejects `comptime_int` literals: give the operand its type.
+    let x = format!("@as({}, {x})", int_ty(from));
+    let target = int_ty(to);
+    if to.bits() > from.bits() {
+        return format!("@as({target}, @intCast({x}))");
+    }
+    if to.bits() == from.bits() {
+        return format!("@as({target}, @bitCast({x}))");
+    }
+    let wide = format!("@as({}, @bitCast({x}))", unsigned_ty(from));
+    let base = if from.signed() { wide } else { x };
+    let mid = format!("@as({}, @truncate({base}))", unsigned_ty(to));
+    if to.signed() {
+        format!("@as({target}, @bitCast({mid}))")
+    } else {
+        mid
+    }
+}
+
+fn unsigned_ty(ty: IntTy) -> &'static str {
+    match ty {
+        IntTy::I8 | IntTy::U8 => "u8",
+        IntTy::I16 | IntTy::U16 => "u16",
+        IntTy::I32 | IntTy::U32 => "u32",
+        IntTy::I64 | IntTy::U64 => "u64",
+        IntTy::I128 => "u128",
+    }
+}
+
+/// Whether any statement calls `str_len` (decides the helper's emission).
+fn body_uses_strlen(stmts: &[Stmt]) -> bool {
+    let mut found = false;
+    walk_stmts(stmts, &mut |s| {
+        let exprs: Vec<&Expr> = match s {
+            Stmt::Let { value, .. } | Stmt::Return(value) => vec![value],
+            Stmt::Require { cond, .. } => vec![cond],
+            Stmt::If { cond, .. } => vec![cond],
+            Stmt::Match { scrutinee, .. } => vec![scrutinee],
+            _ => Vec::new(),
+        };
+        for e in exprs {
+            walk_expr(e, &mut |x| {
+                if matches!(
+                    x,
+                    Expr::Call {
+                        func: Func::StrLen,
+                        ..
+                    }
+                ) {
+                    found = true;
+                }
+            });
+        }
+    });
+    found
+}

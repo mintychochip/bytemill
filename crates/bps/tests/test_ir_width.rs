@@ -87,3 +87,147 @@ fn std_encodings_match_the_table() {
     assert_eq!(class_of(int, "u64le"), Storage::U64);
     assert_eq!(class_of(int, "boolean"), Storage::Bool);
 }
+#[test]
+fn interval_rule_shrinks_computed_bit_fields() {
+    let flags = locals(&[("flags", Storage::U8)]);
+    // `commands_node.node_type = flags & 3` and the versions' `flags_*`
+    // fields are u8 now, not i128.
+    assert_eq!(storage_of(&parse_expr("flags & 3"), &flags), Storage::U8);
+    assert_eq!(storage_of(&parse_expr("flags & 1"), &flags), Storage::U8);
+    assert_eq!(
+        storage_of(&parse_expr("(flags >> 5) & 1"), &flags),
+        Storage::U8
+    );
+    assert_eq!(storage_of(&parse_expr("flags >> 6"), &flags), Storage::U8);
+    let slot = locals(&[("slot_byte", Storage::U8)]);
+    assert_eq!(
+        storage_of(&parse_expr("slot_byte & 127"), &slot),
+        Storage::U8
+    );
+    // `%` by a positive constant, `|` of bounded operands, literals.
+    let raw = locals(&[("raw", Storage::U64)]);
+    assert_eq!(storage_of(&parse_expr("raw % 4096"), &raw), Storage::U16);
+    assert_eq!(
+        storage_of(&parse_expr("300"), &HashMap::new()),
+        Storage::U16
+    );
+    assert_eq!(storage_of(&parse_expr("-1"), &HashMap::new()), Storage::I8);
+    assert_eq!(
+        storage_of(&parse_expr("70000"), &HashMap::new()),
+        Storage::U32
+    );
+    assert_eq!(
+        storage_of(&parse_expr("18446744073709551615"), &HashMap::new()),
+        Storage::U64
+    );
+    // Unknown names stay unbounded: still i128.
+    assert_eq!(
+        storage_of(&parse_expr("unknown & 3"), &HashMap::new()),
+        Storage::U8,
+        // `&` needs only the mask: any integer masked with 3 fits u8.
+    );
+    assert_eq!(
+        storage_of(&parse_expr("unknown >> 2"), &HashMap::new()),
+        Storage::I128
+    );
+    assert_eq!(
+        storage_of(&parse_expr("unknown + 1"), &HashMap::new()),
+        Storage::I128
+    );
+}
+
+#[test]
+fn f32be_is_f32_storage() {
+    let schema = bps::load_schema(&[repo("schemas/std/integers.bps")]).unwrap();
+    let resolved = bps::analyze(&schema).unwrap();
+    let ir = bps::ir::lower(&resolved).unwrap();
+    assert_eq!(
+        ir.types.get("f32be"),
+        Some(&bps::ir::TypeDef::Scalar(Storage::F32))
+    );
+    assert_eq!(
+        ir.types.get("f64be"),
+        Some(&bps::ir::TypeDef::Scalar(Storage::F64))
+    );
+}
+
+/// After the interval rule no `i128` field remains in 26.3, the versions, or
+/// hytale, and no `__any` type remains anywhere. A real `i128` would fail
+/// here with its `file: type.field` path; keep it and report the field.
+#[test]
+fn no_i128_or_any_fields_in_shipped_schemas() {
+    use bps::ir::TypeDef;
+    let mut roots = vec!["schemas/minecraft_26_3_wiki.bps".to_string()];
+    let versions = std::fs::read_dir(repo("schemas/versions")).unwrap();
+    let mut names: Vec<String> = versions
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with('v') && n.ends_with(".bps"))
+        .map(|n| format!("schemas/versions/{n}"))
+        .collect();
+    names.sort();
+    roots.extend(names);
+    roots.push("schemas/hytale/2026_02_17.bps".to_string());
+    assert!(!roots.is_empty());
+
+    let mut bad = Vec::new();
+    for root in &roots {
+        let schema = bps::load_schema(&[repo(root)]).unwrap();
+        let resolved = bps::analyze(&schema).unwrap();
+        let ir = bps::ir::lower(&resolved).unwrap();
+        for (name, def) in ir.types.iter() {
+            let is_any = name.contains("__any");
+            let fields: &[bps::ir::Field] = match def {
+                TypeDef::Record { fields } => fields,
+                _ => &[],
+            };
+            if is_any {
+                bad.push(format!("{root}: type {name}"));
+            }
+            for field in fields {
+                if is_any_ty(&field.ty) {
+                    bad.push(format!("{root}: {name}.{} is __any", field.name));
+                }
+                if field_storage(&field.ty, &ir) == Some(Storage::I128) {
+                    bad.push(format!("{root}: {name}.{} is i128", field.name));
+                }
+            }
+            match def {
+                TypeDef::Scalar(Storage::I128) => {
+                    bad.push(format!("{root}: scalar {name} is i128"))
+                }
+                TypeDef::Enum {
+                    base: Storage::I128,
+                    ..
+                } => {
+                    bad.push(format!("{root}: enum {name} base is i128"));
+                }
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "unexpected wide fields:\n{}",
+        bad.join("\n")
+    );
+}
+
+fn is_any_ty(ty: &bps::ir::Ty) -> bool {
+    match ty {
+        bps::ir::Ty::Named(id) => id.0.contains("__any"),
+        bps::ir::Ty::List(inner) | bps::ir::Ty::Optional(inner) => is_any_ty(inner),
+        bps::ir::Ty::Scalar(_) => false,
+    }
+}
+
+fn field_storage(ty: &bps::ir::Ty, ir: &bps::ir::IrSchema) -> Option<Storage> {
+    match ty {
+        bps::ir::Ty::Scalar(class) => Some(*class),
+        bps::ir::Ty::Named(id) => match ir.types.get(&id.0) {
+            Some(bps::ir::TypeDef::Scalar(class)) => Some(*class),
+            Some(bps::ir::TypeDef::Enum { base, .. }) => Some(*base),
+            _ => None,
+        },
+        _ => None,
+    }
+}

@@ -73,22 +73,121 @@ pub fn encode_bare(
 }
 
 /// Decode a length-prefixed frame; returns `(packet_id, {"packet", "fields"})`.
+///
+/// The frame layout is the schema's `frame` block for this state and
+/// direction, not a hardcoded Minecraft shape. The block names `id` and
+/// `payload`, with an optional `length`. Two pairings cover the trees here:
+/// - `payload: rest` with `length`: the length counts every byte after the
+///   length field itself (Minecraft: id bytes plus payload).
+/// - `payload: bytes(n)`: exactly `n` bytes (Hytale: the length counts the
+///   payload only, so `payload: bytes(length)`).
+///
+/// Trailing bytes after one frame are ignored, as before.
 pub fn decode_frame_payload(
     resolved: &ResolvedSchema,
     state: &str,
     direction: &str,
     data: &[u8],
 ) -> BpsResult<(i128, Env)> {
+    let mut frame_names: Vec<String> = Vec::new();
+    for (route, _) in &resolved.routes {
+        if route.state == state && route.direction == direction {
+            let name = route.frame.clone().unwrap_or_else(|| "default".to_string());
+            if !frame_names.contains(&name) {
+                frame_names.push(name);
+            }
+        }
+    }
+    if frame_names.is_empty() {
+        return Err(decode(format!("no routes in {state}.{direction}")));
+    }
+    if frame_names.len() > 1 {
+        frame_names.sort();
+        return Err(decode(format!(
+            "multiple frames in {state}.{direction}: {}",
+            frame_names.join(", ")
+        )));
+    }
+    let frame_name = &frame_names[0];
+    // Scope the lookup to protocols that route this state and direction.
+    // Families share the frame name `default` with different layouts
+    // (Minecraft varint+rest, Hytale i32le+bytes(length)): the first
+    // `default` in the schema is the wrong one for every other family.
+    let frame_decl = resolved
+        .protocols
+        .values()
+        .filter(|p| {
+            p.routes.iter().any(|r| {
+                r.state == state
+                    && r.direction == direction
+                    && r.frame.clone().unwrap_or_else(|| "default".to_string()) == *frame_name
+            })
+        })
+        .flat_map(|p| p.frames.iter())
+        .find(|f| &f.name == frame_name)
+        .ok_or_else(|| decode(format!("no frame {frame_name}")))?;
     let mut cur = Cursor::new(data);
-    let varint = || TypeRef { name: "varint".to_string(), args: Vec::new(), transforms: Vec::new() };
-    let length = int_of(&decode_type_ref(&varint(), &mut cur, resolved, &Env::new())?)?;
-    let frame_end = cur.pos
-        + usize::try_from(length).map_err(|_| decode("negative frame length"))?;
-    let packet_id = int_of(&decode_type_ref(&varint(), &mut cur, resolved, &Env::new())?)?;
-    let payload = cur.read(frame_end - cur.pos)?;
+    let mut env = Env::new();
+    let mut length_val: Option<i128> = None;
+    let mut pos_after_length: Option<usize> = None;
+    let mut id_val: Option<i128> = None;
+    let mut payload_bytes: Option<Vec<u8>> = None;
+    for item in &frame_decl.items {
+        if let BlockItem::Field(wf) = item
+            && wf.name == "payload"
+        {
+            if wf.repeat.is_some() {
+                return Err(decode("frame payload cannot repeat"));
+            }
+            if wf.if_expr.is_some() {
+                return Err(decode("frame payload cannot be conditional"));
+            }
+            match &wf.type_ref {
+                FieldType::Ref(tr) if tr.name == "rest" && tr.args.is_empty() && tr.transforms.is_empty() => {
+                    let n = match (length_val, pos_after_length) {
+                        (Some(len), Some(pos)) => {
+                            let ulen = usize::try_from(len).map_err(|_| decode("negative frame length"))?;
+                            let frame_end = pos.checked_add(ulen).ok_or_else(|| decode("frame length overflow"))?;
+                            frame_end.checked_sub(cur.pos).ok_or_else(|| decode("frame length shorter than header"))?
+                        }
+                        _ => cur.remaining(),
+                    };
+                    let bytes = cur.read(n)?.to_vec();
+                    payload_bytes = Some(bytes.clone());
+                    env.insert("payload", Value::bytes(bytes));
+                }
+                FieldType::Ref(tr) if tr.name == "bytes" && tr.args.len() == 1 && tr.transforms.is_empty() => {
+                    let n_val = eval_expr(&tr.args[0], &env)?;
+                    let n = usize::try_from(int_of(&n_val)?).map_err(|_| decode("negative payload length"))?;
+                    let bytes = cur.read(n)?.to_vec();
+                    payload_bytes = Some(bytes.clone());
+                    env.insert("payload", Value::bytes(bytes));
+                }
+                _ => return Err(decode("frame payload must be rest or bytes(n)")),
+            }
+            continue;
+        }
+        let is_length = matches!(item, BlockItem::Field(wf) if wf.name == "length");
+        let is_id = matches!(item, BlockItem::Field(wf) if wf.name == "id");
+        let got = decode_block_items(std::slice::from_ref(item), &mut cur, resolved, &env, None)?;
+        for (k, v) in got.iter() {
+            env.insert(k, v.clone());
+        }
+        if is_length {
+            let v = env.get("length").ok_or_else(|| decode("frame length missing"))?;
+            length_val = Some(int_of(v)?);
+            pos_after_length = Some(cur.pos);
+        }
+        if is_id {
+            let v = env.get("id").ok_or_else(|| decode("frame id missing"))?;
+            id_val = Some(int_of(v)?);
+        }
+    }
+    let packet_id = id_val.ok_or_else(|| decode("frame has no id"))?;
+    let payload = payload_bytes.ok_or_else(|| decode("frame has no payload"))?;
     for (route, pkt) in &resolved.routes {
         if route.state == state && route.direction == direction && route.packet_id == packet_id {
-            let fields = decode_packet(resolved, &pkt.name, payload, false)?;
+            let fields = decode_packet(resolved, &pkt.name, &payload, false)?;
             let mut out = Env::new();
             out.insert("packet", Value::str(pkt.name.clone()));
             out.insert("fields", Value::map(fields));

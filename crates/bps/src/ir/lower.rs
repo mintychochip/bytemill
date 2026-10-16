@@ -58,7 +58,7 @@ pub fn lower(resolved: &ResolvedSchema) -> BpsResult<IrSchema> {
 fn install_builtins(ir: &mut IrSchema) {
     let scalar = |class| TypeDef::Scalar(class);
     ir.types.insert("u8", scalar(Storage::U8));
-    ir.types.insert("f32be", scalar(Storage::F64));
+    ir.types.insert("f32be", scalar(Storage::F32));
     ir.types.insert("f64be", scalar(Storage::F64));
     ir.types.insert("bytes", TypeDef::Scalar(Storage::Bytes));
     ir.types.insert("rest", TypeDef::Scalar(Storage::Bytes));
@@ -152,8 +152,13 @@ fn lower_scalar(enc: &EncodingDecl, resolved: &ResolvedSchema, ir: &mut IrSchema
         )));
     };
     let params: Vec<String> = enc.params.iter().map(|p| p.name.clone()).collect();
-    let decode_body = lower_items(&block.items, true, resolved, &enc.name)?;
-    let encode_body = lower_items(&block.items, false, resolved, &enc.name)?;
+    let mut decode_cx = RecCx::with_params(&params);
+    let decode_body = lower_items(&block.items, true, resolved, &enc.name, ir, &mut decode_cx)?;
+    if let Some(yield_expr) = &enc.yield_expr {
+        decode_cx.check(yield_expr, &enc.name)?;
+    }
+    let mut encode_cx = RecCx::with_params(&params);
+    let encode_body = lower_items(&block.items, false, resolved, &enc.name, ir, &mut encode_cx)?;
     ir.decode.insert(
         &enc.name,
         Proc {
@@ -180,26 +185,268 @@ fn install_record(
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
 ) -> BpsResult<()> {
-    let items = expand_spreads(items, resolved)?;
-    let fields = collect_fields(name, &items, resolved, ir)?;
+    let items = disambiguate_nested(&expand_spreads(items, resolved)?);
+    // The collect walk and both procedure walks visit bindings in the same
+    // order, so each fresh renamer assigns identical final names.
+    let mut collecter = Renamer::default();
+    let fields = collect_fields(name, &items, resolved, ir, &mut collecter)?;
     ir.types.insert(name, TypeDef::Record { fields });
+    let decode_body = lower_items(
+        &items,
+        true,
+        resolved,
+        name,
+        ir,
+        &mut RecCx::with_params(params),
+    )?;
     ir.decode.insert(
         name,
         Proc {
             params: params.to_vec(),
-            body: lower_items(&items, true, resolved, name)?,
+            body: decode_body,
             result: None,
         },
     );
+    let encode_body = lower_items(
+        &items,
+        false,
+        resolved,
+        name,
+        ir,
+        &mut RecCx::with_params(params),
+    )?;
     ir.encode.insert(
         name,
         Proc {
             params: params.to_vec(),
-            body: lower_items(&items, false, resolved, name)?,
+            body: encode_body,
             result: None,
         },
     );
     Ok(())
+}
+
+/// Gives a block or `match` field the name `<name>_<n>` when an earlier field
+/// of its namespace already has its name, so the nested type keys
+/// (`<owner>_<name>_block`, `<owner>_<name>`) stay distinct: sibling groups
+/// may each declare their own `value: { ... }`. The renamer would rename them
+/// anyway; renaming first keeps their types apart.
+fn disambiguate_nested(items: &[BlockItem]) -> Vec<BlockItem> {
+    disambiguate_in(items, &mut std::collections::HashSet::new())
+}
+
+fn disambiguate_in(
+    items: &[BlockItem],
+    seen: &mut std::collections::HashSet<String>,
+) -> Vec<BlockItem> {
+    items
+        .iter()
+        .map(|item| match item {
+            BlockItem::Field(wf) => {
+                let mut wf = (**wf).clone();
+                if matches!(wf.type_ref, FieldType::Block(_) | FieldType::Match(_))
+                    && seen.contains(&wf.name)
+                {
+                    let mut n = 2;
+                    while seen.contains(&format!("{}_{n}", wf.name)) {
+                        n += 1;
+                    }
+                    wf.name = format!("{}_{n}", wf.name);
+                }
+                seen.insert(wf.name.clone());
+                wf.type_ref = disambiguate_type(&wf.type_ref);
+                BlockItem::Field(Box::new(wf))
+            }
+            BlockItem::Computed { name, .. } => {
+                seen.insert(name.clone());
+                item.clone()
+            }
+            BlockItem::Group { cond, items } => BlockItem::Group {
+                cond: cond.clone(),
+                items: disambiguate_in(items, seen),
+            },
+            // Statement-match arms splice into this namespace.
+            BlockItem::MatchStmt(mt) => {
+                let mut mt = mt.clone();
+                for arm in &mut mt.arms {
+                    if let Some(FieldType::Block(block)) = &mut arm.type_ref {
+                        block.items = disambiguate_in(&block.items, seen);
+                    }
+                }
+                BlockItem::MatchStmt(mt)
+            }
+            BlockItem::Require(_) | BlockItem::Spread { .. } => item.clone(),
+        })
+        .collect()
+}
+
+/// Nested blocks and arm blocks are namespaces of their own.
+fn disambiguate_type(ty: &FieldType) -> FieldType {
+    match ty {
+        FieldType::Ref(_) => ty.clone(),
+        FieldType::Block(block) => {
+            let mut block = block.clone();
+            block.items = disambiguate_nested(&block.items);
+            FieldType::Block(block)
+        }
+        FieldType::Match(mt) => {
+            let mut mt = mt.clone();
+            for arm in &mut mt.arms {
+                if let Some(t) = &arm.type_ref {
+                    arm.type_ref = Some(disambiguate_type(t));
+                }
+            }
+            FieldType::Match(mt)
+        }
+    }
+}
+
+/// Threaded state for lowering one record namespace.
+///
+/// `renamer` gives every binding its final field name: the first binding of a
+/// name keeps it, each later binding with a different type becomes `<name>_2`,
+/// `<name>_3`, …. `scopes` is the lexical namespace stack for the
+/// renamed-read check; group and match arms share the top scope (their
+/// bindings leak into the interpreter's environment), nested blocks and
+/// repeat elements push a fresh one (the interpreter clones there).
+struct RecCx {
+    renamer: Renamer,
+    scopes: Vec<RecScope>,
+}
+
+impl RecCx {
+    fn fresh() -> Self {
+        Self {
+            renamer: Renamer::default(),
+            scopes: vec![RecScope::default()],
+        }
+    }
+
+    /// Parameters (and the encode `value`) are bound, never renamed.
+    fn with_params(params: &[String]) -> Self {
+        let mut cx = Self::fresh();
+        for param in params {
+            cx.bind(param, param);
+        }
+        cx.bind("value", "value");
+        cx
+    }
+
+    /// Storage classes of the names bound so far, for the interval rule.
+    fn classes(&self, ir: &IrSchema) -> HashMap<String, Storage> {
+        self.renamer.classes(ir)
+    }
+
+    fn bind(&mut self, name: &str, final_name: &str) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.bound.insert(name.to_string(), final_name.to_string());
+        }
+    }
+
+    fn check(&self, expr: &Expr, owner: &str) -> BpsResult<()> {
+        check_no_renamed_read(expr, &self.scopes, owner)
+    }
+}
+
+/// First binding of a name keeps it; later bindings with a different type
+/// are renamed `<name>_2`, `<name>_3`, …. Same-type rebindings keep the name.
+#[derive(Default)]
+struct Renamer {
+    seen: HashMap<String, Ty>,
+}
+
+impl Renamer {
+    fn dst_for(&mut self, name: &str, ty: &Ty) -> String {
+        match self.seen.get(name) {
+            None => {
+                self.seen.insert(name.to_string(), ty.clone());
+                name.to_string()
+            }
+            Some(prev) if prev == ty => name.to_string(),
+            _ => {
+                let mut n = 2u32;
+                loop {
+                    let cand = format!("{name}_{n}");
+                    match self.seen.get(&cand) {
+                        None => {
+                            self.seen.insert(cand.clone(), ty.clone());
+                            return cand;
+                        }
+                        Some(prev) if prev == ty => return cand,
+                        _ => n += 1,
+                    }
+                }
+            }
+        }
+    }
+
+    fn classes(&self, ir: &IrSchema) -> HashMap<String, Storage> {
+        let mut out = HashMap::new();
+        for (name, ty) in &self.seen {
+            if let Some(class) = ty_storage(ty, ir) {
+                out.insert(name.clone(), class);
+            }
+        }
+        out
+    }
+}
+
+/// One lexical namespace: original names bound so far and their final names.
+/// A read of a name whose final differs from the original would mean
+/// "whichever binding ran last", so it is a lowering error.
+#[derive(Default)]
+struct RecScope {
+    bound: HashMap<String, String>,
+}
+
+fn check_no_renamed_read(expr: &Expr, scopes: &[RecScope], owner: &str) -> BpsResult<()> {
+    let mut bad: Option<(String, String)> = None;
+    read_idents(expr, &mut |name| {
+        if bad.is_some() {
+            return;
+        }
+        for scope in scopes.iter().rev() {
+            if let Some(final_name) = scope.bound.get(name) {
+                if final_name != name {
+                    bad = Some((name.to_string(), final_name.clone()));
+                }
+                break;
+            }
+        }
+    });
+    if let Some((name, final_name)) = bad {
+        return Err(emit(format!(
+            "{owner}: `{name}` was renamed to `{final_name}`; reading `{name}` would mean whichever binding ran last"
+        )));
+    }
+    Ok(())
+}
+
+fn read_idents(expr: &Expr, f: &mut impl FnMut(&str)) {
+    match expr {
+        Expr::Ident(name) => f(name),
+        Expr::Path(dotted) => {
+            if let Some(first) = dotted.split('.').next() {
+                f(first);
+            }
+        }
+        Expr::Int(_) | Expr::Bool(_) | Expr::Str(_) => {}
+        Expr::Unop(_, inner) => read_idents(inner, f),
+        Expr::Binop(_, left, right) => {
+            read_idents(left, f);
+            read_idents(right, f);
+        }
+        Expr::Ternary(cond, yes, no) => {
+            read_idents(cond, f);
+            read_idents(yes, f);
+            read_idents(no, f);
+        }
+        Expr::Call(_, args) => {
+            for arg in args {
+                read_idents(arg, f);
+            }
+        }
+    }
 }
 
 /// `decode` selects decode statements. Encode drops `require` and uses each field's `= expr`.
@@ -208,32 +455,56 @@ fn lower_items(
     decode: bool,
     resolved: &ResolvedSchema,
     owner: &str,
+    ir: &IrSchema,
+    cx: &mut RecCx,
 ) -> BpsResult<Vec<Stmt>> {
     let mut out = Vec::new();
     for item in items {
         match item {
             BlockItem::Require(expr) => {
                 if decode {
+                    cx.check(expr, owner)?;
                     out.push(Stmt::Require(expr.clone()));
                 }
             }
             BlockItem::Computed { name, expr } => {
+                cx.check(expr, owner)?;
+                let ty = Ty::Scalar(storage_of(expr, &cx.classes(ir)));
+                let final_name = cx.renamer.dst_for(name, &ty);
+                cx.bind(name, &final_name);
                 out.push(Stmt::Let {
-                    name: name.clone(),
+                    name: final_name,
                     expr: expr.clone(),
                 });
             }
             BlockItem::Field(wf) => {
+                if let Some(cond) = &wf.if_expr {
+                    cx.check(cond, owner)?;
+                }
+                let ty = field_ty(owner, wf, ir);
+                let final_name = cx.renamer.dst_for(&wf.name, &ty);
+                cx.bind(&wf.name, &final_name);
                 let inner = if wf.repeat.is_some() {
-                    vec![repeat_stmt(wf, decode, resolved, owner)?]
+                    vec![repeat_stmt(
+                        wf,
+                        &final_name,
+                        decode,
+                        resolved,
+                        owner,
+                        ir,
+                        cx,
+                    )?]
                 } else if decode {
-                    decode_field(&wf.name, &wf.type_ref, resolved, owner)?
+                    decode_field(&final_name, &wf.type_ref, resolved, owner, ir, cx)?
                 } else {
-                    let value = wf
-                        .encode_expr
-                        .clone()
-                        .unwrap_or_else(|| Expr::Ident(wf.name.clone()));
-                    encode_field(&wf.name, &wf.type_ref, value, resolved, owner)?
+                    let value = match &wf.encode_expr {
+                        Some(e) => {
+                            cx.check(e, owner)?;
+                            e.clone()
+                        }
+                        None => Expr::Ident(final_name.clone()),
+                    };
+                    encode_field(&final_name, &wf.type_ref, value, resolved, owner, ir, cx)?
                 };
                 if let Some(cond) = &wf.if_expr {
                     out.push(Stmt::If {
@@ -247,7 +518,10 @@ fn lower_items(
                 }
             }
             BlockItem::Group { cond, items } => {
-                let inner = lower_items(items, decode, resolved, owner)?;
+                if let Some(cond) = cond {
+                    cx.check(cond, owner)?;
+                }
+                let inner = lower_items(items, decode, resolved, owner, ir, cx)?;
                 if let Some(cond) = cond {
                     out.push(Stmt::If {
                         cond: cond.clone(),
@@ -259,7 +533,10 @@ fn lower_items(
                     out.extend(inner);
                 }
             }
-            BlockItem::MatchStmt(m) => out.push(stmt_match(m, decode, resolved, owner)?),
+            BlockItem::MatchStmt(m) => {
+                cx.check(&m.tag_expr, owner)?;
+                out.push(stmt_match(m, decode, resolved, owner, ir, cx)?);
+            }
             BlockItem::Spread { .. } => {
                 return Err(emit(format!("{owner}: spread survived expansion")));
             }
@@ -273,14 +550,29 @@ fn decode_field(
     ty: &FieldType,
     resolved: &ResolvedSchema,
     owner: &str,
+    ir: &IrSchema,
+    cx: &mut RecCx,
 ) -> BpsResult<Vec<Stmt>> {
     match ty {
-        FieldType::Ref(r) => ref_decode(dst, r, resolved, owner),
-        FieldType::Match(mt) => Ok(vec![typed_match(dst, mt, true, resolved, owner)?]),
-        FieldType::Block(block) => Ok(vec![Stmt::Block {
-            body: lower_items(&block.items, true, resolved, owner)?,
-            dst: dst.to_string(),
-        }]),
+        FieldType::Ref(r) => ref_decode(dst, r, resolved, owner, cx),
+        FieldType::Match(mt) => {
+            cx.check(&mt.tag_expr, owner)?;
+            Ok(vec![typed_match(dst, mt, true, resolved, owner, ir, cx)?])
+        }
+        FieldType::Block(block) => {
+            // A nested record: its own renamer, but parent scopes stay
+            // visible (nested bodies read parent fields).
+            cx.scopes.push(RecScope::default());
+            let mut parent = Renamer::default();
+            std::mem::swap(&mut cx.renamer, &mut parent);
+            let body = lower_items(&block.items, true, resolved, owner, ir, cx);
+            std::mem::swap(&mut cx.renamer, &mut parent);
+            cx.scopes.pop();
+            Ok(vec![Stmt::Block {
+                body: body?,
+                dst: dst.to_string(),
+            }])
+        }
     }
 }
 
@@ -289,12 +581,17 @@ fn ref_decode(
     r: &TypeRef,
     resolved: &ResolvedSchema,
     owner: &str,
+    cx: &RecCx,
 ) -> BpsResult<Vec<Stmt>> {
     check_transform(r, owner)?;
+    let args = call_args(resolved, r, owner)?;
+    for arg in &args {
+        cx.check(arg, owner)?;
+    }
     let mut stmts = vec![Stmt::CallDecode {
         dst: dst.to_string(),
         callee: TypeId(r.name.clone()),
-        args: call_args(resolved, r, owner)?,
+        args,
     }];
     if r.transforms.iter().any(|t| t == "utf8") {
         stmts.push(Stmt::Utf8 {
@@ -311,14 +608,29 @@ fn encode_field(
     value: Expr,
     resolved: &ResolvedSchema,
     owner: &str,
+    ir: &IrSchema,
+    cx: &mut RecCx,
 ) -> BpsResult<Vec<Stmt>> {
     match ty {
-        FieldType::Ref(r) => ref_encode(name, r, value, resolved, owner),
-        FieldType::Match(mt) => Ok(vec![typed_match(name, mt, false, resolved, owner)?]),
-        FieldType::Block(block) => Ok(vec![Stmt::Block {
-            body: lower_items(&block.items, false, resolved, owner)?,
-            dst: name.to_string(),
-        }]),
+        FieldType::Ref(r) => ref_encode(name, r, value, resolved, owner, cx),
+        FieldType::Match(mt) => {
+            cx.check(&mt.tag_expr, owner)?;
+            Ok(vec![typed_match(name, mt, false, resolved, owner, ir, cx)?])
+        }
+        FieldType::Block(block) => {
+            // A nested record: its own renamer, but parent scopes stay
+            // visible (nested bodies read parent fields).
+            cx.scopes.push(RecScope::default());
+            let mut parent = Renamer::default();
+            std::mem::swap(&mut cx.renamer, &mut parent);
+            let body = lower_items(&block.items, false, resolved, owner, ir, cx);
+            std::mem::swap(&mut cx.renamer, &mut parent);
+            cx.scopes.pop();
+            Ok(vec![Stmt::Block {
+                body: body?,
+                dst: name.to_string(),
+            }])
+        }
     }
 }
 
@@ -328,8 +640,15 @@ fn ref_encode(
     value: Expr,
     resolved: &ResolvedSchema,
     owner: &str,
+    cx: &RecCx,
 ) -> BpsResult<Vec<Stmt>> {
     check_transform(r, owner)?;
+    // `value` was already checked by the caller (explicit `= expr`); the
+    // default `Ident(field)` it substitutes needs no check.
+    let args = call_args(resolved, r, owner)?;
+    for arg in &args {
+        cx.check(arg, owner)?;
+    }
     Ok(vec![
         Stmt::Let {
             name: name.to_string(),
@@ -337,7 +656,7 @@ fn ref_encode(
         },
         Stmt::CallEncode {
             callee: TypeId(r.name.clone()),
-            args: call_args(resolved, r, owner)?,
+            args,
             value: Expr::Ident(name.to_string()),
         },
     ])
@@ -723,31 +1042,35 @@ fn lower_frames(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
 }
 fn repeat_stmt(
     wf: &WireField,
+    dst: &str,
     decode: bool,
     resolved: &ResolvedSchema,
     owner: &str,
+    ir: &IrSchema,
+    cx: &mut RecCx,
 ) -> BpsResult<Stmt> {
     let rep = wf.repeat.as_ref().unwrap();
     let elem = if decode {
-        decode_field("__elem", &wf.type_ref, resolved, owner)?
+        decode_field("__elem", &wf.type_ref, resolved, owner, ir, cx)?
     } else {
-        encode_element(&wf.type_ref, "__elem", resolved, owner)?
+        encode_element(&wf.type_ref, "__elem", resolved, owner, ir, cx)?
     };
     let expr = rep.expr.clone().unwrap_or(Expr::Int(0));
+    cx.check(&expr, owner)?;
     Ok(match rep.mode {
         RepeatMode::Count => Stmt::RepeatCount {
             n: expr,
             elem,
-            dst: wf.name.clone(),
+            dst: dst.to_string(),
         },
         RepeatMode::Until => Stmt::RepeatUntil {
             term: expr,
             elem,
-            dst: wf.name.clone(),
+            dst: dst.to_string(),
         },
         RepeatMode::UntilEnd => Stmt::RepeatUntilEnd {
             elem,
-            dst: wf.name.clone(),
+            dst: dst.to_string(),
         },
     })
 }
@@ -757,18 +1080,37 @@ fn encode_element(
     dst: &str,
     resolved: &ResolvedSchema,
     owner: &str,
+    ir: &IrSchema,
+    cx: &mut RecCx,
 ) -> BpsResult<Vec<Stmt>> {
     match ty {
-        FieldType::Ref(r) => Ok(vec![Stmt::CallEncode {
-            callee: TypeId(r.name.clone()),
-            args: call_args(resolved, r, owner)?,
-            value: Expr::Ident(dst.to_string()),
-        }]),
-        FieldType::Block(block) => Ok(vec![Stmt::Block {
-            body: lower_items(&block.items, false, resolved, owner)?,
-            dst: dst.to_string(),
-        }]),
-        FieldType::Match(mt) => Ok(vec![typed_match(dst, mt, false, resolved, owner)?]),
+        FieldType::Ref(r) => {
+            let args = call_args(resolved, r, owner)?;
+            for arg in &args {
+                cx.check(arg, owner)?;
+            }
+            Ok(vec![Stmt::CallEncode {
+                callee: TypeId(r.name.clone()),
+                args,
+                value: Expr::Ident(dst.to_string()),
+            }])
+        }
+        FieldType::Block(block) => {
+            cx.scopes.push(RecScope::default());
+            let mut parent = Renamer::default();
+            std::mem::swap(&mut cx.renamer, &mut parent);
+            let body = lower_items(&block.items, false, resolved, owner, ir, cx);
+            std::mem::swap(&mut cx.renamer, &mut parent);
+            cx.scopes.pop();
+            Ok(vec![Stmt::Block {
+                body: body?,
+                dst: dst.to_string(),
+            }])
+        }
+        FieldType::Match(mt) => {
+            cx.check(&mt.tag_expr, owner)?;
+            Ok(vec![typed_match(dst, mt, false, resolved, owner, ir, cx)?])
+        }
     }
 }
 
@@ -778,14 +1120,16 @@ fn typed_match(
     decode: bool,
     resolved: &ResolvedSchema,
     owner: &str,
+    ir: &IrSchema,
+    cx: &mut RecCx,
 ) -> BpsResult<Stmt> {
     let mut arms = Vec::new();
     let mut default = None;
     for arm in &mt.arms {
         let body = match &arm.type_ref {
             None => Vec::new(),
-            Some(ty) if decode => decode_field(dst, ty, resolved, owner)?,
-            Some(ty) => encode_element(ty, dst, resolved, owner)?,
+            Some(ty) if decode => decode_field(dst, ty, resolved, owner, ir, cx)?,
+            Some(ty) => encode_element(ty, dst, resolved, owner, ir, cx)?,
         };
         match arm_tags(arm)? {
             None => default = Some(body),
@@ -806,12 +1150,18 @@ fn stmt_match(
     decode: bool,
     resolved: &ResolvedSchema,
     owner: &str,
+    ir: &IrSchema,
+    cx: &mut RecCx,
 ) -> BpsResult<Stmt> {
     let mut arms = Vec::new();
     let mut default = None;
     for arm in &mt.arms {
         let body = match &arm.type_ref {
-            Some(FieldType::Block(block)) => lower_items(&block.items, decode, resolved, owner)?,
+            // Arms share the record namespace: their bindings leak into the
+            // interpreter's environment like group bindings do.
+            Some(FieldType::Block(block)) => {
+                lower_items(&block.items, decode, resolved, owner, ir, cx)?
+            }
             None => Vec::new(),
             Some(_) => {
                 return Err(emit(format!(
@@ -831,16 +1181,18 @@ fn stmt_match(
     })
 }
 
+/// Every tag of an arm, once each: `tag` is the first of `tags` when both
+/// are set.
 fn arm_tags(arm: &AstArm) -> BpsResult<Option<Vec<i128>>> {
     if arm.tag.is_none() && arm.tags.is_empty() {
         return Ok(None);
     }
     let mut tags = Vec::new();
-    if let Some(tag) = &arm.tag {
-        tags.push(tag_int(tag)?);
-    }
-    for tag in &arm.tags {
-        tags.push(tag_int(tag)?);
+    for tag in arm.tag.iter().chain(&arm.tags) {
+        let v = tag_int(tag)?;
+        if !tags.contains(&v) {
+            tags.push(v);
+        }
     }
     Ok(Some(tags))
 }
@@ -975,37 +1327,47 @@ fn collect_fields(
     items: &[BlockItem],
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
+    renamer: &mut Renamer,
 ) -> BpsResult<Vec<Field>> {
     let mut fields = Vec::new();
     for item in items {
         match item {
             BlockItem::Require(_) | BlockItem::Spread { .. } => {}
-            BlockItem::Computed { name, expr } => add_field(
-                owner,
-                &mut fields,
-                Field {
-                    name: name.clone(),
-                    ty: Ty::Scalar(storage_of(expr, &HashMap::new())),
-                    optional: false,
-                },
-            )?,
+            BlockItem::Computed { name, expr } => {
+                let ty = Ty::Scalar(storage_of(expr, &renamer.classes(ir)));
+                add_field(
+                    owner,
+                    &mut fields,
+                    renamer,
+                    Field {
+                        name: name.clone(),
+                        ty,
+                        optional: false,
+                    },
+                )?;
+            }
             BlockItem::Field(wf) => {
-                add_field(owner, &mut fields, field_desc(owner, wf, false, resolved, ir)?)?;
+                add_field(
+                    owner,
+                    &mut fields,
+                    renamer,
+                    field_desc(owner, wf, false, resolved, ir)?,
+                )?;
             }
             BlockItem::Group { cond, items } => {
-                let mut inner = collect_fields(owner, items, resolved, ir)?;
+                let mut inner = collect_fields(owner, items, resolved, ir, renamer)?;
                 if cond.is_some() {
                     for field in &mut inner {
                         field.optional = true;
                     }
                 }
                 for field in inner {
-                    add_field(owner, &mut fields, field)?;
+                    add_field(owner, &mut fields, renamer, field)?;
                 }
             }
             BlockItem::MatchStmt(mt) => {
-                for field in match_stmt_fields(owner, mt, resolved, ir)? {
-                    add_field(owner, &mut fields, field)?;
+                for field in match_stmt_fields(owner, mt, resolved, ir, renamer)? {
+                    add_field(owner, &mut fields, renamer, field)?;
                 }
             }
         }
@@ -1013,16 +1375,26 @@ fn collect_fields(
     Ok(fields)
 }
 
-fn add_field(owner: &str, fields: &mut Vec<Field>, field: Field) -> BpsResult<()> {
+/// Pushes `field`, renaming it to `<name>_<n>` when an earlier binding of
+/// `field.name` has a different type. Same-type rebindings keep the name and
+/// merge optionality. There is no `__any`: every field keeps one type.
+fn add_field(
+    owner: &str,
+    fields: &mut Vec<Field>,
+    renamer: &mut Renamer,
+    field: Field,
+) -> BpsResult<()> {
     let _ = owner;
-    if let Some(existing) = fields.iter_mut().find(|have| have.name == field.name) {
-        if existing.ty != field.ty {
-            existing.ty = Ty::Named(TypeId("__any".into()));
-        }
+    let final_name = renamer.dst_for(&field.name, &field.ty);
+    if let Some(existing) = fields.iter_mut().find(|have| have.name == final_name) {
         existing.optional = existing.optional && field.optional;
         return Ok(());
     }
-    fields.push(field);
+    fields.push(Field {
+        name: final_name,
+        ty: field.ty,
+        optional: field.optional,
+    });
     Ok(())
 }
 
@@ -1033,26 +1405,22 @@ fn field_desc(
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
 ) -> BpsResult<Field> {
-    let ty = match &wf.type_ref {
-        FieldType::Ref(r) => ty_of(&r.name, ir),
+    match &wf.type_ref {
+        FieldType::Ref(_) => {}
         FieldType::Match(mt) => {
             let id = format!("{owner}_{}", wf.name);
             let arms = sum_arms(&id, mt, resolved, ir)?;
             ir.types.insert(&id, TypeDef::Sum { arms });
-            Ty::Named(TypeId(id))
         }
         FieldType::Block(block) => {
             let id = format!("{owner}_{}_block", wf.name);
-            let fields = collect_fields(&id, &block.items, resolved, ir)?;
+            // A nested record is its own namespace.
+            let mut nested = Renamer::default();
+            let fields = collect_fields(&id, &block.items, resolved, ir, &mut nested)?;
             ir.types.insert(&id, TypeDef::Record { fields });
-            Ty::Named(TypeId(id))
         }
     };
-    let ty = if wf.repeat.is_some() {
-        Ty::List(Box::new(ty))
-    } else {
-        ty
-    };
+    let ty = field_ty(owner, wf, ir);
     Ok(Field {
         name: wf.name.clone(),
         ty,
@@ -1060,11 +1428,39 @@ fn field_desc(
     })
 }
 
+/// The record-field type of `wf`, without creating nested types. Must agree
+/// with `field_desc`; the procedure walks use it to replay the same renames.
+fn field_ty(owner: &str, wf: &WireField, ir: &IrSchema) -> Ty {
+    let ty = match &wf.type_ref {
+        FieldType::Ref(r) => ty_of(&r.name, ir),
+        FieldType::Match(_) => Ty::Named(TypeId(format!("{owner}_{}", wf.name))),
+        FieldType::Block(_) => Ty::Named(TypeId(format!("{owner}_{}_block", wf.name))),
+    };
+    if wf.repeat.is_some() {
+        Ty::List(Box::new(ty))
+    } else {
+        ty
+    }
+}
+
 fn ty_of(name: &str, ir: &IrSchema) -> Ty {
     match ir.types.get(name) {
         Some(TypeDef::Scalar(class)) => Ty::Scalar(*class),
         Some(TypeDef::String) => Ty::Scalar(Storage::Str),
         _ => Ty::Named(TypeId(name.to_string())),
+    }
+}
+
+/// Storage class of a field type, for the interval rule.
+fn ty_storage(ty: &Ty, ir: &IrSchema) -> Option<Storage> {
+    match ty {
+        Ty::Scalar(class) => Some(*class),
+        Ty::Named(id) => match ir.types.get(&id.0) {
+            Some(TypeDef::Scalar(class)) => Some(*class),
+            Some(TypeDef::Enum { base, .. }) => Some(*base),
+            _ => None,
+        },
+        Ty::List(_) | Ty::Optional(_) => None,
     }
 }
 
@@ -1081,7 +1477,8 @@ fn sum_arms(
             Some(FieldType::Ref(r)) => ty_of(&r.name, ir),
             Some(FieldType::Block(block)) => {
                 let id = format!("{owner}_arm{i}");
-                let fields = collect_fields(&id, &block.items, resolved, ir)?;
+                let mut nested = Renamer::default();
+                let fields = collect_fields(&id, &block.items, resolved, ir, &mut nested)?;
                 ir.types.insert(&id, TypeDef::Record { fields });
                 Ty::Named(TypeId(id))
             }
@@ -1106,6 +1503,7 @@ fn match_stmt_fields(
     mt: &crate::ast::MatchType,
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
+    renamer: &mut Renamer,
 ) -> BpsResult<Vec<Field>> {
     let mut per_arm = Vec::new();
     for arm in &mt.arms {
@@ -1121,25 +1519,27 @@ fn match_stmt_fields(
                 )));
             }
         };
-        per_arm.push(collect_fields(owner, items, resolved, ir)?);
+        let mut arm_renamer = Renamer::default();
+        per_arm.push(collect_fields(
+            owner,
+            items,
+            resolved,
+            ir,
+            &mut arm_renamer,
+        )?);
     }
     let mut order = Vec::new();
     let mut seen: HashMap<String, (Ty, usize, bool)> = HashMap::new();
     for arm in &per_arm {
         let mut in_arm = HashMap::new();
         for field in arm {
-            if let Some((prev, _, _)) = seen.get(&field.name)
-                && prev != &field.ty
+            // Same-name bindings with different types rename, as in groups.
+            let final_name = renamer.dst_for(&field.name, &field.ty);
+            in_arm.insert(final_name.clone(), field.optional);
+            if let std::collections::hash_map::Entry::Vacant(slot) = seen.entry(final_name.clone())
             {
-                return Err(emit(format!(
-                    "{owner}: match arms disagree on {}",
-                    field.name
-                )));
-            }
-            in_arm.insert(field.name.clone(), field.optional);
-            if !seen.contains_key(&field.name) {
-                order.push(field.name.clone());
-                seen.insert(field.name.clone(), (field.ty.clone(), 0, field.optional));
+                order.push(final_name);
+                slot.insert((field.ty.clone(), 0, field.optional));
             }
         }
         for (name, optional) in in_arm {

@@ -237,9 +237,24 @@ packet tagged { tag: u8  value: match tag { 1 => u8  _ => u16be } }
     };
     assert_eq!(map.get("value"), Some(&Value::Int(5)));
 
+    // Same-name bindings with different types rename instead of erroring:
+    // the first keeps `a`, the later conflicting one becomes `a_2`.
     let bad = repo("schemas/std/integers.bps")
         + "packet bad { kind: u8  match kind { 1 => { a: u8 }  2 => { a: u16be } } }\n";
-    assert!(lower(&bps::analyze(&bps::parse(&bad).unwrap()).unwrap()).is_err());
+    let bad_ir = lower(&bps::analyze(&bps::parse(&bad).unwrap()).unwrap()).unwrap();
+    let fields = match bad_ir.types.get("bad") {
+        Some(TypeDef::Record { fields }) => fields.clone(),
+        other => panic!("bad is not a record: {other:?}"),
+    };
+    assert_eq!(
+        fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
+        vec!["kind", "a", "a_2"]
+    );
+    assert!(fields.iter().all(|f| f.name == "kind" || f.optional));
+    let one = exec_decode(&bad_ir, "bad", &[], &[1, 5]).unwrap();
+    let Value::Map(map) = one else { panic!("map") };
+    assert_eq!(map.get("a"), Some(&Value::Int(5)));
+    assert_eq!(map.get("a_2"), None);
 
     assert!(matches!(ir.types.get("intent"), Some(TypeDef::Enum { .. })));
     assert_eq!(

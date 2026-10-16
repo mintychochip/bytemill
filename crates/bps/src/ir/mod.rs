@@ -5,7 +5,10 @@
 mod exec;
 mod lower;
 mod schema;
+pub mod typed;
 mod width;
+
+pub use typed::typed;
 
 pub use exec::{exec_decode, exec_decode_frame, exec_encode, exec_encode_frame};
 pub use lower::lower;

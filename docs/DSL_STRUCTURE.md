@@ -90,6 +90,14 @@ protocol minecraft @ v26_3 {
 A packet's meaning depends on **state × direction × id**, which the descriptor model cannot
 express.
 
+The frame block is the framing: `bpsc decode --state` reads it, so a second
+game is a second frame shape, not a code change. `length`, `id`, and
+`payload` are ordinary typed fields with one rule: `payload: rest` pairs
+with a length that counts everything after the length field (id bytes
+included, the Minecraft shape above); `payload: bytes(n)` reads exactly `n`
+bytes (Hytale: `length: i32le`, `id: i32le`, `payload: bytes(length)` — the
+length counts the payload only).
+
 ## Why not `.proto`?
 
 Protobuf fixes wire types per field number. Minecraft 26.3 uses VarInt packet IDs, state-scoped

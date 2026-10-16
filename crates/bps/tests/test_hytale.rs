@@ -211,3 +211,77 @@ fn connect_packs_the_variable_tail_in_serialize_order() {
     assert_eq!(source.get("port"), Some(&Value::Int(25565)));
     assert_eq!(source.get("host"), Some(&Value::str("localhost")));
 }
+
+#[test]
+fn framed_ping_reads_the_schema_frame_not_a_minecraft_varint() {
+    use bps::interp::decode_frame_payload;
+    let resolved = load();
+    // Frame from PacketIO.writeFramedPacket: i32le payload length (29, id NOT
+    // included), i32le packet id (2), then the 29-byte ping payload with the
+    // instant slot absent.
+    let mut payload = vec![0x00];
+    payload.extend(7i32.to_le_bytes());
+    payload.extend([0u8; 12]);
+    payload.extend(1i32.to_le_bytes());
+    payload.extend(2i32.to_le_bytes());
+    payload.extend(3i32.to_le_bytes());
+    assert_eq!(payload.len(), 29);
+    let mut frame = Vec::new();
+    frame.extend(29i32.to_le_bytes());
+    frame.extend(2i32.to_le_bytes());
+    frame.extend(&payload);
+    let (pid, out) = decode_frame_payload(&resolved, "default", "clientbound", &frame).unwrap();
+    assert_eq!(pid, 2);
+    assert_eq!(out.get("packet"), Some(&Value::str("ping")));
+    let fields = match out.get("fields") {
+        Some(Value::Map(m)) => m,
+        _ => panic!("expected fields"),
+    };
+    assert_eq!(fields.get("id"), Some(&Value::Int(7)));
+    assert_eq!(fields.get("time_present"), Some(&Value::Bool(false)));
+    assert_eq!(fields.get("last_ping_value_tick"), Some(&Value::Int(3)));
+}
+
+#[test]
+fn frame_lookup_is_scoped_to_the_routing_protocol() {
+    use bps::interp::decode_frame_payload;
+    // Two protocols sharing the frame name `default` with different layouts.
+    // The decoder must use the frame of the protocol that routes this
+    // state and direction, not the first `default` in the schema.
+    let source = r#"
+        packet pa { x: u8 }
+        packet pb { y: u8 }
+        protocol a @ x {
+            id = 1
+            frame default {
+                length: u8
+                id: u8
+                payload: bytes(length)
+            }
+            route s1.clientbound 0x01 => pa
+        }
+        protocol b @ y {
+            id = 2
+            frame default {
+                length: u8
+                id: u8
+                payload: rest
+            }
+            route s2.clientbound 0x02 => pb
+        }
+    "#;
+    let resolved = bps::analyze(&bps::parse(source).unwrap()).unwrap();
+    // s1: bytes(length), length counts the payload only.
+    let (pid, out) = decode_frame_payload(&resolved, "s1", "clientbound", &[1, 1, 0xAA]).unwrap();
+    assert_eq!(pid, 1);
+    assert_eq!(out.get("packet"), Some(&Value::str("pa")));
+    // s2: rest, length covers id plus payload.
+    let (pid, out) = decode_frame_payload(&resolved, "s2", "clientbound", &[2, 2, 0xBB]).unwrap();
+    assert_eq!(pid, 2);
+    assert_eq!(out.get("packet"), Some(&Value::str("pb")));
+    let fields = match out.get("fields") {
+        Some(Value::Map(m)) => m,
+        _ => panic!("expected fields"),
+    };
+    assert_eq!(fields.get("y"), Some(&Value::Int(0xBB)));
+}
