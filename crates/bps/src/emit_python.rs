@@ -1,4 +1,4 @@
-//! `emit python`: a stdlib-only `bpsgen.py` printed from the typed program.
+//! `emit python`: a stdlib-only `bpsgen` package printed from the typed program.
 //!
 //! Every codec becomes typed Python: records are `@dataclasses.dataclass`
 //! classes with `decode`/`encode` methods, sums are variant dataclasses plus
@@ -6,16 +6,17 @@
 //! open enums are `enum.IntEnum` with unknown-preserving decode, and scalar
 //! or string encodings are `decode_*`/`encode_*` module functions. There is
 //! no environment, no dynamic value, no reflection, and no global state:
-//! locals of the typed program print as plain annotated variables.
+//! locals of the typed program print as plain variables, annotated only
+//! where `mypy --strict` needs it (`None`/`[]` initializers, multi-arm joins).
 //!
-//! Errors carry the offset where they surface: reads and calls print
-//! unwrapped, and each error raised by a codec body is tagged with that
-//! codec at its raise (`raise X(...).in_codec("name")`). There is no
-//! `try/except` anywhere in generated codec code. The emitted file passes
-//! `python3 -m py_compile`, `ruff check`, `ruff format --check`, and
-//! `mypy --strict`.
+//! Errors carry the offset where they surface. Each codec body wraps in
+//! `try/except BpsError`, which tags the codec path (`in_codec`) on the way
+//! out, so raises in the body are plain constructors (`raise X(...)`). The
+//! package passes `python3 -m compileall`. Categories follow
+//! [`crate::ir::typed::Program::output_stem`]: `runtime.py`, `encoding.py`,
+//! `play_clientbound.py`, `shared.py`, and so on.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -45,11 +46,10 @@ const RUNTIME: &str = r#"class BpsError(Exception):
         super().__init__(message)
         self.codecs: list[str] = []
 
-    def in_codec(self, codec: str) -> Self:
+    def in_codec(self, codec: str) -> None:
         """Record that the failure propagated through ``codec``."""
         if not self.codecs or self.codecs[-1] != codec:
             self.codecs.append(codec)
-        return self
 
     def __str__(self) -> str:
         base = super().__str__()
@@ -242,13 +242,454 @@ def _missing_(cls, value: object) -> Self | None:
     return None
 "#;
 
-/// Emit `bpsgen.py` for `resolved` into `out_dir`.
+/// Emit the `bpsgen` package for `resolved` into `out_dir`.
 pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
-    let src = emit_program(&program)?;
-    fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("bpsgen.py"), src).map_err(|e| emit(e.to_string()))?;
+    let parts = emit_program(&program)?;
+    let pkg = out_dir.join("bpsgen");
+    fs::create_dir_all(&pkg).map_err(|e| emit(e.to_string()))?;
+    let deps = stem_deps(&program);
+    let reps = collapse_cycles(&deps);
+    let mut merged: BTreeMap<String, String> = BTreeMap::new();
+    for (stem, body) in parts {
+        let rep = reps.get(&stem).cloned().unwrap_or(stem);
+        merged.entry(rep).or_default().push_str(&body);
+    }
+    let mut names: Vec<String> = merged.keys().cloned().collect();
+    names.sort();
+    for (stem, body) in &merged {
+        let mut dep_names = BTreeSet::new();
+        for (src, set) in &deps {
+            let src_rep = reps.get(src).cloned().unwrap_or_else(|| src.clone());
+            if &src_rep != stem {
+                continue;
+            }
+            for dep in set {
+                let dep_rep = reps.get(dep).cloned().unwrap_or_else(|| dep.clone());
+                if &dep_rep != stem && merged.contains_key(&dep_rep) {
+                    dep_names.insert(dep_rep);
+                }
+            }
+        }
+        if stem != "runtime" && merged.contains_key("runtime") {
+            dep_names.insert("runtime".to_string());
+        }
+        let dep_names: Vec<String> = dep_names.into_iter().collect();
+        let src = format!(
+            "{}{}{}",
+            py_preamble(stem, body, &dep_names),
+            body.trim_end_matches('\n'),
+            py_all(body)
+        );
+        fs::write(pkg.join(format!("{stem}.py")), src).map_err(|e| emit(e.to_string()))?;
+    }
+    let mut init =
+        String::from("\"\"\"Generated BPS codecs, one module per route category.\"\"\"\n\n");
+    for name in &names {
+        init.push_str(&format!("from bpsgen.{name} import *\n"));
+    }
+    fs::write(pkg.join("__init__.py"), init).map_err(|e| emit(e.to_string()))?;
     Ok(())
+}
+
+/// What a category module holds, for its docstring.
+fn module_doc(stem: &str) -> String {
+    match stem {
+        "runtime" => "Reader, writer, and errors every generated module shares.".to_string(),
+        "encoding" => "Encodings, enums, and nested types the packets share.".to_string(),
+        "shared" => "Packets routed in more than one state or direction.".to_string(),
+        "unrouted" => "Packets the schema declares without a route.".to_string(),
+        other => {
+            let words = other.replace('_', " ");
+            let mut chars = words.chars();
+            let head = chars.next().map(|c| c.to_ascii_uppercase()).unwrap_or(' ');
+            format!("{head}{} packets.", chars.as_str())
+        }
+    }
+}
+
+/// Docstring, then imports in ruff's isort order (`__future__`, the standard
+/// library, then this package), then the two blank lines before the first
+/// definition.
+fn py_preamble(stem: &str, body: &str, deps: &[String]) -> String {
+    let mut out = format!(
+        "\"\"\"{}\"\"\"\n\nfrom __future__ import annotations\n\n",
+        module_doc(stem)
+    );
+    let mut stdlib = Vec::new();
+    if body.contains("@dataclasses") || body.contains("dataclasses.") {
+        stdlib.push("import dataclasses".to_string());
+    }
+    if body.contains("enum.") {
+        stdlib.push("import enum".to_string());
+    }
+    if body.contains("struct.") {
+        stdlib.push("import struct".to_string());
+    }
+    let typing: Vec<&str> = ["Self", "TypeAlias"]
+        .into_iter()
+        .filter(|name| body.contains(name))
+        .collect();
+    if !typing.is_empty() {
+        stdlib.push(format!("from typing import {}", typing.join(", ")));
+    }
+    let first_party: Vec<String> = deps
+        .iter()
+        .map(|dep| format!("from bpsgen.{dep} import *"))
+        .collect();
+    let groups: Vec<String> = [stdlib, first_party]
+        .into_iter()
+        .filter(|group| !group.is_empty())
+        .map(|group| group.join("\n"))
+        .collect();
+    if !groups.is_empty() {
+        out.push_str(&groups.join("\n\n"));
+        out.push('\n');
+    }
+    out.push_str("\n\n");
+    out
+}
+
+/// Names a category module actually defines. Star-imports then cannot leak
+/// `struct` or `enum`, or one category's helper, into `bpsgen`.
+fn py_all(body: &str) -> String {
+    let mut names = Vec::new();
+    for line in body.lines() {
+        let name = if let Some(rest) = line.strip_prefix("class ") {
+            rest.split(['(', ':']).next()
+        } else if let Some(rest) = line.strip_prefix("def ") {
+            rest.split('(').next()
+        } else if !line.starts_with([' ', '\t', '#', '"']) {
+            line.split('=').next().map(str::trim).filter(|name| {
+                !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+        } else {
+            None
+        };
+        if let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) {
+            names.push(name.to_string());
+        }
+    }
+    names.sort_by_key(|name| isort_key(name));
+    names.dedup();
+    if names.is_empty() {
+        return "\n".to_string();
+    }
+    let mut out = String::from("\n\n\n__all__ = [\n");
+    for name in names {
+        out.push_str(&format!("    \"{name}\",\n"));
+    }
+    out.push_str("]\n");
+    out
+}
+
+/// The order ruff's RUF022 wants in `__all__`: SCREAMING_CASE constants,
+/// then CamelCase classes, then the rest, each in natural order (`Tag2`
+/// before `Tag10`).
+fn isort_key(name: &str) -> (u8, Vec<(u8, u64, String)>) {
+    let screaming = name.chars().any(|c| c.is_ascii_alphabetic())
+        && name.chars().all(|c| !c.is_ascii_lowercase());
+    let class = name.starts_with(|c: char| c.is_ascii_uppercase());
+    let rank = if screaming && name.len() > 1 {
+        0
+    } else if class {
+        1
+    } else {
+        2
+    };
+    let mut parts = Vec::new();
+    let mut chars = name.chars().peekable();
+    while let Some(&c) = chars.peek() {
+        let digits = c.is_ascii_digit();
+        let mut run = String::new();
+        while let Some(&d) = chars.peek() {
+            if d.is_ascii_digit() != digits {
+                break;
+            }
+            run.push(d);
+            chars.next();
+        }
+        if digits {
+            parts.push((0, run.parse().unwrap_or(u64::MAX), String::new()));
+        } else {
+            parts.push((1, 0, run));
+        }
+    }
+    (rank, parts)
+}
+
+fn stem_deps(prog: &Program) -> BTreeMap<String, BTreeSet<String>> {
+    let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let add = |deps: &mut BTreeMap<String, BTreeSet<String>>, from: &str, to: String| {
+        if from != to && to != "runtime" {
+            deps.entry(from.to_string()).or_default().insert(to);
+        }
+    };
+    let note_ty =
+        |deps: &mut BTreeMap<String, BTreeSet<String>>, prog: &Program, from: &str, ty: &Ty| {
+            match ty {
+                Ty::List(inner) => {
+                    if let Ty::Named(t) = inner.as_ref() {
+                        add(deps, from, prog.output_stem(&prog.types[*t].origin));
+                    }
+                }
+                Ty::Named(t) => add(deps, from, prog.output_stem(&prog.types[*t].origin)),
+                _ => {}
+            }
+        };
+    for ty in &prog.types {
+        let from = prog.output_stem(&ty.origin);
+        match &ty.kind {
+            TypeKind::Record { fields } => {
+                for f in fields {
+                    note_ty(&mut deps, prog, &from, &f.ty);
+                }
+            }
+            TypeKind::Sum { variants } => {
+                for v in variants {
+                    if let Some(payload) = &v.payload {
+                        note_ty(&mut deps, prog, &from, payload);
+                    }
+                }
+            }
+            TypeKind::Alias { target } => add(
+                &mut deps,
+                &from,
+                prog.output_stem(&prog.types[*target].origin),
+            ),
+            TypeKind::Enum { .. } => {}
+        }
+    }
+    for codec in &prog.codecs {
+        let from = prog.output_stem(&codec.origin);
+        note_body(&mut deps, prog, &from, &codec.decode);
+        note_body(&mut deps, prog, &from, &codec.encode);
+    }
+    deps
+}
+
+fn note_body(
+    deps: &mut BTreeMap<String, BTreeSet<String>>,
+    prog: &Program,
+    from: &str,
+    body: &Body,
+) {
+    for stmt in &body.stmts {
+        note_stmt(deps, prog, from, stmt);
+    }
+}
+
+fn note_stmt(
+    deps: &mut BTreeMap<String, BTreeSet<String>>,
+    prog: &Program,
+    from: &str,
+    stmt: &Stmt,
+) {
+    let add = |deps: &mut BTreeMap<String, BTreeSet<String>>, to: String| {
+        if from != to && to != "runtime" {
+            deps.entry(from.to_string()).or_default().insert(to);
+        }
+    };
+    match stmt {
+        Stmt::Decode { codec, args, .. } => {
+            add(deps, prog.output_stem(&prog.codecs[*codec].origin));
+            for arg in args {
+                note_expr(deps, prog, from, arg);
+            }
+        }
+        Stmt::Encode { codec, args, value } => {
+            add(deps, prog.output_stem(&prog.codecs[*codec].origin));
+            for arg in args {
+                note_expr(deps, prog, from, arg);
+            }
+            note_expr(deps, prog, from, value);
+        }
+        Stmt::Let { value, .. }
+        | Stmt::Require { cond: value, .. }
+        | Stmt::Unwrap { src: value, .. }
+        | Stmt::Return(value) => {
+            note_expr(deps, prog, from, value);
+        }
+        Stmt::Utf8 { src, .. } | Stmt::Write { value: src, .. } => note_expr(deps, prog, from, src),
+        Stmt::Read { op, .. } => match op {
+            ReadOp::Bytes(n) => note_expr(deps, prog, from, n),
+            ReadOp::U8 | ReadOp::F32 | ReadOp::F64 | ReadOp::Rest => {}
+        },
+        Stmt::If { cond, then, els } => {
+            note_expr(deps, prog, from, cond);
+            for s in then.iter().chain(els) {
+                note_stmt(deps, prog, from, s);
+            }
+        }
+        Stmt::Match {
+            scrutinee,
+            arms,
+            other,
+        } => {
+            note_expr(deps, prog, from, scrutinee);
+            for arm in arms {
+                for s in &arm.body {
+                    note_stmt(deps, prog, from, s);
+                }
+            }
+            if let Some(other) = other {
+                for s in other {
+                    note_stmt(deps, prog, from, s);
+                }
+            }
+        }
+        Stmt::Repeat { mode, body, .. } => {
+            match mode {
+                RepeatMode::Count(e) | RepeatMode::Until(e) => note_expr(deps, prog, from, e),
+                RepeatMode::UntilEnd => {}
+            }
+            for s in body {
+                note_stmt(deps, prog, from, s);
+            }
+        }
+        Stmt::ForEach { list, body, .. } => {
+            note_expr(deps, prog, from, list);
+            for s in body {
+                note_stmt(deps, prog, from, s);
+            }
+        }
+        Stmt::ExpectVariant { sum, ty, .. } => {
+            note_expr(deps, prog, from, sum);
+            add(deps, prog.output_stem(&prog.types[*ty].origin));
+        }
+        Stmt::Declare { .. } | Stmt::Fail(_) => {}
+    }
+}
+
+fn note_expr(
+    deps: &mut BTreeMap<String, BTreeSet<String>>,
+    prog: &Program,
+    from: &str,
+    expr: &Expr,
+) {
+    let add = |deps: &mut BTreeMap<String, BTreeSet<String>>, to: String| {
+        if from != to && to != "runtime" {
+            deps.entry(from.to_string()).or_default().insert(to);
+        }
+    };
+    match expr {
+        Expr::Field { base, ty, .. } => {
+            note_expr(deps, prog, from, base);
+            add(deps, prog.output_stem(&prog.types[*ty].origin));
+        }
+        Expr::Present(inner) | Expr::Get(inner) | Expr::Not(inner) | Expr::StrBytes(inner) => {
+            note_expr(deps, prog, from, inner);
+        }
+        Expr::Binary { lhs, rhs, ty, .. } => {
+            note_expr(deps, prog, from, lhs);
+            note_expr(deps, prog, from, rhs);
+            if let Ty::Named(t) = ty {
+                add(deps, prog.output_stem(&prog.types[*t].origin));
+            }
+        }
+        Expr::Cond {
+            cond,
+            then,
+            els,
+            ty,
+        } => {
+            note_expr(deps, prog, from, cond);
+            note_expr(deps, prog, from, then);
+            note_expr(deps, prog, from, els);
+            if let Ty::Named(t) = ty {
+                add(deps, prog.output_stem(&prog.types[*t].origin));
+            }
+        }
+        Expr::Cast { expr, to } => {
+            note_expr(deps, prog, from, expr);
+            if let Ty::Named(t) = to {
+                add(deps, prog.output_stem(&prog.types[*t].origin));
+            }
+        }
+        Expr::Call { args, .. } => {
+            for arg in args {
+                note_expr(deps, prog, from, arg);
+            }
+        }
+        Expr::Construct { ty, fields } => {
+            add(deps, prog.output_stem(&prog.types[*ty].origin));
+            for field in fields {
+                note_expr(deps, prog, from, field);
+            }
+        }
+        Expr::Variant { ty, payload, .. } => {
+            add(deps, prog.output_stem(&prog.types[*ty].origin));
+            if let Some(payload) = payload {
+                note_expr(deps, prog, from, payload);
+            }
+        }
+        Expr::Int { .. } | Expr::Bool(_) | Expr::Str(_) | Expr::Local(_) | Expr::Remaining => {}
+    }
+}
+
+/// Map every stem onto a representative. A cycle collapses onto `encoding`,
+/// else `shared`, else the alphabetically first name.
+fn collapse_cycles(deps: &BTreeMap<String, BTreeSet<String>>) -> BTreeMap<String, String> {
+    let mut nodes: BTreeSet<String> = deps.keys().cloned().collect();
+    for set in deps.values() {
+        nodes.extend(set.iter().cloned());
+    }
+    let mut parent: BTreeMap<String, String> =
+        nodes.iter().cloned().map(|n| (n.clone(), n)).collect();
+    fn find(parent: &mut BTreeMap<String, String>, x: &str) -> String {
+        let p = parent.get(x).cloned().unwrap_or_else(|| x.to_string());
+        if p == x {
+            return p;
+        }
+        let root = find(parent, &p);
+        parent.insert(x.to_string(), root.clone());
+        root
+    }
+    fn prefer(a: &str, b: &str) -> String {
+        for name in ["encoding", "shared"] {
+            if a == name || b == name {
+                return name.to_string();
+            }
+        }
+        if a <= b { a.to_string() } else { b.to_string() }
+    }
+    for (from, tos) in deps {
+        for to in tos {
+            if reaches(deps, to, from) {
+                let ra = find(&mut parent, from);
+                let rb = find(&mut parent, to);
+                if ra != rb {
+                    let keep = prefer(&ra, &rb);
+                    let drop = if keep == ra { rb } else { ra };
+                    parent.insert(drop, keep);
+                }
+            }
+        }
+    }
+    nodes
+        .into_iter()
+        .map(|n| {
+            let root = find(&mut parent, &n);
+            (n, root)
+        })
+        .collect()
+}
+
+fn reaches(deps: &BTreeMap<String, BTreeSet<String>>, from: &str, goal: &str) -> bool {
+    let mut seen = BTreeSet::new();
+    let mut stack = vec![from.to_string()];
+    while let Some(node) = stack.pop() {
+        if node == goal {
+            return true;
+        }
+        if !seen.insert(node.clone()) {
+            continue;
+        }
+        if let Some(next) = deps.get(&node) {
+            stack.extend(next.iter().cloned());
+        }
+    }
+    false
 }
 
 /// The emitted identifier of a codec's decode: `decode_x` for functions,
@@ -275,9 +716,9 @@ pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
     }
 }
 
-fn emit_program(prog: &Program) -> BpsResult<String> {
+fn emit_program(prog: &Program) -> BpsResult<BTreeMap<String, String>> {
     let mut e = Emitter::new(prog);
-    e.header();
+    e.set_raw("runtime");
     e.runtime();
     e.records_and_enums();
     e.aliases();
@@ -288,6 +729,8 @@ fn emit_program(prog: &Program) -> BpsResult<String> {
 
 struct Emitter<'a> {
     prog: &'a Program,
+    parts: BTreeMap<String, String>,
+    stem: String,
     buf: String,
     indent: usize,
 }
@@ -296,13 +739,43 @@ impl<'a> Emitter<'a> {
     fn new(prog: &'a Program) -> Self {
         Emitter {
             prog,
+            parts: BTreeMap::new(),
+            stem: "runtime".to_string(),
             buf: String::new(),
             indent: 0,
         }
     }
 
-    fn finish(self) -> String {
-        self.buf
+    fn set_raw(&mut self, stem: &str) {
+        if stem == self.stem {
+            return;
+        }
+        self.flush();
+        self.stem = stem.to_string();
+    }
+
+    fn set_stem(&mut self, origin: &Origin) {
+        self.set_raw(&self.prog.output_stem(origin));
+    }
+
+    fn flush(&mut self) {
+        if self.buf.is_empty() {
+            return;
+        }
+        self.parts
+            .entry(self.stem.clone())
+            .or_default()
+            .push_str(&self.buf);
+        self.buf.clear();
+    }
+
+    fn stem_nonempty(&self) -> bool {
+        !self.buf.is_empty() || self.parts.get(&self.stem).is_some_and(|s| !s.is_empty())
+    }
+
+    fn finish(mut self) -> BTreeMap<String, String> {
+        self.flush();
+        self.parts
     }
 
     fn pad(&self) -> String {
@@ -338,53 +811,6 @@ impl<'a> Emitter<'a> {
     // Top level
     // ---------------------------------------------------------------
 
-    fn header(&mut self) {
-        let mut dataclasses = false;
-        let mut enums = false;
-        let mut aliases = false;
-        let mut selves = false;
-        for t in &self.prog.types {
-            match &t.kind {
-                TypeKind::Record { .. } => {
-                    dataclasses = true;
-                    selves = true;
-                }
-                TypeKind::Sum { variants } => {
-                    aliases = true;
-                    if variants
-                        .iter()
-                        .any(|v| !is_record_payload(self.prog, &v.payload))
-                    {
-                        dataclasses = true;
-                    }
-                }
-                TypeKind::Enum { .. } => {
-                    enums = true;
-                    selves = true;
-                }
-                TypeKind::Alias { .. } => {}
-            }
-        }
-        self.line("from __future__ import annotations");
-        self.blank();
-        if dataclasses {
-            self.line("import dataclasses");
-        }
-        if enums {
-            self.line("import enum");
-        }
-        self.line("import struct");
-        if selves && aliases {
-            self.line("from typing import Self, TypeAlias");
-        } else if selves {
-            self.line("from typing import Self");
-        } else if aliases {
-            self.line("from typing import TypeAlias");
-        }
-        self.blank();
-        self.blank();
-    }
-
     fn runtime(&mut self) {
         for line in RUNTIME.lines() {
             self.line(line.trim_end());
@@ -394,31 +820,26 @@ impl<'a> Emitter<'a> {
     }
 
     fn records_and_enums(&mut self) {
-        let mut first = true;
         for idx in 0..self.prog.types.len() {
             match &self.prog.types[idx].kind {
                 TypeKind::Record { .. } => {
-                    if !first {
+                    self.set_stem(&self.prog.types[idx].origin);
+                    if self.stem_nonempty() {
                         self.blank();
                         self.blank();
                     }
-                    first = false;
                     self.record(idx);
                 }
                 TypeKind::Enum { .. } => {
-                    if !first {
+                    self.set_stem(&self.prog.types[idx].origin);
+                    if self.stem_nonempty() {
                         self.blank();
                         self.blank();
                     }
-                    first = false;
                     self.enum_type(idx);
                 }
                 TypeKind::Sum { .. } | TypeKind::Alias { .. } => {}
             }
-        }
-        if !first {
-            self.blank();
-            self.blank();
         }
     }
 
@@ -437,9 +858,9 @@ impl<'a> Emitter<'a> {
                     format!("Packet {name} ({list}).")
                 }
             }
-            Origin::Encoding { name } => format!("Encoding {name}."),
-            Origin::Enum { name } => format!("Open enum {name}."),
-            Origin::Frame { name } => format!("Frame {name}."),
+            Origin::Encoding { name } => format!("Encoding {}.", spaced_name(name)),
+            Origin::Enum { name } => format!("Open enum {}.", spaced_name(name)),
+            Origin::Frame { name } => format!("Frame {}.", spaced_name(name)),
             Origin::Field { parent, field } => {
                 format!(
                     "Block {field} of {}.",
@@ -448,11 +869,11 @@ impl<'a> Emitter<'a> {
             }
             Origin::Variant { sum, variant } => match &self.prog.types[*sum].kind {
                 TypeKind::Sum { variants } => format!(
-                    "Arm {} of {}.",
+                    "Variant {} of {}.",
                     variants[*variant].name.pascal(),
                     self.prog.types[*sum].name.pascal()
                 ),
-                _ => "Sum arm.".to_string(),
+                _ => "Sum variant.".to_string(),
             },
         }
     }
@@ -512,26 +933,21 @@ impl<'a> Emitter<'a> {
 
     /// `X = Y` record aliases, in IR order (targets are records: defined).
     fn aliases(&mut self) {
-        let mut first = true;
         for idx in 0..self.prog.types.len() {
             let target = match self.prog.types[idx].kind {
                 TypeKind::Alias { target } => target,
                 _ => continue,
             };
-            if !first {
+            self.set_stem(&self.prog.types[idx].origin);
+            if self.stem_nonempty() {
                 self.blank();
                 self.blank();
             }
-            first = false;
             let name = self.prog.types[idx].name.pascal();
             let target_name = self.prog.types[target].name.pascal();
             let doc = self.type_doc(idx);
             self.line(&format!("{name} = {target_name}"));
             self.line(&format!("\"\"\"{doc}\"\"\""));
-        }
-        if !first {
-            self.blank();
-            self.blank();
         }
     }
 
@@ -539,18 +955,13 @@ impl<'a> Emitter<'a> {
     /// emits after it (the alias evaluates at runtime).
     fn sums(&mut self) {
         let order = self.sum_order();
-        let mut first = true;
         for idx in order {
-            if !first {
+            self.set_stem(&self.prog.types[idx].origin);
+            if self.stem_nonempty() {
                 self.blank();
                 self.blank();
             }
-            first = false;
             self.sum(idx);
-        }
-        if !first {
-            self.blank();
-            self.blank();
         }
     }
 
@@ -670,18 +1081,15 @@ impl<'a> Emitter<'a> {
     // ---------------------------------------------------------------
 
     fn codecs(&mut self) -> BpsResult<()> {
-        // Record codecs print as methods on their class; only module
-        // functions emit here (and take separators).
-        let mut first = true;
         for idx in 0..self.prog.codecs.len() {
             if self.prog.codecs[idx].kind == CodecKind::Record {
                 continue;
             }
-            if !first {
+            self.set_stem(&self.prog.codecs[idx].origin);
+            if self.stem_nonempty() {
                 self.blank();
                 self.blank();
             }
-            first = false;
             self.codec(idx)?;
         }
         Ok(())
@@ -741,17 +1149,17 @@ impl<'a> Emitter<'a> {
             tag,
             names,
             taken,
+            unwrap_subst: unwrap_substs(body),
         }
     }
-
     fn methods(&mut self, codec: CodecIdx) {
         let c = self.prog.codecs[codec].clone();
-        let snake = c.name.snake();
-        let spaced = snake.replace('_', " ");
         let f = self.ctx_for(&c, &c.decode, true, true);
         let decode_params = self.fn_params(&f, &c, true);
         let g = self.ctx_for(&c, &c.encode, false, true);
         let encode_params = self.fn_params(&g, &c, false);
+        let decode_doc = self.doc_for(&c, true);
+        let encode_doc = self.doc_for(&c, false);
         self.blank();
         self.indent += 1;
         self.line("@classmethod");
@@ -760,22 +1168,14 @@ impl<'a> Emitter<'a> {
             &format!("cls, r: Reader{decode_params}"),
             " -> Self:",
         );
-        self.doc_and_body(
-            &format!("\"\"\"Decode a {spaced}.\"\"\""),
-            &f,
-            &c.decode.stmts,
-        );
+        self.doc_and_body(&decode_doc, &f, &c.decode.stmts);
         self.blank();
         self.def_line(
             "def encode",
             &format!("self, w: Writer{encode_params}"),
             " -> None:",
         );
-        self.doc_and_body(
-            &format!("\"\"\"Encode a {spaced}.\"\"\""),
-            &g,
-            &c.encode.stmts,
-        );
+        self.doc_and_body(&encode_doc, &g, &c.encode.stmts);
         self.indent -= 1;
     }
 
@@ -785,20 +1185,16 @@ impl<'a> Emitter<'a> {
             return Ok(());
         }
         let snake = c.name.snake();
-        let spaced = snake.replace('_', " ");
         let ret = annotation(self.prog, &c.value, false);
         let f = self.ctx_for(&c, &c.decode, true, false);
         let decode_params = self.fn_params(&f, &c, true);
+        let decode_doc = self.doc_for(&c, true);
         self.def_line(
             &format!("def decode_{snake}"),
             &format!("r: Reader{decode_params}"),
             &format!(" -> {ret}:"),
         );
-        self.doc_and_body(
-            &format!("\"\"\"Decode a {spaced}.\"\"\""),
-            &f,
-            &c.decode.stmts,
-        );
+        self.doc_and_body(&decode_doc, &f, &c.decode.stmts);
         self.blank();
         self.blank();
         let value_ann = annotation(self.prog, &c.value, false);
@@ -814,12 +1210,24 @@ impl<'a> Emitter<'a> {
             &format!("w: Writer, {value_name}: {value_ann}{encode_params}"),
             " -> None:",
         );
-        self.doc_and_body(
-            &format!("\"\"\"Encode a {spaced}.\"\"\""),
-            &f,
-            &c.encode.stmts,
-        );
+        self.doc_and_body(&self.doc_for(&c, false), &f, &c.encode.stmts);
         Ok(())
+    }
+
+    /// A codec's one-line docstring: grammatical article, and `packet body`
+    /// for packets (the methods move whole packet bodies).
+    fn doc_for(&self, c: &Codec, decode: bool) -> String {
+        let spaced = c.name.snake().replace('_', " ");
+        let art = match spaced.chars().next() {
+            Some('a' | 'e' | 'i' | 'o') => "an",
+            _ => "a",
+        };
+        let verb = if decode { "Decode" } else { "Encode" };
+        if matches!(c.origin, Origin::Packet { .. }) {
+            format!("\"\"\"{verb} {art} {spaced} packet body.\"\"\"")
+        } else {
+            format!("\"\"\"{verb} {art} {spaced}.\"\"\"")
+        }
     }
 
     /// A `def` head: single line when it fits, else parameters packed on one
@@ -881,14 +1289,22 @@ impl<'a> Emitter<'a> {
     }
 
     /// A docstring plus its body; an empty body needs no `pass` (ruff PIE790:
-    /// the docstring alone is a complete body).
+    /// the docstring alone is a complete body). A non-empty body runs inside
+    /// `try/except BpsError`, which tags the codec path on the way out, so
+    /// raises in the body are plain constructors.
     fn doc_and_body(&mut self, doc: &str, f: &FCtx, stmts: &[Stmt]) {
         self.nested(|e| {
             e.line(doc);
+            if !stmts.is_empty() {
+                e.line("try:");
+                e.fn_body(f, stmts);
+                e.line("except BpsError as exc:");
+                e.indent += 1;
+                e.line(&format!("exc.in_codec(\"{}\")", f.cname));
+                e.line("raise");
+                e.indent -= 1;
+            }
         });
-        if !stmts.is_empty() {
-            self.fn_body(f, stmts);
-        }
     }
 
     /// A statement that must split reports itself instead of failing.
@@ -933,13 +1349,12 @@ impl<'a> Emitter<'a> {
             }
             Stmt::Read { dst, op } => {
                 let rhs = self.read_rhs(f, op);
-                let line = self.let_line(f, dst, rhs, &read_ty(op));
+                let line = self.let_line(f, dst, rhs);
                 self.site(&line)
             }
             Stmt::Decode { dst, codec, args } => {
                 let call = self.decode_call(f, *codec, args);
-                let ty = self.prog.codecs[*codec].value.clone();
-                let line = self.let_line(f, dst, call, &ty);
+                let line = self.let_line(f, dst, call);
                 self.site(&line)
             }
             Stmt::Utf8 { dst, src } => {
@@ -947,12 +1362,8 @@ impl<'a> Emitter<'a> {
                 let Ok(data) = data else {
                     return Err(data.unwrap_err());
                 };
-                let line = self.let_line(
-                    f,
-                    dst,
-                    format!("decode_utf8({data}, r.pos - len({data}))"),
-                    &Ty::Str,
-                );
+                let line =
+                    self.let_line(f, dst, format!("decode_utf8({data}, r.pos - len({data}))"));
                 self.site(&line)
             }
             Stmt::Write { op, value } => {
@@ -965,23 +1376,13 @@ impl<'a> Emitter<'a> {
             }
             Stmt::Require { cond, text } => {
                 let off = if f.decode { "r.pos" } else { "w.offset" };
-                // `not (a == b)` trips SIM201; the flipped comparison is exact.
-                let cond_s = match cond {
-                    Expr::Binary { op, lhs, rhs, .. } if op.is_comparison() => {
-                        let flipped = Expr::Binary {
-                            op: flip_cmp(*op),
-                            lhs: lhs.clone(),
-                            rhs: rhs.clone(),
-                            ty: Ty::Bool,
-                            wraps: false,
-                        };
-                        self.top_or_emit(f, &flipped)
-                    }
-                    _ => format!("not {}", self.nested_req(f, cond)),
-                };
+                // Fail when the negation holds (`!(a == b)` prints as
+                // `a != b`; `Program::negated` keeps float comparisons exact).
+                let neg = self.prog.negated(&f.body, cond);
+                let cond_s = self.top_or_emit(f, &neg);
                 self.line(&format!("if {cond_s}:"));
                 self.indent += 1;
-                self.raise_here(f, "RequireFailed", &format!("{off}, {}", py_str(text)));
+                self.raise_here("RequireFailed", &format!("{off}, {}", py_str(text)));
                 self.indent -= 1;
                 Ok(())
             }
@@ -990,12 +1391,14 @@ impl<'a> Emitter<'a> {
                 let off = if f.decode { "r.pos" } else { "w.offset" };
                 self.line(&format!("if {src_s} is None:"));
                 self.indent += 1;
-                self.raise_here(f, "MissingField", &format!("{off}, {}", py_str(field)));
+                self.raise_here("MissingField", &format!("{off}, {}", py_str(field)));
                 self.indent -= 1;
-                let l = &f.body.locals[dst.local];
-                let name = self.local_name(f, dst.local);
-                let ann = annotation(self.prog, &l.ty, false);
-                self.line(&format!("{name}: {ann} = {src_s}"));
+                // An inlined temp (`unwrap_subst`) renders as its source from
+                // here on; anything else binds a bare name (mypy narrows it).
+                if !f.unwrap_subst.contains_key(&dst.local) {
+                    let name = self.local_name(f, dst.local);
+                    self.line(&format!("{name} = {src_s}"));
+                }
                 Ok(())
             }
             Stmt::If { cond, then, els } => {
@@ -1062,7 +1465,7 @@ impl<'a> Emitter<'a> {
                     }
                     None => {
                         let off = if f.decode { "r.pos" } else { "w.offset" };
-                        self.raise_here(f, "NoMatchArm", &format!("{off}, {scrut}"));
+                        self.raise_here("NoMatchArm", &format!("{off}, {scrut}"));
                     }
                 }
                 self.indent -= 1;
@@ -1097,16 +1500,9 @@ impl<'a> Emitter<'a> {
                 let cls = match failure {
                     Failure::EncodeUntilEnd => "EncodeUntilEnd",
                 };
-                self.raise_here(f, cls, "");
+                self.raise_here(cls, "");
                 Ok(())
             }
-        }
-    }
-
-    fn nested_req(&self, f: &FCtx, cond: &Expr) -> String {
-        match self.nested_str(f, cond) {
-            Ok(s) => s,
-            Err(long) => long.into_string(),
         }
     }
 
@@ -1119,9 +1515,13 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// Introduce a local: only `None`/`[]` initializers and bare join
+    /// annotations print (mypy needs those); zero prologues print bare, and
+    /// anything else declares at first assignment. Dead and inlined locals
+    /// print nothing.
     fn declare(&mut self, f: &FCtx, local: LocalId, zero: bool) {
         let l = &f.body.locals[local];
-        if l.uses == 0 {
+        if l.uses == 0 || f.unwrap_subst.contains_key(&local) {
             return;
         }
         let name = self.local_name(f, local);
@@ -1132,7 +1532,7 @@ impl<'a> Emitter<'a> {
             self.line(&format!("{name}: {ann} = []"));
         } else if zero {
             match zero_value(&l.ty) {
-                Some(z) => self.line(&format!("{name}: {ann} = {z}")),
+                Some(z) => self.line(&format!("{name} = {z}")),
                 None => self.line(&format!("{name}: {ann}")),
             }
         } else {
@@ -1140,43 +1540,33 @@ impl<'a> Emitter<'a> {
         }
     }
 
-    /// An assignment to `dst`: annotated when it declares, `_` when dead.
-    fn let_line(&self, f: &FCtx, dst: &Bind, rhs: String, ty: &Ty) -> String {
+    /// An assignment to `dst`: the first one declares with a bare name
+    /// (mypy infers the type), `_` when dead.
+    fn let_line(&self, f: &FCtx, dst: &Bind, rhs: String) -> String {
         let l = &f.body.locals[dst.local];
         if l.uses == 0 {
             return format!("_ = {rhs}");
         }
         let name = self.local_name(f, dst.local);
-        if dst.declare {
-            let ann = annotation(self.prog, ty, l.optional);
-            format!("{name}: {ann} = {rhs}")
-        } else {
-            format!("{name} = {rhs}")
-        }
+        format!("{name} = {rhs}")
     }
 
-    fn assign_lhs(&self, f: &FCtx, dst: &Bind, ty: &Ty) -> String {
+    fn assign_lhs(&self, f: &FCtx, dst: &Bind) -> String {
         let l = &f.body.locals[dst.local];
-        let name = if l.uses == 0 {
+        if l.uses == 0 {
             "_".to_string()
         } else {
             self.local_name(f, dst.local)
-        };
-        if dst.declare && l.uses > 0 {
-            format!("{name}: {}", annotation(self.prog, ty, l.optional))
-        } else {
-            name
         }
     }
 
     fn assign(&mut self, f: &FCtx, dst: &Bind, rhs: String, value: &Expr) -> Result<(), Long> {
-        let ty = self.prog.expr_ty(&f.body, value).0;
-        let line = self.let_line(f, dst, rhs.clone(), &ty);
+        let line = self.let_line(f, dst, rhs.clone());
         if self.fits(&line) {
             self.line(&line);
             return Ok(());
         }
-        let lhs = self.assign_lhs(f, dst, &ty);
+        let lhs = self.assign_lhs(f, dst);
         // Too long: split the right-hand side by shape, looking through
         // range-proven no-op casts at the rendered core.
         match self.peel_identity(f, value) {
@@ -1376,7 +1766,11 @@ impl<'a> Emitter<'a> {
     fn write_line(&self, f: &FCtx, op: &WriteOp, value: &Expr) -> String {
         let v = self.top_or_emit(f, value);
         match op {
-            WriteOp::U8 => format!("w.write_u8({v})"),
+            // A literal wire byte prints hex (`0xFF`).
+            WriteOp::U8 => match self.lit_value(f, value) {
+                Some(b) if (0..=255).contains(&b) => format!("w.write_u8({})", byte_lit(b)),
+                _ => format!("w.write_u8({v})"),
+            },
             WriteOp::F32 => format!("w.write_f32({v})"),
             WriteOp::F64 => format!("w.write_f64({v})"),
             WriteOp::Bytes(n) => {
@@ -1405,6 +1799,16 @@ impl<'a> Emitter<'a> {
             format!("encode_{}({})", c.name.snake(), parts.join(", "))
         }
     }
+    /// `{list}.append({call})`: single line when it fits, else split
+    /// call-style like `ruff format`.
+    fn append_line(&mut self, list: &str, call: &str) {
+        let single = format!("{list}.append({call})");
+        if self.fits(&single) {
+            self.line(&single);
+        } else {
+            self.explode(&single).unwrap_or_else(|_| self.line(&single));
+        }
+    }
 
     fn repeat(
         &mut self,
@@ -1426,7 +1830,7 @@ impl<'a> Emitter<'a> {
                 let n_bare = self.top_or_emit(f, n);
                 self.line(&format!("if {n_s} < 0:"));
                 self.indent += 1;
-                self.raise_here(f, "NegativeLength", &format!("r.pos, {n_bare}"));
+                self.raise_here("NegativeLength", &format!("r.pos, {n_bare}"));
                 self.indent -= 1;
                 if let [Stmt::Decode { codec, args, .. }] = body {
                     let call = self.decode_call(f, *codec, args);
@@ -1442,33 +1846,55 @@ impl<'a> Emitter<'a> {
                 self.line(&format!("{list_name}: list[{item_ann}] = []"));
                 self.line(&format!("for _ in range({n_bare}):"));
                 self.indent += 1;
-                for s in body {
-                    self.stmt_or_long(f, s);
+                if let [Stmt::Decode { codec, args, .. }] = body {
+                    let call = self.decode_call(f, *codec, args);
+                    self.append_line(&list_name, &call);
+                } else {
+                    for s in body {
+                        self.stmt_or_long(f, s);
+                    }
+                    self.line(&format!("{list_name}.append({item_name})"));
                 }
-                self.line(&format!("{list_name}.append({item_name})"));
                 self.indent -= 1;
                 Ok(())
             }
             RepeatMode::Until(term) => {
-                let t = self.nested_or_long(f, term);
-                let head = fresh(&f.taken, "head");
+                // A wire-byte terminator prints hex (`0xFF`); anything else
+                // renders as an expression.
+                let t = match self.lit_value(f, term) {
+                    Some(v) => byte_lit(v),
+                    None => self.nested_or_long(f, term),
+                };
                 self.line(&format!("{list_name}: list[{item_ann}] = []"));
                 self.line("while True:");
                 self.indent += 1;
+                // The typed `Until` ends at no bytes left too, so the peek
+                // below never runs dry.
                 self.line("if r.remaining == 0:");
                 self.indent += 1;
                 self.line("break");
                 self.indent -= 1;
-                self.line(&format!("{head} = r.peek_u8()"));
-                self.line(&format!("if {head} == {t}:"));
+                let peek = format!("if r.peek_u8() == {t}:");
+                if self.fits(&peek) {
+                    self.line(&peek);
+                } else {
+                    let head = fresh(&f.taken, "head");
+                    self.line(&format!("{head} = r.peek_u8()"));
+                    self.line(&format!("if {head} == {t}:"));
+                }
                 self.indent += 1;
                 self.line("r.read_u8()");
                 self.line("break");
                 self.indent -= 1;
-                for s in body {
-                    self.stmt_or_long(f, s);
+                if let [Stmt::Decode { codec, args, .. }] = body {
+                    let call = self.decode_call(f, *codec, args);
+                    self.append_line(&list_name, &call);
+                } else {
+                    for s in body {
+                        self.stmt_or_long(f, s);
+                    }
+                    self.line(&format!("{list_name}.append({item_name})"));
                 }
-                self.line(&format!("{list_name}.append({item_name})"));
                 self.indent -= 1;
                 Ok(())
             }
@@ -1476,10 +1902,15 @@ impl<'a> Emitter<'a> {
                 self.line(&format!("{list_name}: list[{item_ann}] = []"));
                 self.line("while r.remaining > 0:");
                 self.indent += 1;
-                for s in body {
-                    self.stmt_or_long(f, s);
+                if let [Stmt::Decode { codec, args, .. }] = body {
+                    let call = self.decode_call(f, *codec, args);
+                    self.append_line(&list_name, &call);
+                } else {
+                    for s in body {
+                        self.stmt_or_long(f, s);
+                    }
+                    self.line(&format!("{list_name}.append({item_name})"));
                 }
-                self.line(&format!("{list_name}.append({item_name})"));
                 self.indent -= 1;
                 Ok(())
             }
@@ -1505,19 +1936,16 @@ impl<'a> Emitter<'a> {
         self.line(&format!("if not isinstance({sum_s}, {cls}):"));
         self.indent += 1;
         self.raise_here(
-            f,
             "WrongVariant",
             &format!("w.offset, {}, {tag_s}", py_str(&expected)),
         );
         self.indent -= 1;
         if let Some(dst) = dst {
-            let l = &f.body.locals[dst.local];
             let name = self.local_name(f, dst.local);
-            let ann = annotation(self.prog, &l.ty, false);
             if is_record_payload(self.prog, &decl.payload) {
-                self.line(&format!("{name}: {ann} = {sum_s}"));
+                self.line(&format!("{name} = {sum_s}"));
             } else {
-                self.line(&format!("{name}: {ann} = {sum_s}.value"));
+                self.line(&format!("{name} = {sum_s}.value"));
             }
         }
         Ok(())
@@ -1682,12 +2110,13 @@ impl<'a> Emitter<'a> {
         self.buf[mark..].split('\n').all(|l| l.len() <= MAX_WIDTH)
     }
 
-    /// Raise an error constructed here, tagged with the codec name.
-    fn raise_here(&mut self, f: &FCtx, cls: &str, args: &str) {
+    /// Raise a plain-constructed error: the enclosing `try/except` tags the
+    /// codec path.
+    fn raise_here(&mut self, cls: &str, args: &str) {
         let single = if args.is_empty() {
-            format!("raise {cls}().in_codec(\"{}\")", f.cname)
+            format!("raise {cls}()")
         } else {
-            format!("raise {cls}({args}).in_codec(\"{}\")", f.cname)
+            format!("raise {cls}({args})")
         };
         if self.fits(&single) || self.explode(&single).is_err() {
             self.line(&single);
@@ -1723,7 +2152,13 @@ impl<'a> Emitter<'a> {
             Expr::Int { value, .. } => Ok((value.to_string(), 99)),
             Expr::Bool(b) => Ok((b.to_string(), 99)),
             Expr::Str(s) => Ok((py_str(s), 99)),
-            Expr::Local(id) => Ok((self.local_name(f, *id), 99)),
+            Expr::Local(id) => {
+                // An inlined `Unwrap` temp renders as its source.
+                if let Some(src) = f.unwrap_subst.get(id).cloned() {
+                    return self.render(f, &src);
+                }
+                Ok((self.local_name(f, *id), 99))
+            }
             Expr::Field { base, ty, field } => {
                 let b = self.with_min(f, base, 99)?;
                 let name = escape_name(&self.prog.fields(*ty)[*field].name.snake());
@@ -1737,6 +2172,39 @@ impl<'a> Emitter<'a> {
             Expr::Not(inner) => {
                 let s = self.with_min(f, inner, 4)?;
                 Ok((format!("not {s}"), 3))
+            }
+            Expr::Binary { op, lhs, rhs, .. }
+                if matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) =>
+            {
+                let p = bin_prec(*op);
+                // A narrowing mask under an outer mask is redundant:
+                // `(x & m1) & m2` is `x & (m1 & m2)` (likewise `|`/`^`).
+                if let (Some(m2), Some((inner, m1))) =
+                    (self.lit_value(f, rhs), self.masked_lhs(f, *op, lhs))
+                    && m1 >= 0
+                    && m2 >= 0
+                {
+                    let m = match op {
+                        BinOp::BitAnd => m1 & m2,
+                        BinOp::BitOr => m1 | m2,
+                        _ => m1 ^ m2,
+                    };
+                    let inner_s = self.with_min(f, inner, p)?;
+                    return Ok((
+                        format!("{inner_s} {} {}", bin_sym(*op), mask_lit(*op, m)),
+                        p,
+                    ));
+                }
+                // Masks and flags print hexadecimal above 9.
+                let l = match self.lit_value(f, lhs) {
+                    Some(v) => mask_lit(*op, v),
+                    None => self.with_min(f, lhs, p)?,
+                };
+                let r = match self.lit_value(f, rhs) {
+                    Some(v) => mask_lit(*op, v),
+                    None => self.with_min(f, rhs, p + 1)?,
+                };
+                Ok((format!("{l} {} {r}", bin_sym(*op)), p))
             }
             Expr::Binary { op, lhs, rhs, .. } => {
                 let p = bin_prec(*op);
@@ -1859,6 +2327,30 @@ impl<'a> Emitter<'a> {
         }
         cur
     }
+    /// The integer `e` renders as, looking through casts that render
+    /// identically (so a masked literal still counts as a mask operand).
+    fn lit_value(&self, f: &FCtx, e: &Expr) -> Option<i64> {
+        match self.peel_identity(f, e) {
+            Expr::Int { value, .. } => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// `lhs` of a same-operator mask pair: `(x & m1)` in `(x & m1) & m2`.
+    fn masked_lhs<'b>(&self, f: &FCtx, op: BinOp, lhs: &'b Expr) -> Option<(&'b Expr, i64)> {
+        if let Expr::Binary {
+            op: op2,
+            lhs: inner,
+            rhs,
+            ..
+        } = self.peel_identity(f, lhs)
+            && *op2 == op
+            && let Some(m) = self.lit_value(f, rhs)
+        {
+            return Some((inner, m));
+        }
+        None
+    }
 
     #[allow(clippy::only_used_in_recursion)]
     fn cast(&self, f: &FCtx, expr: &Expr, to: &Ty) -> Result<(String, u8), Long> {
@@ -1876,6 +2368,25 @@ impl<'a> Emitter<'a> {
                 Ok((format!("{v} != 0"), 4))
             }
             (Ty::Int(_), Ty::Int(t)) => {
+                // A signed narrowing of an already sign-extended value is
+                // free when the target holds the extended range: `sign_extend`
+                // from `bits` always lands in `[-2^(bits-1), 2^(bits-1))`.
+                if t.signed() {
+                    let core = self.peel_identity(f, expr);
+                    if let Expr::Call {
+                        func: Func::SignExtend,
+                        args,
+                    } = core
+                        && let [_, bits] = args.as_slice()
+                        && let Expr::Int { value: bits, .. } = bits
+                        && *bits >= 1
+                        && *bits <= 128
+                        && t.contains(-(1i128 << (*bits - 1)))
+                        && t.contains((1i128 << (*bits - 1)) - 1)
+                    {
+                        return self.render(f, core);
+                    }
+                }
                 if let Some(n) = self.narrowing(f, expr, t) {
                     if n.signed {
                         let inner = self.with_min(f, n.inner, 7)?;
@@ -1925,6 +2436,9 @@ struct FCtx {
     names: HashMap<LocalId, String>,
     /// Every printed local name plus fixed and reserved names.
     taken: HashSet<String>,
+    /// `Unwrap` bindings to inline: the temp renders as its source (a field
+    /// chain rooted at the encode value), so only the `None` guard prints.
+    unwrap_subst: HashMap<LocalId, Expr>,
 }
 
 /// A rendered line that does not fit: the caller prints it as-is and the
@@ -1960,6 +2474,11 @@ fn is_enum(prog: &Program, t: TypeIdx) -> bool {
 fn escape_name(snake: &str) -> String {
     crate::ir::typed::escape(snake.to_string(), KEYWORDS)
 }
+/// A raw schema name as running words (`meta_entry` to `meta entry`) for
+/// docstrings.
+fn spaced_name(name: &str) -> String {
+    name.replace('_', " ")
+}
 
 /// A printer-introduced name that no local, parameter, or fixed name uses.
 fn fresh(taken: &HashSet<String>, base: &str) -> String {
@@ -1968,6 +2487,93 @@ fn fresh(taken: &HashSet<String>, base: &str) -> String {
         name.push('_');
     }
     name
+}
+/// `Unwrap` temps to inline (`dst -> src`): only when `src` is a field chain
+/// rooted at the encode value and `dst` is bound exactly once (by the
+/// `Unwrap`). Every later read of `dst` renders as `src` instead, so the
+/// `Unwrap` prints just its `None` guard. Sound: in a valid body every read
+/// of an `Unwrap`-bound local is dominated by the `Unwrap` (every other path
+/// assigns it or fails first), and the guard keeps narrowing the source.
+fn unwrap_substs(body: &Body) -> HashMap<LocalId, Expr> {
+    let Some(value) = body.value else {
+        return HashMap::new();
+    };
+    let mut binds: HashMap<LocalId, usize> = HashMap::new();
+    let mut cands: Vec<(LocalId, Expr)> = Vec::new();
+    scan_binds(&mut binds, &mut cands, &body.stmts, value);
+    cands
+        .into_iter()
+        .filter(|(dst, _)| *dst != value && binds.get(dst).copied().unwrap_or(0) == 1)
+        .collect()
+}
+
+fn scan_binds(
+    binds: &mut HashMap<LocalId, usize>,
+    cands: &mut Vec<(LocalId, Expr)>,
+    stmts: &[Stmt],
+    value: LocalId,
+) {
+    for s in stmts {
+        match s {
+            Stmt::Declare { .. } => {}
+            Stmt::Let { dst, .. }
+            | Stmt::Read { dst, .. }
+            | Stmt::Decode { dst, .. }
+            | Stmt::Utf8 { dst, .. } => {
+                *binds.entry(dst.local).or_insert(0) += 1;
+            }
+            Stmt::Unwrap { dst, src, .. } => {
+                *binds.entry(dst.local).or_insert(0) += 1;
+                if value_rooted(src, value) {
+                    cands.push((dst.local, src.clone()));
+                }
+            }
+            Stmt::ExpectVariant { dst, .. } => {
+                if let Some(dst) = dst {
+                    *binds.entry(dst.local).or_insert(0) += 1;
+                }
+            }
+            Stmt::If { then, els, .. } => {
+                scan_binds(binds, cands, then, value);
+                scan_binds(binds, cands, els, value);
+            }
+            Stmt::Match { arms, other, .. } => {
+                for arm in arms {
+                    scan_binds(binds, cands, &arm.body, value);
+                }
+                if let Some(other) = other {
+                    scan_binds(binds, cands, other, value);
+                }
+            }
+            Stmt::Repeat {
+                list, item, body, ..
+            } => {
+                *binds.entry(*list).or_insert(0) += 1;
+                *binds.entry(*item).or_insert(0) += 1;
+                scan_binds(binds, cands, body, value);
+            }
+            Stmt::ForEach { item, body, .. } => {
+                *binds.entry(*item).or_insert(0) += 1;
+                scan_binds(binds, cands, body, value);
+            }
+            Stmt::Write { .. }
+            | Stmt::Encode { .. }
+            | Stmt::Require { .. }
+            | Stmt::Return(_)
+            | Stmt::Fail(_) => {}
+        }
+    }
+}
+
+/// Whether `e` is a field chain rooted at local `value` (`self.x.y`).
+fn value_rooted(mut e: &Expr, value: LocalId) -> bool {
+    loop {
+        match e {
+            Expr::Local(id) => return *id == value,
+            Expr::Field { base, .. } => e = base,
+            _ => return false,
+        }
+    }
 }
 
 fn annotation(prog: &Program, ty: &Ty, optional: bool) -> String {
@@ -1998,20 +2604,30 @@ fn zero_value(ty: &Ty) -> Option<&'static str> {
     }
 }
 
-fn read_ty(op: &ReadOp) -> Ty {
-    match op {
-        ReadOp::U8 => Ty::Int(IntTy::U8),
-        ReadOp::F32 => Ty::F32,
-        ReadOp::F64 => Ty::F64,
-        ReadOp::Bytes(_) | ReadOp::Rest => Ty::Bytes,
-    }
-}
-
 fn mask_of(t: IntTy) -> u128 {
     if t.bits() >= 128 {
         u128::MAX
     } else {
         (1u128 << t.bits()) - 1
+    }
+}
+/// An integer literal under `op`: hexadecimal when it is a mask or flag
+/// above 9 (`typed::hex_literal`), decimal otherwise.
+fn mask_lit(op: BinOp, value: i64) -> String {
+    if crate::ir::typed::hex_literal(op, value) {
+        format!("0x{value:X}")
+    } else {
+        value.to_string()
+    }
+}
+
+/// A single wire byte as a literal: hexadecimal above 9 (`0xFF`), decimal
+/// otherwise. Anything outside byte range falls back to decimal.
+fn byte_lit(value: i64) -> String {
+    if (0..=255).contains(&value) && value > 9 {
+        format!("0x{value:X}")
+    } else {
+        value.to_string()
     }
 }
 
@@ -2071,21 +2687,6 @@ fn bin_prec(op: crate::ir::typed::BinOp) -> u8 {
         Shl | Shr => 8,
         Add | Sub => 9,
         Mul | Div | Mod => 10,
-    }
-}
-
-/// The negation of a comparison, for `require` heads (`not (a == b)` trips
-/// SIM201; the flipped form is exactly equivalent on every operand type).
-fn flip_cmp(op: crate::ir::typed::BinOp) -> crate::ir::typed::BinOp {
-    use crate::ir::typed::BinOp::*;
-    match op {
-        Eq => Ne,
-        Ne => Eq,
-        Lt => Ge,
-        Le => Gt,
-        Gt => Le,
-        Ge => Lt,
-        _ => Ne,
     }
 }
 
@@ -2165,8 +2766,7 @@ fn split_assign(line: &str) -> Option<(&str, &str)> {
 /// Split `head(arg, ...)trailer` at its top-level commas, string-aware.
 /// Returns the head (ending just before `(`), the argument strings, and the
 /// trailer after the matching `)`. Splits the outermost call: the last
-/// top-level `(` whose match ends the line (so `raise E(a).in_codec("c")`
-/// splits `.in_codec`, the way `ruff format` does).
+/// top-level `(` whose match ends the line.
 fn split_call(line: &str) -> Option<(String, Vec<String>, String)> {
     let open = last_call_open(line)?;
     let close = match_paren(line, open)?;

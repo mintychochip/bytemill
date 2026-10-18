@@ -141,7 +141,11 @@ bpsc shapes report $ROOT --rstom ../rstom-bps    # eligible vs blocked packets (
 bpsc emit rust $ROOT --out /tmp/bps_rust && cargo test --manifest-path /tmp/bps_rust/Cargo.toml
 bpsc emit go schemas/std/varint.bps --out /tmp/bps_go && (cd /tmp/bps_go && go test)
 bpsc emit python schemas/std/varint.bps --out /tmp/bps_py
-bpsc emit c schemas/std/varint.bps --out /tmp/bps_c && cc -Wall -Werror -c /tmp/bps_c/bpsgen.c -o /tmp/bps_c/bpsgen.o
+bpsc emit c schemas/std/varint.bps --out /tmp/bps_c && cc -Wall -Werror -c /tmp/bps_c/*.c
+bpsc emit cpp schemas/std/varint.bps --out /tmp/bps_cpp && g++ -std=c++20 -Wall -Wextra -Wpedantic -Werror -c /tmp/bps_cpp/*.cpp
+bpsc emit typescript $ROOT --out /tmp/bps_ts     # bpsgen.ts + one module per route category
+bpsc emit zig $ROOT --out /tmp/bps_zig           # bpsgen.zig + one module per route category
+bpsc emit rust-typed $ROOT --out /tmp/bps_rt && cargo test --manifest-path /tmp/bps_rt/Cargo.toml
 bpsc emit rstom $ROOT --out ../rstom/crates/bps_rstom  # drop-in for `rstom-packets`
 bpsc emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
 cargo run -q -p bps --bin java_probe_samples     # packets whose layout disagrees with real Minestom bytes
@@ -163,6 +167,22 @@ echo 'ac0202' | bpsc decode schemas/minecraft_26_3_play.bps --packet animate --h
 bpsc encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
 # ac0202
 ```
+
+## Typed language backends
+
+`bpsc emit go`, `python`, `c`, `cpp`, `typescript`, `zig`, and `rust-typed` lower the
+resolved schema to the typed program (`crates/bps/src/ir/typed/`) and print it in the
+target language's own types and names. The IR interpreter (`ir::exec`) stays the meaning of
+the bytes; each printer is checked by a round trip in its own compiler (`go test`, `python3`,
+`cc`, `g++`, `node --experimental-strip-types`, `zig test`, `cargo test`) over every 26.3
+packet the interpreter can synthesize, plus the Hytale root.
+
+Every tree is one file per route category (`{state}_{direction}`, `shared`, `encoding`), and
+the package entry point re-exports them all, so the public surface does not depend on the
+split: `bpsgen.ts` + `runtime.ts` + `{stem}.ts`, `bpsgen.zig` + `runtime.zig` + `{stem}.zig`,
+a `bpsgen/` package (`__init__.py`, `runtime.py`, `{stem}.py`), `runtime.go` + `{stem}.go`,
+`bpsgen.h` + `runtime.c` + `{stem}.c`, `bpsgen.hpp` + `{stem}.cpp`, and a crate with
+`src/packets/{stem}.rs`.
 
 ## Rust codegen
 

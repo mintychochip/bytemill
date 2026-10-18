@@ -2813,13 +2813,7 @@ impl<'a> Builder<'a> {
             && t.contains(lo)
             && t.contains(hi)
         {
-            let e = Expr::Binary {
-                op,
-                lhs: Box::new(retype(l.e, t)),
-                rhs: Box::new(retype(r.e, t)),
-                ty: Ty::Int(t),
-                wraps: false,
-            };
+            let e = binary(op, retype(l.e, t), retype(r.e, t), Ty::Int(t), false);
             return Ok(TE {
                 e,
                 ty: Ty::Int(t),
@@ -2835,13 +2829,7 @@ impl<'a> Builder<'a> {
             Some((lo, hi)) if IntTy::I64.contains(lo) && IntTy::I64.contains(hi) => (false, lo, hi),
             _ => (true, IntTy::I64.min_value(), IntTy::I64.max_value()),
         };
-        let e = Expr::Binary {
-            op,
-            lhs: Box::new(l.e),
-            rhs: Box::new(r.e),
-            ty: Ty::Int(IntTy::I64),
-            wraps,
-        };
+        let e = binary(op, l.e, r.e, Ty::Int(IntTy::I64), wraps);
         Ok(TE {
             e,
             ty: Ty::Int(IntTy::I64),
@@ -3020,6 +3008,7 @@ impl<'a> Builder<'a> {
                     )));
                 }
                 prune(body);
+                sink_declares(body);
             }
             if codec.decode.stmts.is_empty() {
                 return Err(emit(format!("typed: {} has no decode body", codec.ir)));
@@ -3373,6 +3362,47 @@ fn retype(e: Expr, t: IntTy) -> Expr {
     match e {
         Expr::Int { value, .. } => Expr::Int { value, ty: t },
         other => other,
+    }
+}
+
+/// `lhs op rhs`, building `(x & a) & b` as `x & (a & b)` for non-negative
+/// literal masks (exact: `&` is associative), so a narrowing never stacks on
+/// a wider mask: `x & 0x7F`, not `x & 0xFFFFFFFF & 0x7F`.
+fn binary(op: BinOp, lhs: Expr, rhs: Expr, ty: Ty, wraps: bool) -> Expr {
+    let mask = match rhs {
+        Expr::Int { value, ty: lit } if op == BinOp::BitAnd && value >= 0 => Some((value, lit)),
+        _ => None,
+    };
+    match (lhs, mask) {
+        (
+            Expr::Binary {
+                op: BinOp::BitAnd,
+                lhs: inner,
+                rhs: mut first,
+                ty: inner_ty,
+                ..
+            },
+            Some((b, lit)),
+        ) if inner_ty == ty && matches!(*first, Expr::Int { value, .. } if value >= 0) => {
+            if let Expr::Int { value, ty } = first.as_mut() {
+                *value &= b;
+                *ty = lit;
+            }
+            Expr::Binary {
+                op,
+                lhs: inner,
+                rhs: first,
+                ty,
+                wraps,
+            }
+        }
+        (lhs, _) => Expr::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty,
+            wraps,
+        },
     }
 }
 
@@ -3945,7 +3975,9 @@ fn typed_match(stmt: &IrStmt, decode: bool) -> Option<String> {
     dst
 }
 
-/// The schema text of a `require` condition.
+/// The schema text of a `require` condition, with the literal operands of
+/// `&`, `|`, and `^` above 9 in hexadecimal, as every printer writes them in
+/// code ([`super::hex_literal`]): `(b4 & 0x80) == 0`.
 fn source(e: &AstExpr) -> String {
     fn go(e: &AstExpr, top: bool) -> String {
         let s = match e {
@@ -3963,7 +3995,15 @@ fn source(e: &AstExpr) -> String {
                         .join(", ")
                 );
             }
-            AstExpr::Binop(op, a, b) => format!("{} {op} {}", go(a, false), go(b, false)),
+            AstExpr::Binop(op, a, b) => {
+                let side = |x: &AstExpr| match x {
+                    AstExpr::Int(v) if matches!(op.as_str(), "&" | "|" | "^") && *v > 9 => {
+                        format!("0x{v:X}")
+                    }
+                    _ => go(x, false),
+                };
+                format!("{} {op} {}", side(a), side(b))
+            }
             AstExpr::Ternary(c, a, b) => {
                 format!("{} ? {} : {}", go(c, false), go(a, false), go(b, false))
             }
@@ -4115,5 +4155,159 @@ fn prune(body: &mut Body) {
         if !sweep(&mut body.stmts, &keep) {
             return;
         }
+    }
+}
+
+/// Folds each `Declare` into the store that first touches its local, when
+/// that store is in the same block, does not read the local, and nothing in
+/// between mentions it: `let x = 0; x = read()` becomes `let x = read()`, as
+/// the zero is never seen. Optional locals keep theirs (they start absent).
+fn sink_declares(body: &mut Body) {
+    let optional: Vec<bool> = body.locals.iter().map(|l| l.optional).collect();
+    sink_list(&mut body.stmts, &optional);
+}
+
+fn sink_list(list: &mut Vec<Stmt>, optional: &[bool]) {
+    let mut i = 0;
+    while i < list.len() {
+        match &mut list[i] {
+            Stmt::If { then, els, .. } => {
+                sink_list(then, optional);
+                sink_list(els, optional);
+            }
+            Stmt::Match { arms, other, .. } => {
+                for arm in arms {
+                    sink_list(&mut arm.body, optional);
+                }
+                if let Some(other) = other {
+                    sink_list(other, optional);
+                }
+            }
+            Stmt::Repeat { body, .. } | Stmt::ForEach { body, .. } => sink_list(body, optional),
+            _ => {}
+        }
+        if let Stmt::Declare { local, .. } = list[i]
+            && !optional[local]
+            && let Some(at) = first_store(&list[i + 1..], local)
+        {
+            if let Some(dst) = store_dst(&mut list[i + 1 + at]) {
+                dst.declare = true;
+            }
+            list.remove(i);
+            continue;
+        }
+        i += 1;
+    }
+}
+
+/// The index in `rest` of the first statement mentioning `local`, when that
+/// statement is a plain store of `local` that does not read it.
+fn first_store(rest: &[Stmt], local: LocalId) -> Option<usize> {
+    let reads = |e: &Expr| expr_mentions(e, local);
+    for (k, s) in rest.iter().enumerate() {
+        let plain = store_bind(s).is_some_and(|d| d.local == local && !d.some);
+        if !plain {
+            if stmt_mentions(s, local) {
+                return None;
+            }
+            continue;
+        }
+        let read = match s {
+            Stmt::Let { value, .. } => reads(value),
+            Stmt::Read { op, .. } => matches!(op, ReadOp::Bytes(n) if reads(n)),
+            Stmt::Decode { args, .. } => args.iter().any(reads),
+            Stmt::Utf8 { src, .. } | Stmt::Unwrap { src, .. } => reads(src),
+            _ => true,
+        };
+        return (!read).then_some(k);
+    }
+    None
+}
+
+/// Where a single-value store puts its result.
+fn store_bind(s: &Stmt) -> Option<&Bind> {
+    match s {
+        Stmt::Let { dst, .. }
+        | Stmt::Read { dst, .. }
+        | Stmt::Decode { dst, .. }
+        | Stmt::Utf8 { dst, .. }
+        | Stmt::Unwrap { dst, .. } => Some(dst),
+        _ => None,
+    }
+}
+
+fn store_dst(s: &mut Stmt) -> Option<&mut Bind> {
+    match s {
+        Stmt::Let { dst, .. }
+        | Stmt::Read { dst, .. }
+        | Stmt::Decode { dst, .. }
+        | Stmt::Utf8 { dst, .. }
+        | Stmt::Unwrap { dst, .. } => Some(dst),
+        _ => None,
+    }
+}
+
+/// Whether `s` reads or stores `local` anywhere, nested blocks included.
+fn stmt_mentions(s: &Stmt, local: LocalId) -> bool {
+    let e = |x: &Expr| expr_mentions(x, local);
+    let block = |xs: &[Stmt]| xs.iter().any(|s| stmt_mentions(s, local));
+    match s {
+        Stmt::Declare { local: l, .. } => *l == local,
+        Stmt::Let { dst, value } => dst.local == local || e(value),
+        Stmt::Read { dst, op } => dst.local == local || matches!(op, ReadOp::Bytes(n) if e(n)),
+        Stmt::Decode { dst, args, .. } => dst.local == local || args.iter().any(e),
+        Stmt::Utf8 { dst, src } | Stmt::Unwrap { dst, src, .. } => dst.local == local || e(src),
+        Stmt::Write { op, value } => matches!(op, WriteOp::Bytes(n) if e(n)) || e(value),
+        Stmt::Encode { args, value, .. } => args.iter().any(e) || e(value),
+        Stmt::Require { cond, .. } => e(cond),
+        Stmt::If { cond, then, els } => e(cond) || block(then) || block(els),
+        Stmt::Match {
+            scrutinee,
+            arms,
+            other,
+        } => {
+            e(scrutinee)
+                || arms.iter().any(|a| block(&a.body))
+                || other.as_deref().is_some_and(block)
+        }
+        Stmt::Repeat {
+            mode,
+            list,
+            item,
+            body,
+        } => {
+            *list == local
+                || *item == local
+                || matches!(mode, RepeatMode::Count(n) | RepeatMode::Until(n) if e(n))
+                || block(body)
+        }
+        Stmt::ForEach { list, item, body } => e(list) || *item == local || block(body),
+        Stmt::ExpectVariant { dst, sum, .. } => dst.is_some_and(|d| d.local == local) || e(sum),
+        Stmt::Return(value) => e(value),
+        Stmt::Fail(_) => false,
+    }
+}
+
+/// Whether `e` reads `local`.
+fn expr_mentions(e: &Expr, local: LocalId) -> bool {
+    match e {
+        Expr::Local(l) => *l == local,
+        Expr::Field { base, .. }
+        | Expr::Present(base)
+        | Expr::Get(base)
+        | Expr::Not(base)
+        | Expr::StrBytes(base)
+        | Expr::Cast { expr: base, .. } => expr_mentions(base, local),
+        Expr::Binary { lhs, rhs, .. } => expr_mentions(lhs, local) || expr_mentions(rhs, local),
+        Expr::Cond {
+            cond, then, els, ..
+        } => [cond, then, els].iter().any(|x| expr_mentions(x, local)),
+        Expr::Call { args, .. } | Expr::Construct { fields: args, .. } => {
+            args.iter().any(|a| expr_mentions(a, local))
+        }
+        Expr::Variant { payload, .. } => {
+            payload.as_deref().is_some_and(|p| expr_mentions(p, local))
+        }
+        Expr::Int { .. } | Expr::Bool(_) | Expr::Str(_) | Expr::Remaining => false,
     }
 }

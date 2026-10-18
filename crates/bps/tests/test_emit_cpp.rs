@@ -31,15 +31,25 @@ fn clang_format_gate(dir: &Path) {
         eprintln!("skipping clang-format gate: not installed");
         return;
     }
-    for file in ["bpsgen.hpp", "bpsgen.cpp"] {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            matches!(p.extension().and_then(|e| e.to_str()), Some("hpp" | "cpp"))
+                && p.file_name().and_then(|n| n.to_str()) != Some("check.cpp")
+        })
+        .collect();
+    files.sort();
+    for file in files {
         let out = Command::new("clang-format")
             .args(["--dry-run", "--Werror"])
-            .arg(dir.join(file))
+            .arg(&file)
             .output()
             .unwrap();
         assert!(
             out.status.success(),
-            "clang-format failed for {file}\n{}\n{}",
+            "clang-format failed for {}\n{}\n{}",
+            file.display(),
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
@@ -47,6 +57,15 @@ fn clang_format_gate(dir: &Path) {
 }
 
 fn compile_strict(dir: &Path, extra: &[&str]) {
+    let mut sources: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("cpp")
+                && p.file_name().and_then(|n| n.to_str()) != Some("check.cpp")
+        })
+        .collect();
+    sources.sort();
     let mut cmd = Command::new("g++");
     cmd.args([
         "-std=c++20",
@@ -58,8 +77,8 @@ fn compile_strict(dir: &Path, extra: &[&str]) {
         "-o",
     ])
     .arg(dir.join("check"))
-    .arg(dir.join("check.cpp"))
-    .arg(dir.join("bpsgen.cpp"));
+    .arg(dir.join("check.cpp"));
+    cmd.args(&sources);
     for a in extra {
         cmd.arg(a);
     }

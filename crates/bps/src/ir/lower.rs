@@ -1020,7 +1020,13 @@ fn lower_frames(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
             return Err(emit(format!("protocol {}: no frame", proto.name)));
         }
         for frame in &proto.frames {
-            install_record(&format!("frame_{}", frame.name), &[], &frame.items, resolved, ir)?;
+            install_record(
+                &format!("frame_{}", frame.name),
+                &[],
+                &frame.items,
+                resolved,
+                ir,
+            )?;
         }
     }
     for (route, packet) in &resolved.routes {
@@ -1142,8 +1148,6 @@ fn typed_match(
         default,
     })
 }
-
-
 
 fn stmt_match(
     mt: &crate::ast::MatchType,

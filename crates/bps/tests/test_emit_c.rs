@@ -42,13 +42,22 @@ fn emit(resolved: &bps::ResolvedSchema, dir: &std::path::Path) {
 /// Compile `check.c` against `bpsgen.c` with the strict gate, run it, and
 /// return its stdout. `extra` adds flags such as `-O2`.
 fn compile_and_run(dir: &std::path::Path, extra: &[&str]) -> String {
+    let mut sources: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("c")
+                && p.file_name().and_then(|n| n.to_str()) != Some("check.c")
+        })
+        .collect();
+    sources.sort();
     let mut cmd = std::process::Command::new("cc");
     cmd.args(["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror"])
         .args(extra)
         .arg("-o")
         .arg(dir.join("check"))
-        .arg(dir.join("check.c"))
-        .arg(dir.join("bpsgen.c"));
+        .arg(dir.join("check.c"));
+    cmd.args(&sources);
     let compile = cmd.output().unwrap();
     assert!(
         compile.status.success(),
@@ -126,7 +135,7 @@ int main(void) {{
     {{ uint8_t raw[] = {{0x80, 0x80, 0x80, 0x80, 0x80}}; bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
       bps_status s = {dec}(&r, &v);
       if (s != BPS_ERR_REQUIRE || r.error_detail == NULL
-          || strcmp(r.error_detail, "require failed: (b4 & 128) == 0") != 0) {{
+          || strcmp(r.error_detail, "require failed: (b4 & 0x80) == 0") != 0) {{
           printf("require %s\n", bps_status_str(s)); return 1; }} }}
     printf("varint ok\n");
     return 0;

@@ -712,6 +712,76 @@ impl Program {
             .position(|c| matches!(&c.origin, Origin::Packet { name, .. } if name == packet))
     }
 
+    /// Predictable output-file stem for `origin`.
+    ///
+    /// Induced from routes, not a new schema annotation:
+    /// - a packet routed in exactly one `state`/`direction` is `{state}_{direction}`
+    ///   (`play_clientbound`);
+    /// - a packet routed in several of those pairs is `shared`;
+    /// - a packet with no route, and every encoding, enum, and frame, is `encoding`;
+    /// - a nested field or variant uses its parent's stem.
+    pub fn output_stem(&self, origin: &Origin) -> String {
+        let mut origin = origin;
+        let mut seen = Vec::new();
+        loop {
+            match origin {
+                Origin::Field { parent, .. } => {
+                    if !seen.iter().any(|t| t == parent) {
+                        seen.push(*parent);
+                        origin = &self.types[*parent].origin;
+                        continue;
+                    }
+                    return "encoding".to_string();
+                }
+                Origin::Variant { sum, .. } => {
+                    if !seen.iter().any(|t| t == sum) {
+                        seen.push(*sum);
+                        origin = &self.types[*sum].origin;
+                        continue;
+                    }
+                    return "encoding".to_string();
+                }
+                Origin::Packet { routes, .. } => {
+                    let mut keys: Vec<String> = routes
+                        .iter()
+                        .map(|r| format!("{}_{}", file_token(&r.state), file_token(&r.direction)))
+                        .collect();
+                    keys.sort();
+                    keys.dedup();
+                    return match keys.as_slice() {
+                        [] => "unrouted".to_string(),
+                        [one] => one.clone(),
+                        _ => "shared".to_string(),
+                    };
+                }
+                Origin::Encoding { .. } | Origin::Enum { .. } | Origin::Frame { .. } => {
+                    return "encoding".to_string();
+                }
+            }
+        }
+    }
+}
+
+/// A path segment: lowercase ascii, anything else becomes `_`.
+pub(crate) fn file_token(s: &str) -> String {
+    let mut out = String::new();
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    while out.ends_with('_') {
+        out.pop();
+    }
+    if out.is_empty() || out.starts_with(|c: char| c.is_ascii_digit()) {
+        out.insert(0, '_');
+    }
+    out
+}
+
+impl Program {
     /// The type of an IR key.
     pub fn type_by_ir(&self, ir: &str) -> Option<TypeIdx> {
         self.types.iter().position(|t| t.ir == ir)
@@ -756,5 +826,102 @@ impl Program {
     /// type (after any wrap). `None` for a non-integer expression.
     pub fn int_range(&self, body: &Body, expr: &Expr) -> Option<(i128, i128)> {
         build::int_range(self, body, expr)
+    }
+
+    /// The logical negation of the bool `cond`, as a reader would write it:
+    /// a comparison of integers, bools, or strings flips its operator
+    /// (`a == b` becomes `a != b`, `a < b` becomes `a >= b`), `!x` becomes `x`,
+    /// and `&&`/`||` follow De Morgan. Anything else, including a float
+    /// comparison (NaN makes `!(a < b)` differ from `a >= b`), is wrapped in
+    /// `Expr::Not`. Printers use it for `Require` (fail when the negation
+    /// holds) instead of printing `!(cond)`.
+    pub fn negated(&self, body: &Body, cond: &Expr) -> Expr {
+        match cond {
+            Expr::Not(inner) => (**inner).clone(),
+            Expr::Bool(b) => Expr::Bool(!b),
+            Expr::Binary {
+                op,
+                lhs,
+                rhs,
+                ty,
+                wraps,
+            } if op.is_comparison() => {
+                let (operand, _) = self.expr_ty(body, lhs);
+                if matches!(operand, Ty::F32 | Ty::F64) {
+                    return Expr::Not(Box::new(cond.clone()));
+                }
+                let flipped = match op {
+                    BinOp::Eq => BinOp::Ne,
+                    BinOp::Ne => BinOp::Eq,
+                    BinOp::Lt => BinOp::Ge,
+                    BinOp::Le => BinOp::Gt,
+                    BinOp::Gt => BinOp::Le,
+                    _ => BinOp::Lt,
+                };
+                Expr::Binary {
+                    op: flipped,
+                    lhs: lhs.clone(),
+                    rhs: rhs.clone(),
+                    ty: ty.clone(),
+                    wraps: *wraps,
+                }
+            }
+            Expr::Binary {
+                op: op @ (BinOp::And | BinOp::Or),
+                lhs,
+                rhs,
+                ty,
+                wraps,
+            } => Expr::Binary {
+                op: if *op == BinOp::And {
+                    BinOp::Or
+                } else {
+                    BinOp::And
+                },
+                lhs: Box::new(self.negated(body, lhs)),
+                rhs: Box::new(self.negated(body, rhs)),
+                ty: ty.clone(),
+                wraps: *wraps,
+            },
+            other => Expr::Not(Box::new(other.clone())),
+        }
+    }
+}
+
+/// Whether a printer writes the integer literal `value` in hexadecimal: when
+/// it is a direct operand of `&`, `|`, or `^` (a mask or a flag) and greater
+/// than 9. Every printer follows this rule, so `b0 & 0x80` and
+/// `value & 0xffffffff` read the same in each language.
+pub fn hex_literal(op: BinOp, value: i64) -> bool {
+    matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) && value > 9
+}
+
+/// The spelling of a literal wire byte (a `Write` of `U8` or a repeat-until
+/// terminator) when `e` is an integer literal in `0..=255`: hexadecimal above
+/// 9 like masks (`0xFF`, or `0xff` when `upper` is false), decimal otherwise.
+/// `None` for anything else.
+pub fn byte_literal(e: &Expr, upper: bool) -> Option<String> {
+    match e {
+        Expr::Int { value, .. } if (0..=255).contains(value) => Some(match *value {
+            0..=9 => value.to_string(),
+            _ if upper => format!("0x{value:X}"),
+            _ => format!("0x{value:x}"),
+        }),
+        _ => None,
+    }
+}
+
+/// Whether control never falls off the end of `stmts`: they end in a
+/// `Return` or a `Fail`, or in an `If` with an `else` or a `Match` whose every
+/// branch diverges. A `Match` without `other` diverges when its arms do:
+/// printers give it a default that fails.
+pub fn diverges(stmts: &[Stmt]) -> bool {
+    match stmts.last() {
+        Some(Stmt::Return(_) | Stmt::Fail(_)) => true,
+        Some(Stmt::If { then, els, .. }) => !els.is_empty() && diverges(then) && diverges(els),
+        Some(Stmt::Match { arms, other, .. }) => {
+            other.as_deref().is_none_or(diverges) && arms.iter().all(|arm| diverges(&arm.body))
+        }
+        _ => false,
     }
 }

@@ -1,6 +1,9 @@
 [workspace]
 members = ["crates/bps"]
 resolver = "2"
+# `build/` holds emitted example trees (`bpsc emit ... --out build/26_3/<lang>`); the
+# rust-typed crate there is buildable in place, so keep it out of this workspace.
+exclude = ["build"]
 
 # Hard gate: a clippy finding is a compile error under `cargo clippy`, with no flags needed. The
 # gate adds `-- -D warnings` so a rustc warning fails too (see README, "Clippy is a hard gate").

@@ -1,9 +1,12 @@
-//! `emit typescript`: one self-contained `bpsgen.ts` ES module.
+//! `emit typescript`: a `bpsgen.ts` index over one ES module per route
+//! category (`runtime.ts`, `encoding.ts`, `play_clientbound.ts`, `shared.ts`,
+//! ...), the same split as the other printers.
 //!
-//! The module runs under node 22 `--experimental-strip-types` and passes
+//! Modules run under node 22 `--experimental-strip-types` and pass
 //! `tsc --strict --noEmit` (plus `--erasableSyntaxOnly`) and `prettier --check`.
-//! All public symbols are exported; every exported type and function carries a
-//! doc comment naming its schema origin.
+//! Every module exports its declarations; `bpsgen.ts` re-exports them all, so
+//! the public surface is unchanged. Each module imports only the runtime
+//! helpers and other modules' symbols its text names.
 //!
 //! Types: a record is an `interface` (fields camelCase in schema order,
 //! optional fields `name?: T`), a sum is a discriminated union over
@@ -27,6 +30,7 @@
 //! typed program documents maps to a `never`-returning builder so narrowing
 //! and definite assignment hold past them.
 
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -34,7 +38,7 @@ use crate::ResolvedSchema;
 use crate::errors::{BpsResult, emit};
 use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Func, IntTy, Origin, ParamRole, Program, ReadOp, RepeatMode, Stmt,
-    Ty, TypeIdx, WriteOp, escape,
+    Ty, TypeIdx, WriteOp, byte_literal, escape, hex_literal,
 };
 
 const RUNTIME: &str = r#"export type BpsErrorKind =
@@ -121,7 +125,7 @@ export function bytesTooLong(
 export function untilEndEncode(codec: string, offset: number): never {
   throw new BpsError("untilEndEncode", codec, offset, "encode not supported");
 }
-const utf8Encoder = new TextEncoder();
+export const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 export class Reader {
   data: Uint8Array;
@@ -379,13 +383,238 @@ pub fn type_name(program: &Program, ty: TypeIdx) -> String {
 
 pub fn emit_typescript(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
-    let mut src = String::from(RUNTIME);
     let printer = Printer { program: &program };
-    printer.types(&mut src);
-    printer.codecs(&mut src);
+    let mut parts: BTreeMap<String, String> = BTreeMap::new();
+    parts.insert("runtime".to_string(), RUNTIME.to_string());
+    let mut stem = String::new();
+    let mut buf = String::new();
+    let mut flush = |stem: &str, buf: &mut String| {
+        if !buf.is_empty() {
+            parts.entry(stem.to_string()).or_default().push_str(buf);
+            buf.clear();
+        }
+    };
+    for t in 0..program.types.len() {
+        let here = program.output_stem(&program.types[t].origin);
+        if here != stem {
+            flush(&stem, &mut buf);
+            stem = here;
+        }
+        buf.push_str(&printer.type_block(t));
+    }
+    for c in 0..program.codecs.len() {
+        let here = program.output_stem(&program.codecs[c].origin);
+        if here != stem {
+            flush(&stem, &mut buf);
+            stem = here;
+        }
+        buf.push_str(&printer.codec_block(c));
+    }
+    flush(&stem, &mut buf);
+
+    let symbols = symbols(&program);
+    let runtime = runtime_symbols();
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("bpsgen.ts"), src).map_err(|e| emit(e.to_string()))?;
+    let mut stems: Vec<String> = parts.keys().cloned().collect();
+    // Runtime first, then the categories alphabetically.
+    stems.sort_by_key(|stem| (stem != "runtime", stem.clone()));
+    for (stem, body) in &parts {
+        let body = format!("{}\n", body.trim_end_matches('\n'));
+        let src = format!("{}{body}", preamble(stem, &body, &symbols, &runtime));
+        fs::write(out_dir.join(format!("{stem}.ts")), src).map_err(|e| emit(e.to_string()))?;
+    }
+    let index: String = stems
+        .iter()
+        .map(|stem| format!("export * from \"./{stem}.ts\";\n"))
+        .collect();
+    fs::write(out_dir.join("bpsgen.ts"), index).map_err(|e| emit(e.to_string()))?;
     Ok(())
+}
+
+/// A generated export and the module that defines it, plus whether it is a
+/// value (a `const`/`class`/`function`) or a type only.
+struct Symbol {
+    stem: String,
+    value: bool,
+}
+
+/// Every name `bpsgen.ts` re-exports, keyed by emitted identifier.
+fn symbols(program: &Program) -> BTreeMap<String, Symbol> {
+    let mut out = BTreeMap::new();
+    for t in 0..program.types.len() {
+        let value = matches!(
+            program.types[t].kind,
+            crate::ir::typed::TypeKind::Enum { .. }
+        );
+        out.insert(
+            type_name(program, t),
+            Symbol {
+                stem: program.output_stem(&program.types[t].origin),
+                value,
+            },
+        );
+    }
+    for c in 0..program.codecs.len() {
+        let stem = program.output_stem(&program.codecs[c].origin);
+        for name in [decode_fn(program, c), encode_fn(program, c)] {
+            out.insert(
+                name,
+                Symbol {
+                    stem: stem.clone(),
+                    value: true,
+                },
+            );
+        }
+    }
+    out
+}
+
+/// The exports of [`RUNTIME`]: `(name, is_value)` in source order.
+fn runtime_symbols() -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    for line in RUNTIME.lines() {
+        let (rest, value) = if let Some(rest) = line.strip_prefix("export type ") {
+            (rest, false)
+        } else if let Some(rest) = line
+            .strip_prefix("export function ")
+            .or_else(|| line.strip_prefix("export class "))
+            .or_else(|| line.strip_prefix("export const "))
+        {
+            (rest, true)
+        } else {
+            continue;
+        };
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+            .collect();
+        if !name.is_empty() {
+            out.push((name, value));
+        }
+    }
+    out
+}
+
+/// Identifiers in `text`, skipping comments and string literals. Generated
+/// names are unique, so a named binding means a real reference; schema text
+/// inside strings and docs never adds one.
+fn identifiers(text: &str) -> HashSet<String> {
+    let bytes = text.as_bytes();
+    let mut out = HashSet::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i < bytes.len() && !(bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/')) {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            b'"' | b'\'' | b'`' => {
+                let quote = bytes[i];
+                i += 1;
+                while i < bytes.len() {
+                    match bytes[i] {
+                        b'\\' => i += 2,
+                        c if c == quote => {
+                            i += 1;
+                            break;
+                        }
+                        _ => i += 1,
+                    }
+                }
+            }
+            c if c.is_ascii_alphanumeric() || c == b'_' || c == b'$' => {
+                let start = i;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'$')
+                {
+                    i += 1;
+                }
+                out.insert(text[start..i].to_string());
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// The import block of one module: the runtime helpers and the symbols of
+/// other categories its text names, each in prettier's one-or-many-line shape.
+fn preamble(
+    stem: &str,
+    body: &str,
+    symbols: &BTreeMap<String, Symbol>,
+    runtime: &[(String, bool)],
+) -> String {
+    let names = identifiers(body);
+    let mut runtime_values = BTreeSet::new();
+    let mut runtime_types = BTreeSet::new();
+    for (name, value) in runtime {
+        if stem == "runtime" || !names.contains(name) {
+            continue;
+        }
+        if *value {
+            runtime_values.insert(name.clone());
+        } else {
+            runtime_types.insert(name.clone());
+        }
+    }
+    let mut deps: BTreeMap<String, (BTreeSet<String>, BTreeSet<String>)> = BTreeMap::new();
+    for name in &names {
+        let Some(symbol) = symbols.get(name) else {
+            continue;
+        };
+        if symbol.stem == stem {
+            continue;
+        }
+        let slot = deps.entry(symbol.stem.clone()).or_default();
+        if symbol.value {
+            slot.0.insert(name.clone());
+        } else {
+            slot.1.insert(name.clone());
+        }
+    }
+    let mut out = String::new();
+    if !runtime_values.is_empty() {
+        out.push_str(&import_stmt("import", &runtime_values, "./runtime.ts"));
+    }
+    if !runtime_types.is_empty() {
+        out.push_str(&import_stmt("import type", &runtime_types, "./runtime.ts"));
+    }
+    for (dep, (values, types)) in deps {
+        if !values.is_empty() {
+            out.push_str(&import_stmt("import", &values, &format!("./{dep}.ts")));
+        }
+        if !types.is_empty() {
+            out.push_str(&import_stmt("import type", &types, &format!("./{dep}.ts")));
+        }
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
+/// One import declaration, broken the way prettier breaks it at 80 columns.
+fn import_stmt(keyword: &str, names: &BTreeSet<String>, module: &str) -> String {
+    let joined: Vec<&str> = names.iter().map(String::as_str).collect();
+    let single = format!("{keyword} {{ {} }} from \"{module}\";", joined.join(", "));
+    if single.len() <= 80 {
+        return format!("{single}\n");
+    }
+    let mut out = format!("{keyword} {{\n");
+    for name in joined {
+        out.push_str(&format!("  {name},\n"));
+    }
+    out.push_str(&format!("}} from \"{module}\";\n"));
+    out
 }
 
 struct Printer<'a> {
@@ -422,7 +651,6 @@ fn ts_string(s: &str) -> String {
     out.push('"');
     out
 }
-
 /// `{ a, b }`, or `{}` when there are no parts.
 fn braced(parts: &[String]) -> String {
     if parts.is_empty() {
@@ -499,25 +727,28 @@ fn origin_doc(program: &Program, origin: &Origin) -> String {
 }
 
 impl<'a> Printer<'a> {
-    fn types(&self, out: &mut String) {
-        for t in 0..self.program.types.len() {
-            let decl = &self.program.types[t];
-            out.push_str(&origin_doc(self.program, &decl.origin));
-            out.push('\n');
-            match &decl.kind {
-                crate::ir::typed::TypeKind::Record { .. } => self.record(t, out),
-                crate::ir::typed::TypeKind::Sum { .. } => self.sum(t, out),
-                crate::ir::typed::TypeKind::Enum { members, .. } => self.enumer(t, members, out),
-                crate::ir::typed::TypeKind::Alias { target } => {
-                    out.push_str(&format!(
-                        "export type {} = {};\n",
-                        type_name(self.program, t),
-                        ts_ty(self.program, &Ty::Named(*target))
-                    ));
-                }
+    /// One declared type: origin doc, declaration, and the blank line after it.
+    fn type_block(&self, t: TypeIdx) -> String {
+        let mut out = String::new();
+        let decl = &self.program.types[t];
+        out.push_str(&origin_doc(self.program, &decl.origin));
+        out.push('\n');
+        match &decl.kind {
+            crate::ir::typed::TypeKind::Record { .. } => self.record(t, &mut out),
+            crate::ir::typed::TypeKind::Sum { .. } => self.sum(t, &mut out),
+            crate::ir::typed::TypeKind::Enum { base, members } => {
+                self.enumer(t, *base, members, &mut out)
             }
-            out.push('\n');
+            crate::ir::typed::TypeKind::Alias { target } => {
+                out.push_str(&format!(
+                    "export type {} = {};\n",
+                    type_name(self.program, t),
+                    ts_ty(self.program, &Ty::Named(*target))
+                ));
+            }
         }
+        out.push('\n');
+        out
     }
 
     /// A record interface; a block arm carries its variant discriminant first.
@@ -655,8 +886,20 @@ impl<'a> Printer<'a> {
         )
     }
 
-    fn enumer(&self, ty: TypeIdx, members: &[crate::ir::typed::EnumMember], out: &mut String) {
+    fn enumer(
+        &self,
+        ty: TypeIdx,
+        base: IntTy,
+        members: &[crate::ir::typed::EnumMember],
+        out: &mut String,
+    ) {
         let name = type_name(self.program, ty);
+        // The open value type (`decode` returns it directly); the `const`
+        // below only carries the known members.
+        out.push_str(&format!(
+            "export type {name} = {};\n",
+            ts_ty(self.program, &Ty::Int(base))
+        ));
         let entries: Vec<String> = members
             .iter()
             .map(|m| format!("{}: {}", pascal(&m.name), m.value))
@@ -697,7 +940,11 @@ fn fits53(range: Option<(i128, i128)>) -> bool {
 /// One call argument for prettier-style breaking: an expression with wrap
 /// text around it, or short raw text that never breaks.
 enum CallArg<'b> {
-    E { pre: String, e: &'b Expr, mid: String },
+    E {
+        pre: String,
+        e: &'b Expr,
+        mid: String,
+    },
     Raw(String),
 }
 
@@ -709,10 +956,15 @@ struct FnGen<'a> {
     /// Per local: print as `number` (schema `Arg`/`Tag` parameters are `i64`
     /// in the typed program but `number` in TS).
     num_like: Vec<bool>,
+    /// Per local: introduce with `const` (stored exactly once, never via
+    /// `Declare`; see `const_locals`).
+    const_local: Vec<bool>,
+    /// Per local: targeted by any `Bind` store (list pre-declarations
+    /// without one print `const`, mutated only through `.push`).
+    stored_local: Vec<bool>,
     /// The sum tag parameter's name, for `other` variant literals.
     tag_param: Option<String>,
 }
-
 impl<'a> FnGen<'a> {
     fn offset(&self) -> &'static str {
         if self.decode { "r.pos" } else { "w.length" }
@@ -743,11 +995,7 @@ impl<'a> FnGen<'a> {
             }
             Expr::Call {
                 func:
-                    Func::Utf8Len
-                    | Func::Utf16Units
-                    | Func::StrLen
-                    | Func::BytesLen
-                    | Func::ListLen,
+                    Func::Utf8Len | Func::Utf16Units | Func::StrLen | Func::BytesLen | Func::ListLen,
                 ..
             }
             | Expr::Remaining => Dom::Num,
@@ -866,7 +1114,7 @@ impl<'a> FnGen<'a> {
                 rhs,
                 ty,
                 wraps,
-            } => self.binary(body, e, *op, lhs, rhs, ty, *wraps),
+            } => self.binary(body, e, *op, lhs, rhs, ty, *wraps, true),
             Expr::Cond {
                 cond, then, els, ..
             } => {
@@ -889,6 +1137,24 @@ impl<'a> FnGen<'a> {
             Expr::Remaining => "r.remaining".to_string(),
             Expr::Construct { .. } | Expr::Variant { .. } => self.value(body, e),
         }
+    }
+
+    /// `expr` without this node's `>>> 0` normalize, for an operand whose
+    /// parent already coerces (`& | ^ << >> >>>` see only the value mod
+    /// 2^32 through ToInt32/ToUint32). One level only: deeper operands
+    /// print through `expr`, keeping their own normalizes.
+    fn expr_nowrap(&self, body: &Body, e: &Expr) -> String {
+        if let Expr::Binary {
+            op,
+            lhs,
+            rhs,
+            ty,
+            wraps,
+        } = e
+        {
+            return self.binary(body, e, *op, lhs, rhs, ty, *wraps, false);
+        }
+        self.expr(body, e)
     }
 
     /// An operand: parenthesized when it is a binary operation, a ternary,
@@ -921,17 +1187,78 @@ impl<'a> FnGen<'a> {
     /// A binary operand with prettier's parentheses: minimal ones plus its
     /// clarifying set (`& | ^ <<` group tighter operands, shifts group
     /// everything, `%` and `==` chains group left-nested pairs, `&&` groups
-    /// under `||`, right-nested `+ *` group).
+    /// under `||`, right-nested `+ *` group). Two refinements keep
+    /// prettier-clean output: a `>>> 0` normalize is skipped under a
+    /// coercing parent (see `expr_nowrap`), and a call-shaped operand
+    /// (`toI64(…)`, `floorDiv(…)`) never takes clarifying parens.
     fn operand(&self, body: &Body, e: &Expr, parent: BinOp, right: bool) -> String {
-        if let Expr::Binary { op, .. } = e
-            && child_paren(parent, *op, right)
+        if let Expr::Binary {
+            op,
+            lhs,
+            rhs,
+            ty,
+            wraps,
+        } = e
         {
-            return format!("({})", self.expr(body, e));
+            // A call-shaped operand prints as a call, so it never needs
+            // clarifying parens (prettier strips them).
+            if self.binary_is_call(body, e, *op, lhs, rhs, ty, *wraps) {
+                return self.expr(body, e);
+            }
+            use BinOp::{BitAnd, BitOr, BitXor, Shl, Shr};
+            // Under a coercing parent the `>>> 0` normalize is a no-op, so
+            // the operand prints without it (a remaining `wraps` mask still
+            // prints as a call, handled above).
+            if matches!(
+                parent,
+                BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | Shl | Shr
+            ) && matches!(op, Shl | BitAnd | BitOr | BitXor)
+            {
+                let s = self.expr_nowrap(body, e);
+                return if child_paren(parent, *op, right) {
+                    format!("({s})")
+                } else {
+                    s
+                };
+            }
+            if child_paren(parent, *op, right) {
+                return format!("({})", self.expr(body, e));
+            }
         }
         if matches!(e, Expr::Cond { .. }) {
             return format!("({})", self.expr(body, e));
         }
         self.expr(body, e)
+    }
+
+    /// Whether `binary()` prints this node as a call rather than an
+    /// operator: a `wraps` mask (`toI64(…)`/`toU64(…)`/`toBigI(…)`, or a
+    /// narrow helper) wraps the operator text, and `Div`/`Mod` always print
+    /// `floorDiv(…)`/`intMod(…)` (and the `bigint` pair). Mirrors
+    /// `binary()` exactly, so the paren decision sees the printed shape.
+    #[allow(clippy::too_many_arguments)]
+    fn binary_is_call(
+        &self,
+        body: &Body,
+        whole: &Expr,
+        op: BinOp,
+        lhs: &Expr,
+        rhs: &Expr,
+        ty: &Ty,
+        wraps: bool,
+    ) -> bool {
+        use BinOp::{Add, Div, Mod, Mul, Sub};
+        if matches!(op, Div | Mod) {
+            return true;
+        }
+        if !wraps {
+            return false;
+        }
+        if self.number_op(body, whole, op, lhs, rhs, ty, wraps) {
+            matches!(op, Add | Sub | Mul)
+        } else {
+            true
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -944,27 +1271,18 @@ impl<'a> FnGen<'a> {
         rhs: &Expr,
         ty: &Ty,
         wraps: bool,
+        allow_wrap: bool,
     ) -> String {
         let l = self.operand(body, lhs, op, false);
         let r = self.operand(body, rhs, op, true);
         match op {
             BinOp::Eq | BinOp::Ne => {
-                let (lty, _) = self.program.expr_ty(body, lhs);
+                // Domains are unified by `cmp_operands`, so strict equality
+                // is sound for every operand kind (numbers, bigints,
+                // strings, booleans).
                 let eq = match op {
-                    BinOp::Eq => {
-                        if matches!(lty, Ty::Str) {
-                            "==="
-                        } else {
-                            "=="
-                        }
-                    }
-                    _ => {
-                        if matches!(lty, Ty::Str) {
-                            "!=="
-                        } else {
-                            "!="
-                        }
-                    }
+                    BinOp::Eq => "===",
+                    _ => "!==",
                 };
                 let (l, r) = self.cmp_operands(body, lhs, rhs, op);
                 return format!("{l} {eq} {r}");
@@ -1029,7 +1347,11 @@ impl<'a> FnGen<'a> {
             }
             BinOp::Shl | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
                 let raw = format!("{l} {} {r}", op.symbol());
-                if self.needs_unsigned_wrap(body, whole, lhs, rhs) {
+                // Skipped under a coercing parent (`expr_nowrap`): `& | ^`
+                // `<<` `>>` `>>>` all funnel operands through ToInt32 or
+                // ToUint32, which see only the value mod 2^32, so the
+                // normalize is a no-op there and only obscures the chain.
+                if allow_wrap && self.needs_unsigned_wrap(body, whole, lhs, rhs) {
                     format!("({raw}) >>> 0")
                 } else {
                     raw
@@ -1042,21 +1364,12 @@ impl<'a> FnGen<'a> {
     /// Comparison operands in one domain: literals defer to the sibling,
     /// otherwise a remaining `number` side converts via `BigInt` (exact
     /// for integers), so `tsc --strict` never sees mixed domains.
-    fn cmp_operands(
-        &self,
-        body: &Body,
-        lhs: &Expr,
-        rhs: &Expr,
-        op: BinOp,
-    ) -> (String, String) {
+    fn cmp_operands(&self, body: &Body, lhs: &Expr, rhs: &Expr, op: BinOp) -> (String, String) {
         let lits = (
             matches!(lhs, Expr::Int { .. }),
             matches!(rhs, Expr::Int { .. }),
         );
-        let (mut lbig, mut rbig) = (
-            self.prints_big(body, lhs),
-            self.prints_big(body, rhs),
-        );
+        let (mut lbig, mut rbig) = (self.prints_big(body, lhs), self.prints_big(body, rhs));
         match lits {
             (true, false) => lbig = rbig,
             (false, true) => rbig = lbig,
@@ -1138,7 +1451,9 @@ impl<'a> FnGen<'a> {
             BinOp::Shl | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
                 match self.program.int_range(body, whole) {
                     Some((lo, hi)) => {
-                        lo >= i128::from(i32::MIN) && hi <= i128::from(u32::MAX) && !(lo < 0 && hi > i128::from(i32::MAX))
+                        lo >= i128::from(i32::MIN)
+                            && hi <= i128::from(u32::MAX)
+                            && !(lo < 0 && hi > i128::from(i32::MAX))
                     }
                     None => false,
                 }
@@ -1168,6 +1483,10 @@ impl<'a> FnGen<'a> {
         big: bool,
     ) -> String {
         if let Expr::Int { value, .. } = e {
+            // A mask or flag operand prints in hex (`0x7f`, not `127`).
+            if matches!(parent, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) {
+                return bit_int(parent, i128::from(*value), big);
+            }
             if big {
                 return format!("{value}n");
             }
@@ -1443,7 +1762,10 @@ impl<'a> FnGen<'a> {
         if self.sign_extend_num(body, args) {
             return format!("signExtend({}, {bits})", self.num_operand(body, &args[0]));
         }
-        format!("signExtendBigint({}, {bits})", self.big_operand(body, &args[0]))
+        format!(
+            "signExtendBigint({}, {bits})",
+            self.big_operand(body, &args[0])
+        )
     }
     /// Whether `sign_extend` prints in `number`: small literal width and an
     /// exactly-convertible operand.
@@ -1518,13 +1840,45 @@ impl<'a> FnGen<'a> {
         format!("Number({})", self.expr(body, e))
     }
 
+    /// A `number`-position expression as a breakable call argument,
+    /// mirroring `expr_num` (literals plain, widenings unwrapped,
+    /// `bigint` via `Number`).
+    fn num_call_arg<'x>(&self, body: &'x Body, e: &'x Expr) -> CallArg<'x> {
+        if let Expr::Int { value, .. } = e {
+            return CallArg::Raw(format!("{value}"));
+        }
+        if self.dom(body, e) == Dom::Num {
+            return CallArg::E {
+                pre: String::new(),
+                e,
+                mid: String::new(),
+            };
+        }
+        if let Expr::Cast {
+            expr,
+            to: Ty::Int(IntTy::I64 | IntTy::U64),
+        } = e
+            && self.dom(body, expr) == Dom::Num
+        {
+            return CallArg::E {
+                pre: String::new(),
+                e: expr,
+                mid: String::new(),
+            };
+        }
+        CallArg::E {
+            pre: "Number(".to_string(),
+            e,
+            mid: ")".to_string(),
+        }
+    }
+
     /// A call argument converted to its parameter's domain.
     fn arg(&self, body: &Body, num_target: bool, e: &Expr) -> String {
-        if let Expr::Int { value, .. } = e {
-            if num_target {
-                return format!("{value}");
-            }
-            return format!("{value}n");
+        if let Expr::Int { value, .. } = e
+            && num_target
+        {
+            return format!("{value}");
         }
         match (num_target, self.dom(body, e)) {
             (true, Dom::Num) | (false, Dom::Big) => self.expr(body, e),
@@ -1554,11 +1908,17 @@ impl<'a> FnGen<'a> {
                     parts.push(format!("kind: \"{kind}\""));
                 }
                 for (f, e) in fields.iter().enumerate() {
-                    parts.push(format!(
-                        "{}: {}",
-                        field_ident(self.program, *ty, f),
-                        self.expr(body, e)
-                    ));
+                    // `{ protocolVersion }`, not
+                    // `{ protocolVersion: protocolVersion }`: both names go
+                    // through the same case transform, so equal text means
+                    // the value is that local.
+                    let name = field_ident(self.program, *ty, f);
+                    let v = self.expr(body, e);
+                    if v == name {
+                        parts.push(name);
+                    } else {
+                        parts.push(format!("{name}: {v}"));
+                    }
                 }
                 parts
             }
@@ -1654,6 +2014,27 @@ fn needs_group(e: &Expr, parent: u8) -> bool {
         _ => false,
     }
 }
+/// An integer literal that is a direct operand of `& | ^`: hexadecimal when
+/// [`hex_literal`] says so (a mask or flag reads as `0x7f`, not `127`).
+/// Wider-than-64 values, which `hex_literal` cannot take, follow the same
+/// `> 9` rule; `big` selects the `n` suffix.
+fn bit_int(op: BinOp, value: i128, big: bool) -> String {
+    let hex = match i64::try_from(value) {
+        Ok(v) => hex_literal(op, v),
+        Err(_) => value > 9,
+    };
+    if hex {
+        if big {
+            format!("0x{value:x}n")
+        } else {
+            format!("0x{value:x}")
+        }
+    } else if big {
+        format!("{value}n")
+    } else {
+        format!("{value}")
+    }
+}
 /// Whether a binary child needs parentheses under `parent` (`right` selects
 /// the right-hand side), matching prettier exactly: minimal precedence
 /// parens plus its clarifying set, verified operator-pair by operator-pair.
@@ -1730,13 +2111,9 @@ fn cast_wrap_dom(
     }
 }
 impl<'a> Printer<'a> {
-    fn codecs(&self, out: &mut String) {
-        for c in 0..self.program.codecs.len() {
-            self.codec_fns(c, out);
-        }
-    }
-
-    fn codec_fns(&self, c: CodecIdx, out: &mut String) {
+    /// The decode and encode functions of one codec.
+    fn codec_block(&self, c: CodecIdx) -> String {
+        let mut out = String::new();
         let codec = &self.program.codecs[c];
         let doc = origin_doc(self.program, &codec.origin);
         let ret = ts_ty(self.program, &codec.value);
@@ -1754,11 +2131,14 @@ impl<'a> Printer<'a> {
                 .zip(body.params.iter())
                 .find(|(p, _)| matches!(p.role, ParamRole::Tag))
                 .map(|(_, lid)| camel(&body.locals[*lid].name));
+            let (const_local, stored_local) = const_locals(body);
             let cg = FnGen {
                 program: self.program,
                 codec: codec.name.snake(),
                 decode,
                 num_like,
+                const_local,
+                stored_local,
                 tag_param,
             };
             let name = if decode {
@@ -1791,12 +2171,32 @@ impl<'a> Printer<'a> {
                 let opt = if p.optional { " | undefined" } else { "" };
                 params.push(format!("{}: {ty}{opt}", camel(&body.locals[*lid].name)));
             }
+            let empty = (if decode {
+                &codec.decode.stmts
+            } else {
+                &codec.encode.stmts
+            })
+            .is_empty();
+            // Empty bodies stay on one line, matching prettier.
             let (head, tail) = if decode {
-                (format!("export function {name}"), format!(": {ret} {{"))
+                (
+                    format!("export function {name}"),
+                    if empty {
+                        format!(": {ret} {{}}")
+                    } else {
+                        format!(": {ret} {{")
+                    },
+                )
+            } else if empty {
+                (format!("export function {name}"), ": void {}".to_string())
             } else {
                 (format!("export function {name}"), ": void {".to_string())
             };
-            cg.signature(&head, &params, &tail, out);
+            cg.signature(&head, &params, &tail, &mut out);
+            if empty {
+                out.push('\n');
+                continue;
+            }
             cg.stmts(
                 body,
                 if decode {
@@ -1805,10 +2205,11 @@ impl<'a> Printer<'a> {
                     &codec.encode.stmts
                 },
                 1,
-                out,
+                &mut out,
             );
             out.push_str("}\n\n");
         }
+        out
     }
 }
 
@@ -1852,9 +2253,16 @@ impl<'a> FnGen<'a> {
                         out,
                     );
                 } else if let Ty::List(t) = &loc.ty {
+                    // Only `.push` mutates the list, so `const` — unless a
+                    // `Bind` store targets it (then `let`, defensively).
+                    let kw = if self.stored_local[*local] {
+                        "let"
+                    } else {
+                        "const"
+                    };
                     self.line(
                         ind,
-                        &format!("let {n}: {}[] = [];", ts_ty(self.program, t)),
+                        &format!("{kw} {n}: {}[] = [];", ts_ty(self.program, t)),
                         out,
                     );
                 } else if *zero && !matches!(loc.ty, Ty::Named(_)) {
@@ -1868,12 +2276,7 @@ impl<'a> FnGen<'a> {
                 }
             }
             Stmt::Let { dst, value } => {
-                let n = self.local_name(body, dst.local);
-                let head = if dst.declare {
-                    format!("let {n} = ")
-                } else {
-                    format!("{n} = ")
-                };
+                let head = self.decl_head(body, dst);
                 self.assign(body, &head, value, ind, out);
             }
             Stmt::Read { dst, op } => {
@@ -1882,11 +2285,25 @@ impl<'a> FnGen<'a> {
                     ReadOp::F32 => format!("r.readF32(\"{}\")", self.codec),
                     ReadOp::F64 => format!("r.readF64(\"{}\")", self.codec),
                     ReadOp::Bytes(n) => {
-                        format!(
-                            "r.readBytes(\"{}\", {})",
+                        let bind = self.bind_head(body, dst);
+                        let single = format!(
+                            "{bind}r.readBytes(\"{}\", {});",
                             self.codec,
                             self.expr_num(body, n)
-                        )
+                        );
+                        self.stmt_call(
+                            body,
+                            &format!("{bind}r.readBytes"),
+                            &[
+                                CallArg::Raw(format!("\"{}\"", self.codec)),
+                                self.num_call_arg(body, n),
+                            ],
+                            ";",
+                            ind,
+                            out,
+                            &single,
+                        );
+                        return;
                     }
                     ReadOp::Rest => "r.readRest()".to_string(),
                 };
@@ -1900,48 +2317,80 @@ impl<'a> FnGen<'a> {
                     "r",
                     self.call_args(body, target, args)
                 );
-                self.line(ind, &format!("{}{call};", self.bind_head(body, dst)), out);
+                self.assign_break(&self.bind_head(body, dst), &call, ind, out);
             }
             Stmt::Utf8 { dst, src } => {
                 let b = self.expr(body, src);
-                let call = format!("decodeUtf8({b}, \"{}\", r.pos - ({b}).length)", self.codec);
-                self.line(ind, &format!("{}{call};", self.bind_head(body, dst)), out);
+                let call = format!("decodeUtf8({b}, \"{}\", r.pos - {b}.length)", self.codec);
+                self.assign_break(&self.bind_head(body, dst), &call, ind, out);
             }
             Stmt::Write { op, value } => {
-                let call = match op {
-                    WriteOp::U8 => format!("w.writeU8({})", self.expr(body, value)),
-                    WriteOp::F32 => format!("w.writeF32({})", self.expr(body, value)),
-                    WriteOp::F64 => format!("w.writeF64({})", self.expr(body, value)),
-                    WriteOp::Bytes(n) => format!(
-                        "w.writeBytesFixed(\"{}\", {}, {})",
+                if let WriteOp::Bytes(n) = op {
+                    let v = self.expr(body, value);
+                    let single = format!(
+                        "w.writeBytesFixed(\"{}\", {v}, {});",
                         self.codec,
-                        self.expr(body, value),
                         self.expr_num(body, n)
-                    ),
-                    WriteOp::Rest => format!("w.writeBytes({})", self.expr(body, value)),
+                    );
+                    self.stmt_call(
+                        body,
+                        "w.writeBytesFixed",
+                        &[
+                            CallArg::Raw(format!("\"{}\"", self.codec)),
+                            CallArg::E {
+                                pre: String::new(),
+                                e: value,
+                                mid: String::new(),
+                            },
+                            self.num_call_arg(body, n),
+                        ],
+                        ";",
+                        ind,
+                        out,
+                        &single,
+                    );
+                    return;
+                }
+                if let (WriteOp::U8, Some(byte)) = (op, byte_literal(value, false)) {
+                    self.line(ind, &format!("w.writeU8({byte});"), out);
+                    return;
+                }
+                let (open, close) = match op {
+                    WriteOp::U8 => ("w.writeU8(", ");"),
+                    WriteOp::F32 => ("w.writeF32(", ");"),
+                    WriteOp::F64 => ("w.writeF64(", ");"),
+                    WriteOp::Bytes(_) => unreachable!("handled above"),
+                    WriteOp::Rest => ("w.writeBytes(", ");"),
                 };
-                self.line(ind, &format!("{call};"), out);
+                self.lay(body, open, value, close, ind, out);
             }
             Stmt::Encode { codec, args, value } => {
                 let target = &self.program.codecs[*codec];
-                let call = format!(
-                    "{}(w, {}{})",
-                    encode_fn(self.program, *codec),
+                let name = encode_fn(self.program, *codec);
+                let single = format!(
+                    "{name}(w, {}{});",
                     self.expr(body, value),
                     self.call_args(body, target, args)
                 );
-                self.line(ind, &format!("{call};"), out);
+                let mut cargs = vec![
+                    CallArg::Raw("w".to_string()),
+                    CallArg::E {
+                        pre: String::new(),
+                        e: value,
+                        mid: String::new(),
+                    },
+                ];
+                for (i, a) in args.iter().enumerate() {
+                    cargs.push(CallArg::Raw(self.param_arg(body, &target.params[i], a)));
+                }
+                self.stmt_call(body, &name, &cargs, ";", ind, out, &single);
             }
             Stmt::Require { cond, text } => {
                 self.lay_require(body, cond, text, ind, out);
             }
             Stmt::Unwrap { dst, src, field } => {
                 let n = self.local_name(body, dst.local);
-                let head = if dst.declare {
-                    format!("let {n} = ")
-                } else {
-                    format!("{n} = ")
-                };
+                let head = self.decl_head(body, dst);
                 self.line(ind, &format!("{head}{};", self.expr(body, src)), out);
                 let guard = format!("if ({n} === undefined)");
                 let fail = format!(
@@ -1953,7 +2402,19 @@ impl<'a> FnGen<'a> {
                     self.line(ind, &format!("{guard} {fail}"), out);
                 } else {
                     self.line(ind, &guard, out);
-                    self.line(ind + 1, &fail, out);
+                    self.stmt_call(
+                        body,
+                        "missingField",
+                        &[
+                            CallArg::Raw(format!("\"{}\"", self.codec)),
+                            CallArg::Raw(self.offset().to_string()),
+                            CallArg::Raw(format!("\"{field}\"")),
+                        ],
+                        ";",
+                        ind + 1,
+                        out,
+                        &fail,
+                    );
                 }
             }
             Stmt::If { cond, then, els } => {
@@ -2045,10 +2506,19 @@ impl<'a> FnGen<'a> {
     }
 
     fn bind_head(&self, body: &Body, dst: &crate::ir::typed::Bind) -> String {
-        if dst.declare {
-            format!("let {} = ", self.local_name(body, dst.local))
+        self.decl_head(body, dst)
+    }
+
+    /// `let` or `const` for a store: `const` when the binding introduces a
+    /// local that is never stored again (see `const_locals`).
+    fn decl_head(&self, body: &Body, dst: &crate::ir::typed::Bind) -> String {
+        let n = self.local_name(body, dst.local);
+        if dst.declare && self.const_local[dst.local] {
+            format!("const {n} = ")
+        } else if dst.declare {
+            format!("let {n} = ")
         } else {
-            format!("{} = ", self.local_name(body, dst.local))
+            format!("{n} = ")
         }
     }
 
@@ -2086,30 +2556,48 @@ impl<'a> FnGen<'a> {
     }
 
     fn lay_require(&self, body: &Body, cond: &Expr, text: &str, ind: usize, out: &mut String) {
+        // Fail when the negation holds (`protocolVersion !== 777`, not
+        // `!(protocolVersion == 777)`); the detail keeps the schema text.
+        let neg = self.program.negated(body, cond);
+        let detail = ts_string(text);
         let single = format!(
-            "if (!({})) requireFailed(\"{}\", {}, {});",
-            self.expr(body, cond),
+            "if ({}) requireFailed(\"{}\", {}, {detail});",
+            self.expr(body, &neg),
             self.codec,
             self.offset(),
-            ts_string(text)
         );
         if ind * 2 + single.len() <= 80 {
             self.line(ind, &single, out);
             return;
         }
         // Split the statement; only a pathological condition breaks further.
-        let head = format!("if (!({}))", self.expr(body, cond));
-        let fail =
-            format!("requireFailed(\"{}\", {}, {});", self.codec, self.offset(), ts_string(text));
+        let head = format!("if ({})", self.expr(body, &neg));
+        let fail = format!(
+            "requireFailed(\"{}\", {}, {detail});",
+            self.codec,
+            self.offset(),
+        );
         // `single` did not fit, so split the statement.
         if ind * 2 + head.len() <= 80 {
             self.line(ind, &head, out);
-            self.line(ind + 1, &fail, out);
+            self.stmt_call(
+                body,
+                "requireFailed",
+                &[
+                    CallArg::Raw(format!("\"{}\"", self.codec)),
+                    CallArg::Raw(self.offset().to_string()),
+                    CallArg::Raw(detail.clone()),
+                ],
+                ";",
+                ind + 1,
+                out,
+                &fail,
+            );
             return;
         }
         // Break the condition, keeping the `requireFailed` on the last line.
         let mut lines: Vec<(usize, String)> = Vec::new();
-        self.lay_parts(body, "if (!(", cond, ind, &mut lines);
+        self.lay_parts(body, "if (", &neg, ind, &mut lines);
         let (li, last) = lines.pop().unwrap_or((ind, String::new()));
         for (li, l) in lines {
             self.line(li, &l, out);
@@ -2117,14 +2605,73 @@ impl<'a> FnGen<'a> {
         self.line(
             li,
             &format!(
-                "{last})) requireFailed(\"{}\", {}, {});",
+                "{last}) requireFailed(\"{}\", {}, {detail});",
                 self.codec,
                 self.offset(),
-                ts_string(text)
             ),
             out,
         );
     }
+}
+
+/// Per local: introduce with `const`. True when the local is stored exactly
+/// once, by an introducing store (`Bind.declare`), with no `Declare` and no
+/// second store anywhere in the body (including `if`/`switch`/loop nests).
+/// Reassigned byte cursors (`let b0 = 0` + later stores), multi-arm
+/// destinations, and optional pre-declarations stay `let`. The second
+/// vector marks locals with any `Bind` store at all, so list
+/// pre-declarations (mutated only through `.push`) can still print `const`.
+fn const_locals(body: &Body) -> (Vec<bool>, Vec<bool>) {
+    fn store(stores: &mut [(usize, usize)], dst: &crate::ir::typed::Bind) {
+        let e = &mut stores[dst.local];
+        if dst.declare {
+            e.0 += 1;
+        } else {
+            e.1 += 1;
+        }
+    }
+    fn stmts(list: &[Stmt], stores: &mut [(usize, usize)], declared: &mut [bool]) {
+        for s in list {
+            match s {
+                Stmt::Declare { local, .. } => declared[*local] = true,
+                Stmt::Let { dst, .. }
+                | Stmt::Read { dst, .. }
+                | Stmt::Decode { dst, .. }
+                | Stmt::Utf8 { dst, .. }
+                | Stmt::Unwrap { dst, .. } => store(stores, dst),
+                Stmt::ExpectVariant { dst: Some(dst), .. } => store(stores, dst),
+                Stmt::If { then, els, .. } => {
+                    stmts(then, stores, declared);
+                    stmts(els, stores, declared);
+                }
+                Stmt::Match { arms, other, .. } => {
+                    for a in arms {
+                        stmts(&a.body, stores, declared);
+                    }
+                    if let Some(other) = other {
+                        stmts(other, stores, declared);
+                    }
+                }
+                Stmt::Repeat { body: inner, .. } | Stmt::ForEach { body: inner, .. } => {
+                    stmts(inner, stores, declared);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut stores = vec![(0usize, 0usize); body.locals.len()];
+    let mut declared = vec![false; body.locals.len()];
+    stmts(&body.stmts, &mut stores, &mut declared);
+    let is_const = stores
+        .iter()
+        .zip(declared.iter())
+        .map(|((intro, again), decl)| *intro == 1 && *again == 0 && !decl)
+        .collect::<Vec<_>>();
+    let stored = stores
+        .iter()
+        .map(|(intro, again)| *intro + *again > 0)
+        .collect::<Vec<_>>();
+    (is_const, stored)
 }
 
 /// The zero value of a type for `Declare`.
@@ -2173,10 +2720,23 @@ fn split_assoc<'b>(e: &'b Expr, op: BinOp, out: &mut Vec<&'b Expr>) {
 }
 
 impl<'a> FnGen<'a> {
-    /// Whether a chain part needs parentheses inside a chain of `op`.
-    fn chain_paren(p: &Expr, op: BinOp, right: bool) -> bool {
+    /// Whether a chain part needs parentheses inside a chain of `op`: a
+    /// call-shaped part (`toI64(…)`, `floorDiv(…)`) never does, matching
+    /// prettier, which strips such parens.
+    fn chain_paren(&self, body: &Body, p: &Expr, op: BinOp, right: bool) -> bool {
         match p {
-            Expr::Binary { op: inner, .. } => child_paren(op, *inner, right),
+            Expr::Binary {
+                op: inner,
+                lhs,
+                rhs,
+                ty,
+                wraps,
+            } => {
+                if self.binary_is_call(body, p, *inner, lhs, rhs, ty, *wraps) {
+                    return false;
+                }
+                child_paren(op, *inner, right)
+            }
             Expr::Cond { .. } => true,
             _ => false,
         }
@@ -2209,9 +2769,21 @@ impl<'a> FnGen<'a> {
         self.lay_inner(body, prefix, e, ind, lines, false);
     }
 
-    /// `lay_parts` with comma awareness: a top-level chain that will be
-    /// comma-terminated (a broken call's argument) skips clarifying parens
-    /// on its last part, matching prettier.
+    /// `lay_parts` for an operand whose parent already coerces: this node's
+    /// `>>> 0` normalize prints as a no-op-free operator (one level only).
+    fn lay_parts_nowrap(
+        &self,
+        body: &Body,
+        prefix: &str,
+        e: &Expr,
+        ind: usize,
+        lines: &mut Vec<(usize, String)>,
+    ) {
+        self.lay_inner(body, prefix, e, ind, lines, true);
+    }
+
+    /// The lines of `prefix + E` with optional `>>> 0` suppression (the
+    /// caller appends any suffix to the last).
     fn lay_inner(
         &self,
         body: &Body,
@@ -2219,9 +2791,13 @@ impl<'a> FnGen<'a> {
         e: &Expr,
         ind: usize,
         lines: &mut Vec<(usize, String)>,
-        comma: bool,
+        nowrap: bool,
     ) {
-        let single = format!("{prefix}{}", self.expr(body, e));
+        let single = if nowrap {
+            format!("{prefix}{}", self.expr_nowrap(body, e))
+        } else {
+            format!("{prefix}{}", self.expr(body, e))
+        };
         if ind * 2 + single.len() <= 80 {
             lines.push((ind, single));
             return;
@@ -2273,24 +2849,50 @@ impl<'a> FnGen<'a> {
                         _ => (String::new(), String::new(), true),
                     };
                     if plain {
-                        // `?:` binds looser than `|` `&` and the shifts, so a
-                        // ternary part stays parenthesized even when a comma
-                        // follows the whole call argument.
-                        let (po, pc) = if comma && i + 1 == n {
-                            // Comma-terminated last part: nothing binds
-                            // looser than `,`, so no clarifying parens.
-                            (String::new(), String::new())
-                        } else if Self::chain_paren(q, *op, i > 0) {
+                        // A ternary part binds loosest, so it stays
+                        // parenthesized wherever it lands in the chain.
+                        let (po, pc) = if self.chain_paren(body, q, *op, i > 0) {
                             ("(".to_string(), ")".to_string())
                         } else {
                             (String::new(), String::new())
                         };
-                        self.lay_parts(body, &(pre + &po), q, li, lines);
-                        let end = lines.len() - 1;
-                        if i + 1 == n {
-                            lines[end].1.push_str(&pc);
+                        // A bare mask part prints in hex; parts are short, so
+                        // no breaking applies.
+                        if let Expr::Int { value, .. } = q
+                            && matches!(*op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
+                        {
+                            let t = bit_int(*op, i128::from(*value), chain_big);
+                            if i + 1 == n {
+                                lines.push((li, format!("{pre}{po}{t}{pc}")));
+                            } else {
+                                lines.push((li, format!("{pre}{po}{t}{pc} {sym}")));
+                            }
                         } else {
-                            lines[end].1.push_str(&format!("{pc} {sym}"));
+                            // Under `& | ^` a `>>> 0` normalize is a no-op,
+                            // so a `& | ^ <<` part prints without it.
+                            let suppress =
+                                matches!(*op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
+                                    && matches!(
+                                        q,
+                                        Expr::Binary {
+                                            op: BinOp::Shl
+                                                | BinOp::BitAnd
+                                                | BinOp::BitOr
+                                                | BinOp::BitXor,
+                                            ..
+                                        }
+                                    );
+                            if suppress {
+                                self.lay_parts_nowrap(body, &(pre + &po), q, li, lines);
+                            } else {
+                                self.lay_parts(body, &(pre + &po), q, li, lines);
+                            }
+                            let end = lines.len() - 1;
+                            if i + 1 == n {
+                                lines[end].1.push_str(&pc);
+                            } else {
+                                lines[end].1.push_str(&format!("{pc} {sym}"));
+                            }
                         }
                     } else {
                         self.lay_parts(body, &(pre + &open), q, li, lines);
@@ -2459,12 +3061,50 @@ impl<'a> FnGen<'a> {
         }
     }
 
+    /// `head + rhs + ";"` with prettier's assignment layout: one line when
+    /// it fits, else the head alone and the whole right-hand side at +1
+    /// indent (a call's callee and arguments stay together, exactly as
+    /// prettier breaks `let x = decodeFoo(r);`).
+    fn assign_break(&self, head: &str, rhs: &str, ind: usize, out: &mut String) {
+        let single = format!("{head}{rhs};");
+        if ind * 2 + single.len() <= 80 {
+            self.line(ind, &single, out);
+            return;
+        }
+        self.line(ind, head.trim_end(), out);
+        self.line(ind + 1, &format!("{rhs};"), out);
+    }
+
     /// One call argument for prettier-style breaking.
     /// (The enum itself lives at module level, after this `impl`.)
-    /// A call laid prettier-style: single line when it fits, else the head,
-    /// each argument whole-or-broken on its own line with a trailing comma,
-    /// and the closer. `single` is the caller's single-line text (kept
-    /// byte-identical when it fits).
+    /// A call statement with prettier breaking: `single` (byte-identical
+    /// to the legacy shape) when it fits, else the head, comma-terminated
+    /// arguments, and the closer.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a broken call is the head, the arguments, the closer, and the single-line text"
+    )]
+    fn stmt_call(
+        &self,
+        body: &Body,
+        head: &str,
+        args: &[CallArg],
+        closer: &str,
+        ind: usize,
+        out: &mut String,
+        single: &str,
+    ) {
+        if ind * 2 + single.len() <= 80 {
+            self.line(ind, single, out);
+            return;
+        }
+        let mut lines = Vec::new();
+        self.lay_call_open(body, head, args, closer, ind, &mut lines, single);
+        for (li, l) in lines {
+            self.line(li, &l, out);
+        }
+    }
+
     #[allow(
         clippy::too_many_arguments,
         reason = "a broken call is the head, the arguments, the closer, and the single-line text"
@@ -2487,7 +3127,7 @@ impl<'a> FnGen<'a> {
         for arg in args {
             match arg {
                 CallArg::E { pre, e, mid } => {
-                    self.lay_inner(body, pre, e, ind + 1, lines, true);
+                    self.lay_inner(body, pre, e, ind + 1, lines, false);
                     let end = lines.len() - 1;
                     lines[end].1.push_str(&format!("{mid},"));
                 }
@@ -2545,10 +3185,19 @@ impl<'a> FnGen<'a> {
                 } else {
                     format!("Number({scr})")
                 };
-                self.line(
+                let single = format!("noMatchArm(\"{}\", {}, {tag});", self.codec, self.offset());
+                self.stmt_call(
+                    body,
+                    "noMatchArm",
+                    &[
+                        CallArg::Raw(format!("\"{}\"", self.codec)),
+                        CallArg::Raw(self.offset().to_string()),
+                        CallArg::Raw(tag),
+                    ],
+                    ";",
                     ind + 2,
-                    &format!("noMatchArm(\"{}\", {}, {tag});", self.codec, self.offset()),
                     out,
+                    &single,
                 );
             }
         }
@@ -2590,25 +3239,31 @@ impl<'a> FnGen<'a> {
                     self.line(ind, &check, out);
                 } else {
                     self.line(ind, &format!("if ({n} < 0)"), out);
-                    self.line(
+                    let fail = format!(
+                        "negativeLength(\"{}\", {}, {n});",
+                        self.codec,
+                        self.offset()
+                    );
+                    self.stmt_call(
+                        body,
+                        "negativeLength",
+                        &[
+                            CallArg::Raw(format!("\"{}\"", self.codec)),
+                            CallArg::Raw(self.offset().to_string()),
+                            CallArg::Raw(n.clone()),
+                        ],
+                        ";",
                         ind + 1,
-                        &format!(
-                            "negativeLength(\"{}\", {}, {n});",
-                            self.codec,
-                            self.offset()
-                        ),
                         out,
+                        &fail,
                     );
                 }
                 self.line(ind, &format!("for (let i = 0; i < {n}; i++) {{"), out);
             }
             RepeatMode::Until(t) => {
                 self.line(ind, "while (r.remaining > 0) {", out);
-                self.line(
-                    ind + 1,
-                    &format!("if (r.data[r.pos] === {}) {{", self.expr_num(body, t)),
-                    out,
-                );
+                let term = byte_literal(t, false).unwrap_or_else(|| self.expr_num(body, t));
+                self.line(ind + 1, &format!("if (r.data[r.pos] === {term}) {{"), out);
                 self.line(ind + 2, "r.pos++;", out);
                 self.line(ind + 2, "break;", out);
                 self.line(ind + 1, "}", out);
@@ -2657,15 +3312,23 @@ impl<'a> FnGen<'a> {
             self.line(ind, &format!("{guard} {fail}"), out);
         } else {
             self.line(ind, &guard, out);
-            self.line(ind + 1, &fail, out);
+            self.stmt_call(
+                body,
+                "wrongVariant",
+                &[
+                    CallArg::Raw(format!("\"{}\"", self.codec)),
+                    CallArg::Raw(self.offset().to_string()),
+                    CallArg::Raw(format!("\"{kind}\"")),
+                    CallArg::Raw(format!("{s}.kind")),
+                ],
+                ";",
+                ind + 1,
+                out,
+                &fail,
+            );
         }
         if let Some(dst) = dst {
-            let n = self.local_name(body, dst.local);
-            let head = if dst.declare {
-                format!("let {n} = ")
-            } else {
-                format!("{n} = ")
-            };
+            let head = self.decl_head(body, dst);
             let src = if decl.tags.is_empty() {
                 format!("{s}.value!")
             } else if self.is_flat_payload(ty, variant) {

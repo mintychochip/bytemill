@@ -160,6 +160,10 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) -> usize {
     let program = bps::ir::typed(&resolved).unwrap();
     let dir = scratch(tag);
     bps::emit_go::emit_go(&resolved, &dir).unwrap();
+    assert!(
+        !dir.join("packets.go").is_file(),
+        "packets.go should be split by route"
+    );
     assert_go_gates(&dir);
     let mut body = String::from(
         "package bpsgen\n\nimport (\n\t\"bytes\"\n\t\"testing\"\n)\n\nfunc TestPackets(t *testing.T) {\n",
@@ -197,6 +201,14 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) -> usize {
         n >= min_packets,
         "only {n} packets round-tripped for {schema_rel}"
     );
+    if schema_rel.contains("26_3") {
+        assert!(
+            dir.join("play_clientbound.go").is_file(),
+            "missing play_clientbound.go"
+        );
+        assert!(dir.join("encoding.go").is_file(), "missing encoding.go");
+        assert!(dir.join("shared.go").is_file(), "missing shared.go");
+    }
     std::fs::write(dir.join("round_test.go"), body).unwrap();
     let out = run(&dir, "go", &["test", "-count=1", "."]);
     assert!(

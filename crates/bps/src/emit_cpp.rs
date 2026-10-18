@@ -32,17 +32,19 @@
 //!   `position.raw` is written from the field.
 //! * Lines that would exceed 80 columns split into `const` temporaries, which
 //!   `clang-format` (LLVM style) leaves stable. Short-circuiting operators
-//!   and ternaries are never split. Overlong `using` lists are packed and
-//!   wrapped in `clang-format off/on` guards (their break choice is chaotic).
+//!   and ternaries are never split. Overlong `using` lists break after `=`
+//!   with the alternatives packed under the `<`, and overlong `Construct`
+//!   returns become designated initializers, both exactly the way
+//!   `clang-format` lays them out (no `off/on` guards).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use crate::ResolvedSchema;
 use crate::errors::{BpsResult, emit};
 use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Func, IntTy, LocalId, Name, Origin, Program, ReadOp, RepeatMode,
-    Stmt, Ty, TypeIdx, escape, typed,
+    Stmt, Ty, TypeIdx, escape, hex_literal, typed,
 };
 
 /// C++20 keywords and alternative tokens, plus POSIX/glibc and math macro
@@ -167,14 +169,16 @@ pub fn emit_cpp(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let layout = Layout::build(&program);
     check_top_level(&program, &layout)?;
     let header = emit_header(&program, &layout)?;
-    let source = emit_source(&program, &layout)?;
+    let sources = emit_sources(&program, &layout)?;
     std::fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
     let header_path = out_dir.join("bpsgen.hpp");
-    let source_path = out_dir.join("bpsgen.cpp");
     std::fs::write(&header_path, header).map_err(|e| emit(e.to_string()))?;
-    std::fs::write(&source_path, source).map_err(|e| emit(e.to_string()))?;
     clang_format(&header_path);
-    clang_format(&source_path);
+    for (stem, source) in sources {
+        let path = out_dir.join(format!("{stem}.cpp"));
+        std::fs::write(&path, source).map_err(|e| emit(e.to_string()))?;
+        clang_format(&path);
+    }
     Ok(())
 }
 
@@ -1233,10 +1237,9 @@ fn emit_type(program: &Program, layout: &Layout, src: &mut Src, item: &Item) {
     }
 }
 
-/// `using Name = std::variant<...>;`, packed when it runs long. A long
-/// alternative list breaks unpredictably across inputs (and clang-format
-/// versions), so the packed rendering is wrapped in `clang-format off/on`
-/// guards; everything else the printer emits is genuinely canonical.
+/// `using Name = std::variant<...>;`, one line when it fits. An overlong
+/// list breaks after `=` with the alternatives packed greedily under the
+/// `<`: exactly the `clang-format` (LLVM) layout, so no `off/on` guards.
 fn emit_using(src: &mut Src, name: &str, alts: &[String]) {
     let one = format!("using {name} = std::variant<{}>;", alts.join(", "));
     if src.ind * 2 + one.len() <= MAX_COL {
@@ -1244,28 +1247,12 @@ fn emit_using(src: &mut Src, name: &str, alts: &[String]) {
         return;
     }
     let budget = MAX_COL - src.ind * 2;
-    let pad4 = " ".repeat(src.ind * 2 + 4);
-    let prefix = format!("using {name} = std::variant<");
-    let bracket_col = prefix.len() - 1;
-    let keep_a = pack_lines(&prefix, &" ".repeat(bracket_col), alts, ">;", budget);
-    let mut keep_b = vec![prefix.clone()];
-    keep_b.extend(pack_lines(&pad4, &pad4, alts, ">;", budget));
-    let mut brk = vec![format!("using {name} =")];
-    let inner_first = format!("{pad4}std::variant<");
-    brk.extend(pack_lines(&inner_first, &" ".repeat(src.ind * 2 + 17), alts, ">;", budget));
-    // Fewest lines wins; ties go to the `=` break, then the bare form.
-    let mut best = &brk;
-    if keep_b.len() < best.len() {
-        best = &keep_b;
+    src.line(&format!("using {name} ="));
+    let inner_first = format!("{}std::variant<", " ".repeat(src.ind * 2 + 4));
+    let cont = " ".repeat(src.ind * 2 + 17);
+    for l in pack_lines(&inner_first, &cont, alts, ">;", budget) {
+        src.line(&l);
     }
-    if keep_a.len() < best.len() {
-        best = &keep_a;
-    }
-    src.line("// clang-format off");
-    for l in best {
-        src.line(l);
-    }
-    src.line("// clang-format on");
 }
 
 /// Greedy comma packing after `first`, continuing at `cont`, ending the last
@@ -1277,7 +1264,11 @@ fn pack_lines(first: &str, cont: &str, items: &[String], end: &str, budget: usiz
     for (i, a) in items.iter().enumerate() {
         let last = i + 1 == items.len();
         let piece = if started { format!(", {a}") } else { a.clone() };
-        let tail = if last { end.to_string() } else { ",".to_string() };
+        let tail = if last {
+            end.to_string()
+        } else {
+            ",".to_string()
+        };
         if cur.len() + piece.len() + tail.len() <= budget {
             cur.push_str(&piece);
             started = true;
@@ -1299,7 +1290,222 @@ fn pack_lines(first: &str, cont: &str, items: &[String], end: &str, budget: usiz
     lines.push(cur);
     lines
 }
+/// Byte index just past the quoted span starting at `s[i]` (`"` or `'`).
+fn skip_quoted(s: &[u8], mut i: usize) -> usize {
+    let quote = s[i];
+    i = next_char(s, i);
+    while i < s.len() {
+        match s[i] {
+            b'\\' => i = next_char(s, i),
+            c if c == quote => return i + 1,
+            c if c < 0x80 => i += 1,
+            _ => i = next_char(s, i),
+        }
+    }
+    i
+}
 
+/// Advance one whole character from a boundary index.
+fn next_char(s: impl AsRef<[u8]>, mut i: usize) -> usize {
+    let s = s.as_ref();
+    i += 1;
+    while i < s.len() && (s[i] & 0xC0) == 0x80 {
+        i += 1;
+    }
+    i
+}
+
+/// Split `s` at top-level commas (nesting depth 0, outside literals).
+fn split_top_commas(s: &str) -> Vec<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'"' | b'\'' => i = skip_quoted(b, i),
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b',' if depth == 0 => {
+                out.push(s[start..i].trim().to_string());
+                i += 1;
+                start = i;
+            }
+            c if c < 0x80 => i += 1,
+            _ => i = next_char(s, i),
+        }
+    }
+    out.push(s[start..].trim().to_string());
+    out
+}
+
+/// Binary operator precedence level for line splitting (loosest first).
+fn split_prec(op: &str) -> Option<u8> {
+    Some(match op {
+        "||" => 1,
+        "&&" => 2,
+        "|" => 3,
+        "^" => 4,
+        "&" => 5,
+        "==" | "!=" => 6,
+        "<" | "<=" | ">" | ">=" => 7,
+        "<<" | ">>" => 8,
+        "+" | "-" => 9,
+        "*" | "/" | "%" => 10,
+        _ => return None,
+    })
+}
+
+/// Split `s` at top-level binary operators of the loosest level present.
+/// Operators require single spaces on both sides (our printer always spaces
+/// them; this excludes templates, unaries, `->`, and `>>` inside types).
+/// Ternaries never split. Returns the pieces and the operator, or None.
+fn split_loosest(s: &str) -> Option<(Vec<String>, &'static str)> {
+    let b = s.as_bytes();
+    const OPS: &[&str] = &[
+        "||", "&&", "==", "!=", "<=", ">=", "<<", ">>", "<", ">", "+", "-", "*", "/", "%", "|",
+        "^", "&",
+    ];
+    let mut depth = 0u32;
+    let mut found: Vec<(usize, &'static str, u8)> = Vec::new();
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'"' | b'\'' => i = skip_quoted(b, i),
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            _ if depth == 0 => {
+                let mut matched = false;
+                for op in OPS {
+                    if s[i..].starts_with(op)
+                        && i > 0
+                        && s[..i].ends_with(' ')
+                        && s[i + op.len()..].starts_with(' ')
+                        && let Some(level) = split_prec(op)
+                    {
+                        found.push((i, op, level));
+                        i += op.len();
+                        matched = true;
+                        break;
+                    }
+                }
+                if !matched {
+                    i = next_char(s, i);
+                }
+            }
+            c if c < 0x80 => i += 1,
+            _ => i = next_char(s, i),
+        }
+    }
+    let loosest = found.iter().map(|(_, _, l)| *l).min()?;
+    let op = found.iter().find(|(_, _, l)| *l == loosest)?.1;
+    let mut pieces = Vec::new();
+    let mut start = 0usize;
+    for (pos, o, level) in found {
+        if level != loosest {
+            continue;
+        }
+        pieces.push(s[start..pos].trim().to_string());
+        start = pos + o.len();
+    }
+    pieces.push(s[start..].trim().to_string());
+    if pieces.len() < 2 {
+        return None;
+    }
+    Some((pieces, op))
+}
+
+/// Split call-shaped `s` into `(head, args, trailer)`. The head must look
+/// like a call head (identifiers, `::`, `.`, `->`, one `<>` group); anything
+/// else yields None.
+fn split_call(s: &str) -> Option<(String, Vec<String>, String)> {
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'"' | b'\'' => i = skip_quoted(b, i),
+            b'(' => break,
+            c if c < 0x80 => i += 1,
+            _ => i = next_char(s, i),
+        }
+    }
+    if i >= b.len() {
+        return None;
+    }
+    let mut head = s[..i].trim().to_string();
+    if head.ends_with('>') {
+        let mut depth = 0u32;
+        let mut j = head.len();
+        let hb = head.as_bytes();
+        let mut ok = false;
+        while j > 0 {
+            j -= 1;
+            match hb[j] {
+                b'>' => depth += 1,
+                b'<' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        ok = true;
+                        break;
+                    }
+                }
+                b'(' | b')' => break,
+                _ => {}
+            }
+        }
+        if !ok {
+            return None;
+        }
+        head.truncate(j);
+        head = head.trim_end().to_string();
+    }
+    if head.is_empty()
+        || !head
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_:.-~>*".contains(c))
+    {
+        return None;
+    }
+    let mut depth = 0u32;
+    let mut j = i;
+    while j < b.len() {
+        match b[j] {
+            b'"' | b'\'' => j = skip_quoted(b, j),
+            b'(' => {
+                depth += 1;
+                j += 1;
+            }
+            b')' => {
+                depth -= 1;
+                j += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            c if c < 0x80 => j += 1,
+            _ => j = next_char(s, j),
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    let inner = s[i + 1..j - 1].to_string();
+    let trailer = s[j..].to_string();
+    Some((s[..i].trim().to_string(), split_top_commas(&inner), trailer))
+}
 
 /// Emit `head(arg, ...)end`: one line when it fits, otherwise packed.
 /// Declarations (signatures) continue at one indent and end one argument per
@@ -1342,7 +1548,10 @@ fn break_call(head: &str, args: &[String], end: &str, base: usize, is_decl: bool
         if let Some((ret, name)) = head.rsplit_once(' ') {
             let alone = format!("{name}({}{end}", args.join(", "));
             if base + alone.len() <= MAX_COL {
-                return vec![format!("{}{}", pad(base), ret), format!("{}{}", pad(base), alone)];
+                return vec![
+                    format!("{}{}", pad(base), ret),
+                    format!("{}{}", pad(base), alone),
+                ];
             }
         }
     }
@@ -1353,75 +1562,262 @@ fn break_call(head: &str, args: &[String], end: &str, base: usize, is_decl: bool
     out
 }
 
-/// A lone argument is not split here; `None` lets the comma packer take it.
+/// A lone binary argument breaks in place: it starts on the head line and
+/// its pieces continue paren-aligned. None when anything overflows (the
+/// general comma flow takes over instead).
 fn break_single_arg(
-    _head: &str,
-    _arg: &str,
-    _end: &str,
-    _base: usize,
-    _paren_col: usize,
+    head: &str,
+    arg: &str,
+    end: &str,
+    base: usize,
+    paren_col: usize,
 ) -> Option<Vec<String>> {
-    None
+    let (pieces, op) = split_loosest(arg)?;
+    let mut out = Vec::new();
+    // First piece stays on the head line with a trailing operator.
+    let mut cur = format!("{}{}({}", " ".repeat(base), head, pieces[0]);
+    cur.push(' ');
+    cur.push_str(op);
+    if cur.len() > MAX_COL {
+        return None;
+    }
+    out.push(cur);
+    // Remaining pieces each take a paren-aligned line; the last takes `end`.
+    for (i, p) in pieces[1..].iter().enumerate() {
+        let last = i + 1 == pieces[1..].len();
+        let mut line = format!("{}{}", " ".repeat(paren_col), p);
+        if last {
+            line.push_str(end);
+        } else {
+            line.push(' ');
+            line.push_str(op);
+        }
+        if line.len() > MAX_COL {
+            return None;
+        }
+        out.push(line);
+    }
+    Some(out)
 }
-
 
 /// Greedy paren-aligned comma packing with atomic arguments: an argument
 /// that fits nowhere aligned fails the whole attempt (None).
-fn pack_paren(head: &str, args: &[String], end: &str, base: usize, paren_col: usize) -> Option<Vec<String>> {
+/// Greedy paren-aligned comma packing. An argument that fits nowhere aligned
+/// moves whole and breaks once (binary pieces or one call level, `+4`
+/// continuations); anything still overflowing fails the whole attempt (None),
+/// sending the call to break-after-paren flow.
+fn pack_paren(
+    head: &str,
+    args: &[String],
+    end: &str,
+    base: usize,
+    paren_col: usize,
+) -> Option<Vec<String>> {
     let mut lines = Vec::new();
     let mut cur = format!("{}{}(", " ".repeat(base), head);
     let mut started = false;
     for (i, a) in args.iter().enumerate() {
         let last = i + 1 == args.len();
+        let tail = if last {
+            end.to_string()
+        } else {
+            ",".to_string()
+        };
         let piece = if started { format!(", {a}") } else { a.clone() };
-        let tail = if last { end.to_string() } else { ",".to_string() };
         if cur.len() + piece.len() + tail.len() <= MAX_COL {
             cur.push_str(&piece);
             started = true;
             if last {
                 cur.push_str(end);
             }
-        } else if !started {
-            // Move whole to the next aligned line; fail when it fits nowhere.
-            lines.push(cur);
-            cur = format!("{}{}", " ".repeat(paren_col), a);
-            started = true;
-            if cur.len() + tail.len() > MAX_COL {
-                return None;
-            }
-            if last {
-                cur.push_str(end);
-            }
-        } else {
-            // Finish the line and move whole; fail when it fits nowhere.
+            continue;
+        }
+        // Finish the current line (unless it is just the head) and move the
+        // argument whole to the next aligned line.
+        if started {
             cur.push(',');
             lines.push(cur);
-            cur = format!("{}{}", " ".repeat(paren_col), a);
-            started = true;
-            if cur.len() + tail.len() > MAX_COL {
-                return None;
-            }
+        } else {
+            lines.push(cur);
+        }
+        cur = format!("{}{}", " ".repeat(paren_col), a);
+        started = true;
+        if cur.len() + tail.len() <= MAX_COL {
             if last {
                 cur.push_str(end);
             }
+            continue;
         }
+        // Break once, `+4` continuations (with `tail` on the last piece);
+        // deeper nesting fails the attempt. Subsequent arguments start
+        // fresh on the next aligned line.
+        let broken = break_arg_shallow(a, paren_col, &tail)?;
+        for b in broken {
+            lines.push(b);
+        }
+        cur = " ".repeat(paren_col);
+        started = false;
     }
-    lines.push(cur);
+    if !cur.trim().is_empty() {
+        lines.push(cur);
+    }
     Some(lines)
 }
 
-/// One argument per line at absolute indent `at`. `clang-format` reflows this.
+/// Pack arguments greedily at absolute indent `at`, breaking overlong ones
+/// recursively (binary chains and nested calls, `+4` continuations). The last
+/// line ends with `end`. Unbreakable arguments are emitted overlong.
+/// `need_sep` tracks whether the next piece needs a `", "` prefix (i.e. the
+/// current line ends with unterminated argument content).
 fn pack_args_at(args: &[String], end: &str, at: usize) -> Vec<String> {
-    let pad = " ".repeat(at);
-    args.iter()
-        .enumerate()
-        .map(|(i, a)| {
-            let tail = if i + 1 == args.len() { end } else { "," };
-            format!("{pad}{a}{tail}")
-        })
-        .collect()
+    let mut out = Vec::new();
+    let mut cur = " ".repeat(at);
+    let mut need_sep = false;
+    for (i, a) in args.iter().enumerate() {
+        let last = i + 1 == args.len();
+        let piece = if need_sep {
+            format!(", {a}")
+        } else {
+            a.clone()
+        };
+        let tail = if last {
+            end.to_string()
+        } else {
+            ",".to_string()
+        };
+        if cur.len() + piece.len() + tail.len() <= MAX_COL {
+            cur.push_str(&piece);
+            need_sep = true;
+            if last {
+                cur.push_str(end);
+            }
+            continue;
+        }
+        if need_sep {
+            // `cur` holds unterminated content: terminate it. (`cur` is never
+            // bare here, so this always emits a content line.)
+            cur.push(',');
+            out.push(std::mem::take(&mut cur));
+        }
+        // `cur` is bare indent here (dropped, never emitted); break the
+        // argument starting fresh at `at`, then continue with its last line
+        // (which already ends with its separator).
+        let broken = break_arg_at(a, at);
+        for b in &broken[..broken.len().saturating_sub(1)] {
+            out.push(b.clone());
+        }
+        cur = broken.into_iter().last().unwrap_or_else(|| " ".repeat(at));
+        if last {
+            cur.push_str(end);
+        } else {
+            cur.push(',');
+        }
+        need_sep = false;
+    }
+    out.push(cur);
+    out
 }
 
+/// Break one argument starting fresh at absolute indent `at`. All returned
+/// lines carry absolute indents and no trailers. Binary chains split after
+/// each top-level operator (`+4` continuations); nested calls break after
+/// their paren (`+4`, recursing); anything else stays whole.
+fn break_arg_at(arg: &str, at: usize) -> Vec<String> {
+    if let Some((pieces, op)) = split_loosest(arg) {
+        // One piece per line: first at `at`, rest at `at + 4`, trailing
+        // operator on every line but the last. Pieces are emitted whole
+        // (gate-driven if one ever overflows).
+        let mut out = Vec::new();
+        for (i, p) in pieces.iter().enumerate() {
+            let last = i + 1 == pieces.len();
+            let indent = if i == 0 { at } else { at + 4 };
+            let mut line = format!("{}{}", " ".repeat(indent), p);
+            if !last {
+                line.push(' ');
+                line.push_str(op);
+            }
+            out.push(line);
+        }
+        return out;
+    }
+    if let Some((head, args, trailer)) = split_call(arg) {
+        let mut out = vec![format!("{}{}(", " ".repeat(at), head)];
+        out.extend(pack_args_at(&args, &format!("){trailer}"), at + 4));
+        return out;
+    }
+    vec![format!("{}{}", " ".repeat(at), arg)]
+}
+
+/// Break one argument shallowly (a single level) for paren-flow: binary
+/// pieces or one call level, `+4` continuations, `tail` on the last line.
+/// None when anything still overflows.
+fn break_arg_shallow(arg: &str, at: usize, tail: &str) -> Option<Vec<String>> {
+    if let Some((pieces, op)) = split_loosest(arg) {
+        let mut out = Vec::new();
+        out.push(format!("{}{}", " ".repeat(at), pieces[0]));
+        for (i, p) in pieces[1..].iter().enumerate() {
+            let last = i + 1 == pieces[1..].len();
+            let mut line = format!("{}{}", " ".repeat(at + 4), p);
+            if last {
+                line.push_str(tail);
+            }
+            if line.len() > MAX_COL {
+                return None;
+            }
+            out.push(line);
+        }
+        // Trailing operators on every line but the last.
+        let n = out.len();
+        for (i, l) in out.iter_mut().enumerate() {
+            if i + 1 < n {
+                l.push(' ');
+                l.push_str(op);
+            }
+        }
+        // First line (at `at`) must also fit (it ends with `op` now).
+        if out[0].len() > MAX_COL {
+            return None;
+        }
+        return Some(out);
+    }
+    if let Some((head, args, trailer)) = split_call(arg) {
+        let mut out = vec![format!("{}{}(", " ".repeat(at), head)];
+        // One level: inner arguments atomic at `+4`.
+        let mut cur: String = " ".repeat(at + 4);
+        let mut started = false;
+        for (i, a) in args.iter().enumerate() {
+            let last = i + 1 == args.len();
+            let inner_tail = if last {
+                format!("){trailer}")
+            } else {
+                ",".to_string()
+            };
+            let piece = if started { format!(", {a}") } else { a.clone() };
+            if cur.len() + piece.len() + inner_tail.len() <= MAX_COL {
+                cur.push_str(&piece);
+                started = true;
+                if last {
+                    cur.push_str(&inner_tail);
+                }
+            } else {
+                return None;
+            }
+        }
+        if !started {
+            // No arguments placed (empty args): `head()` + trailer on one line.
+            cur.push_str(&format!("){trailer}"));
+        }
+        out.push(cur);
+        // Attach the outer `tail` to the very last line and verify.
+        let n = out.len();
+        out[n - 1].push_str(tail);
+        if out.iter().any(|l| l.len() > MAX_COL) {
+            return None;
+        }
+        return Some(out);
+    }
+    None
+}
 
 /// A signature: `Ret Name(args)` packed, breaking between the return type
 /// and the name when even the head overflows. Return types never contain
@@ -1593,23 +1989,26 @@ fn is_enum_ty(program: &Program, ty: &Ty) -> bool {
     )
 }
 
-fn emit_source(program: &Program, layout: &Layout) -> BpsResult<String> {
-    let mut src = Src::new();
-    src.line("#include \"bpsgen.hpp\"");
-    src.line("");
-    src.line("namespace bps {");
-    let mut first = true;
+fn emit_sources(program: &Program, layout: &Layout) -> BpsResult<BTreeMap<String, String>> {
+    let mut bodies: BTreeMap<String, Src> = BTreeMap::new();
     for ci in 0..program.codecs.len() {
+        let stem = program.output_stem(&program.codecs[ci].origin);
+        let src = bodies.entry(stem).or_insert_with(Src::new);
         for decode in [true, false] {
-            if !first {
+            if !src.out.is_empty() {
                 src.line("");
             }
-            first = false;
             src.raw(&emit_function(program, layout, ci, decode)?);
         }
     }
-    src.line("} // namespace bps");
-    Ok(finish(src.out))
+    let mut files = BTreeMap::new();
+    for (stem, src) in bodies {
+        let mut out = String::from("#include \"bpsgen.hpp\"\n\nnamespace bps {\n");
+        out.push_str(&src.out);
+        out.push_str("} // namespace bps\n");
+        files.insert(stem, finish(out));
+    }
+    Ok(files)
 }
 
 // ---------------------------------------------------------------------------
@@ -1702,7 +2101,12 @@ struct EVal {
     boxed: bool,
 }
 
-fn emit_function(program: &Program, layout: &Layout, codec: CodecIdx, decode: bool) -> BpsResult<String> {
+fn emit_function(
+    program: &Program,
+    layout: &Layout,
+    codec: CodecIdx,
+    decode: bool,
+) -> BpsResult<String> {
     let c = &program.codecs[codec];
     let body: &Body = if decode { &c.decode } else { &c.encode };
     let (rname, wname) = cursor_names(body);
@@ -1783,8 +2187,6 @@ impl<'a> Emitter<'a> {
             format!("{ty} {name}")
         }
     }
-
-
 
     fn throw_msg(&mut self, kind: &str) {
         let q = format!("\"{}\"", self.snake);
@@ -1922,7 +2324,10 @@ impl<'a> Emitter<'a> {
                 let vv = self.val(&v);
                 let q = format!("\"{}\"", self.snake);
                 match op {
-                    crate::ir::typed::WriteOp::U8 => self.stmt_call(&format!("{w}.u8"), &[vv]),
+                    crate::ir::typed::WriteOp::U8 => {
+                        let byte = crate::ir::typed::byte_literal(&v, true);
+                        self.stmt_call(&format!("{w}.u8"), &[byte.unwrap_or(vv)])
+                    }
                     crate::ir::typed::WriteOp::F32 => self.stmt_call(&format!("{w}.f32"), &[vv]),
                     crate::ir::typed::WriteOp::F64 => self.stmt_call(&format!("{w}.f64"), &[vv]),
                     crate::ir::typed::WriteOp::Bytes(n) => {
@@ -1945,8 +2350,9 @@ impl<'a> Emitter<'a> {
             }
             Stmt::Require { cond, text } => {
                 let c = cond.clone();
-                let cv = self.val(&c);
-                self.src.open(&format!("if (!({cv}))"));
+                let neg = self.program.negated(self.body, &c);
+                let cv = self.val(&neg);
+                self.src.open(&format!("if ({cv})"));
                 self.throw_msg(&format!("require failed: {text}"));
                 self.src.close("}");
             }
@@ -1958,7 +2364,7 @@ impl<'a> Emitter<'a> {
                     format!("({})", r.s)
                 };
                 let dot = if r.boxed { "->" } else { "." };
-                self.src.open(&format!("if (!({base}{dot}has_value()))"));
+                self.src.open(&format!("if (!{base}{dot}has_value())"));
                 self.throw_msg(&format!("missing field {field}"));
                 self.src.close("}");
                 let access = format!("{base}{dot}value()");
@@ -2247,11 +2653,9 @@ impl<'a> Emitter<'a> {
                 let q = format!("\"{}\"", self.snake);
                 self.src.open(&format!("while ({r}.remaining() > 0)"));
                 let t = t.clone();
-                let peek = match &t {
-                    Expr::Int { value, .. } if (0..256).contains(value) => {
-                        format!("{r}.peek_u8({q}) == {value}")
-                    }
-                    _ => {
+                let peek = match crate::ir::typed::byte_literal(&t, true) {
+                    Some(byte) => format!("{r}.peek_u8({q}) == {byte}"),
+                    None => {
                         let tv = self.paren_child(&t, BinOp::Eq, false);
                         format!("static_cast<std::int64_t>({r}.peek_u8({q})) == {tv}")
                     }
@@ -2361,8 +2765,12 @@ impl<'a> Emitter<'a> {
                 self.src.line(&one);
                 return;
             }
+            // Overlong: one designated initializer per line at a `+4`
+            // continuation, trailing comma, `};` on its own line — the
+            // `clang-format` (LLVM) layout, byte-stable without guards.
             let tname = pascal(&self.program.types[*ty].name);
-            self.src.line(&format!("{tname} _result{{}};"));
+            self.src.line(&format!("return {tname}{{"));
+            self.src.ind += 2;
             let decls = self.program.fields(*ty).to_vec();
             for (i, init) in fields.iter().enumerate() {
                 let r = self.render(init);
@@ -2372,10 +2780,10 @@ impl<'a> Emitter<'a> {
                 } else {
                     r.s
                 };
-                self.src
-                    .line(&format!("_result.{} = {s};", snake(&decls[i].name)));
+                self.src.line(&format!(".{} = {s},", snake(&decls[i].name)));
             }
-            self.src.line("return _result;");
+            self.src.ind -= 2;
+            self.src.line("};");
             return;
         }
         let s = self.val(e);
@@ -2578,6 +2986,14 @@ impl<'a> Emitter<'a> {
                 boxed: false,
             };
         }
+        if matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) {
+            let l = self.mask_operand(lhs, op, true);
+            let r = self.mask_operand(rhs, op, false);
+            return EVal {
+                s: self.binop_compose(op, &l, &r, ty, wraps),
+                boxed: false,
+            };
+        }
         if helper_printed(op, ty, wraps) {
             let l = lhs.clone();
             let r = rhs.clone();
@@ -2596,20 +3012,29 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// A bitwise operand: an integer literal that is a mask prints in hex
+    /// (`typed::hex_literal`); anything else parenthesizes as usual.
+    fn mask_operand(&mut self, e: &Expr, parent: BinOp, is_left: bool) -> String {
+        if let Expr::Int { value, ty } = e
+            && hex_literal(parent, *value)
+        {
+            return int_lit_hex(*value, *ty);
+        }
+        self.paren_child(e, parent, is_left)
+    }
+
     fn paren_child(&mut self, e: &Expr, parent: BinOp, is_left: bool) -> String {
         let cp = child_prec(e);
         let pp = bin_prec(parent);
         let s = self.val(e);
         // g++ -Wparentheses wants explicit parens when `&`, `^`, and `|`
         // mix, even though precedence already decides it.
-        let mixed_bits = matches!(
-            parent,
-            BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd
-        ) && matches!(
-            e,
-            Expr::Binary { op, .. }
-                if matches!(op, BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd) && *op != parent
-        );
+        let mixed_bits = matches!(parent, BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd)
+            && matches!(
+                e,
+                Expr::Binary { op, .. }
+                    if matches!(op, BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd) && *op != parent
+            );
         if cp < pp
             || mixed_bits
             || (cp == pp
@@ -2814,13 +3239,52 @@ fn helper_printed(op: BinOp, ty: &Ty, wraps: bool) -> bool {
 }
 
 fn int_lit(value: i64, ty: IntTy) -> String {
+    int_spelling(value, ty, false)
+}
+
+/// A mask operand of `&`, `|`, `^` in hex (`0x{:X}`, as in the runtime).
+fn int_lit_hex(value: i64, ty: IntTy) -> String {
+    int_spelling(value, ty, true)
+}
+
+/// An integer literal with a suffix only where the value needs it: a value
+/// that fits in `int` converts value-preserving into every 64-bit operand
+/// and parameter in the emitted code, so `<< 7LL`, `32LL`, `255ULL`, and
+/// `? 128LL : 0LL` print plain. Nothing in any shipped schema passes a
+/// literal to a deduced template argument (`std::min`/`std::max` never take
+/// one), so the narrower type changes no overload.
+fn int_spelling(value: i64, ty: IntTy, hex: bool) -> String {
+    let digits = if hex {
+        format!("0x{value:X}")
+    } else {
+        format!("{value}")
+    };
+    let fits_int = (i32::MIN as i64..=i32::MAX as i64).contains(&value);
     match ty {
-        IntTy::I8 | IntTy::I16 | IntTy::I32 => format!("{value}"),
-        IntTy::I64 => format!("{value}LL"),
-        IntTy::U8 | IntTy::U16 => format!("{value}"),
-        IntTy::U32 => format!("{value}U"),
-        IntTy::U64 => format!("{value}ULL"),
-        IntTy::I128 => format!("static_cast<__int128>({value}LL)"),
+        IntTy::I8 | IntTy::I16 | IntTy::I32 => digits,
+        IntTy::I64 => {
+            if fits_int {
+                digits
+            } else {
+                format!("{digits}LL")
+            }
+        }
+        IntTy::U8 | IntTy::U16 => digits,
+        IntTy::U32 => {
+            if fits_int {
+                digits
+            } else {
+                format!("{digits}U")
+            }
+        }
+        IntTy::U64 => {
+            if fits_int {
+                digits
+            } else {
+                format!("{digits}ULL")
+            }
+        }
+        IntTy::I128 => format!("static_cast<__int128>({digits}LL)"),
     }
 }
 
@@ -2842,5 +3306,3 @@ fn quoted(s: &str) -> String {
     o.push('"');
     o
 }
-
-

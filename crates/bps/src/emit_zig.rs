@@ -1,4 +1,8 @@
-//! `emit zig`: one `bpsgen.zig` of typed structs, unions, enums, and codecs.
+//! `emit zig`: a `bpsgen.zig` index over one module per route category
+//! (`runtime.zig`, `encoding.zig`, `play_clientbound.zig`, `shared.zig`, ...),
+//! each of typed structs, unions, enums, and codecs. `bpsgen.zig` re-exports
+//! every public declaration, so the public surface is unchanged; a module
+//! references another's declarations as `@import("x.zig").Foo`.
 //!
 //! The printer reads the typed program (`bps::ir::typed`), never the IR or
 //! the AST. Every encoding, packet, frame, and enum becomes either free
@@ -19,24 +23,26 @@
 //! `@intCast`/`@truncate`/`@bitCast` for the program's explicit casts, so
 //! nothing traps in Debug on a value the interpreter can produce.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
 use crate::ResolvedSchema;
 use crate::errors::{BpsResult, emit};
 use crate::ir::typed::{
-    Bind, Body, CodecIdx, Expr, Func, IntTy, LocalId, Origin, Program, ReadOp, RepeatMode, Stmt,
-    Ty, TypeIdx, WriteOp,
+    BinOp, Bind, Body, CodecIdx, Expr, Func, IntTy, LocalId, Origin, Program, ReadOp, RepeatMode,
+    Stmt, Ty, TypeIdx, WriteOp, byte_literal, hex_literal,
 };
 
-/// Emit `bpsgen.zig` for `resolved` into `out_dir`.
+/// Emit `bpsgen.zig` and its modules for `resolved` into `out_dir`.
 pub fn emit_zig(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
-    let printer = Printer::build(&program)?;
-    let src = printer.print()?;
+    let mut printer = Printer::build(&program)?;
+    let files = printer.files()?;
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("bpsgen.zig"), src).map_err(|e| emit(e.to_string()))?;
+    for (stem, src) in &files {
+        fs::write(out_dir.join(format!("{stem}.zig")), src).map_err(|e| emit(e.to_string()))?;
+    }
     Ok(())
 }
 
@@ -230,7 +236,7 @@ const KEYWORDS: &[&str] = &[
 
 /// Extra names reserved for locals and parameters: the function signatures
 /// already bind `reader`, `writer`, and `allocator`.
-const LOCAL_RESERVED: &[&str] = &["reader", "writer", "allocator"];
+const LOCAL_RESERVED: &[&str] = &["reader", "writer", "allocator", "bps_rt"];
 
 fn ident(name: &crate::ir::typed::Name, extra: &[&str]) -> String {
     let snake = name.snake();
@@ -333,12 +339,12 @@ pub fn signExtend(raw: u64, bits: u7) i64 {
     const sign: u64 = @as(u64, 1) << (b - 1);
     const mask: u64 = (@as(u64, 1) << b) - 1;
     var out = raw & mask;
-    if ((out & sign) != 0) out |= ~mask;
+    if (out & sign != 0) out |= ~mask;
     return @bitCast(out);
 }
 /// UTF-16 units of validated UTF-8 (0.14.1 std has no counter; validated
 /// first, so every lead byte starts a well-formed sequence here).
-fn utf16Units(s: []const u8) usize {
+pub fn utf16Units(s: []const u8) usize {
     var n: usize = 0;
     var i: usize = 0;
     while (i < s.len) {
@@ -368,7 +374,7 @@ fn utf16Units(s: []const u8) usize {
 
 /// `str_len` helper, emitted only when a schema uses it.
 const STRLEN_HELPER: &str = r#"/// Unicode scalars of a validated UTF-8 string.
-fn strLen(s: []const u8) i64 {
+pub fn strLen(s: []const u8) i64 {
     var n: i64 = 0;
     for (s) |c| {
         if ((c & 0xc0) != 0x80) n += 1;
@@ -420,23 +426,88 @@ impl<'a> Printer<'a> {
         Ok(printer)
     }
 
-    fn print(mut self) -> BpsResult<String> {
-        let mut out = String::new();
-        out.push_str(RUNTIME);
+    /// `stem` -> module source: `runtime.zig`, one module per route category,
+    /// and the `bpsgen.zig` index that re-exports them all.
+    fn files(&mut self) -> BpsResult<BTreeMap<String, String>> {
+        let mut runtime = RUNTIME.to_string();
+        if self.needs_strlen {
+            runtime.push_str(STRLEN_HELPER);
+        }
+        let mut bodies: BTreeMap<String, String> = BTreeMap::new();
         // Scalar and string codecs are free functions, in codec order.
         for c in 0..self.prog.codecs.len() {
             if self.prog.codecs[c].ty.is_none() {
-                out.push_str(&self.free_codec(c)?);
+                let here = self.prog.output_stem(&self.prog.codecs[c].origin);
+                let body = self.free_codec(c, &here)?;
+                bodies.entry(here).or_default().push_str(&body);
             }
         }
         // Declared types, in type order, with their codec's methods.
         for t in 0..self.prog.types.len() {
-            out.push_str(&self.type_decl(t)?);
+            let here = self.prog.output_stem(&self.prog.types[t].origin);
+            let body = self.type_decl(t, &here)?;
+            bodies.entry(here).or_default().push_str(&body);
         }
-        if self.needs_strlen {
-            out.push_str(STRLEN_HELPER);
+        let index = self.index(&runtime);
+        let mut files = BTreeMap::new();
+        for (stem, body) in bodies {
+            let mut src = String::new();
+            if body.contains("std.") {
+                src.push_str("const std = @import(\"std\");\n");
+            }
+            if body.contains("bps_rt.") {
+                src.push_str("const bps_rt = @import(\"runtime.zig\");\n");
+            }
+            if !src.is_empty() {
+                src.push('\n');
+            }
+            src.push_str(&body);
+            files.insert(stem, src);
         }
-        Ok(out)
+        files.insert("bpsgen".to_string(), index);
+        files.insert("runtime".to_string(), runtime);
+        Ok(files)
+    }
+
+    /// `bpsgen.zig`: re-export every public declaration, so the public API is
+    /// what the single-module emission was.
+    fn index(&self, runtime: &str) -> String {
+        let mut entries: BTreeSet<(String, String)> = BTreeSet::new();
+        for line in runtime.lines() {
+            let rest = line
+                .strip_prefix("pub const ")
+                .or_else(|| line.strip_prefix("pub fn "));
+            let Some(rest) = rest else { continue };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                entries.insert((name.clone(), "runtime".to_string()));
+            }
+        }
+        for c in 0..self.prog.codecs.len() {
+            if self.prog.codecs[c].ty.is_some() {
+                continue;
+            }
+            let stem = self.prog.output_stem(&self.prog.codecs[c].origin);
+            for name in [decode_fn(self.prog, c), encode_fn(self.prog, c)] {
+                entries.insert((name, stem.clone()));
+            }
+        }
+        for t in 0..self.prog.types.len() {
+            entries.insert((
+                self.prog.types[t].name.pascal(),
+                self.prog.output_stem(&self.prog.types[t].origin),
+            ));
+        }
+        let mut out = String::from("//! Generated BPS codecs, one module per route category.\n\n");
+        for (name, stem) in entries {
+            out.push_str(&format!(
+                "pub const {name} = @import(\"{stem}.zig\").{name};\n"
+            ));
+        }
+        out
     }
 }
 
@@ -515,7 +586,7 @@ fn boxed_edges(prog: &Program) -> (EdgeSet, EdgeSet) {
 impl Printer<'_> {
     // -- types ----------------------------------------------------------
 
-    fn type_decl(&mut self, t: TypeIdx) -> BpsResult<String> {
+    fn type_decl(&mut self, t: TypeIdx, here: &str) -> BpsResult<String> {
         let mut out = String::new();
         out.push_str(&self.doc(t));
         let name = self.prog.types[t].name.pascal();
@@ -528,14 +599,17 @@ impl Printer<'_> {
                 };
                 for (f, decl) in fields.iter().enumerate() {
                     let fname = field_name(&decl.name);
-                    out.push_str(&format!("    {fname}: {},\n", self.field_ty(t, f, decl)?));
+                    out.push_str(&format!(
+                        "    {fname}: {},\n",
+                        self.field_ty(t, f, decl, here)?
+                    ));
                 }
                 if let Some(codec) = self.prog.types[t].codec {
                     if self.prog.codecs[codec].kind == crate::ir::typed::CodecKind::Alias {
                         // Aliases emit no methods here; the const below aliases.
                     } else {
-                        out.push_str(&self.decode_method(codec, &name)?);
-                        out.push_str(&self.encode_method(codec, &name)?);
+                        out.push_str(&self.decode_method(codec, &name, here)?);
+                        out.push_str(&self.encode_method(codec, &name, here)?);
                         out.push_str(&self.deinit_record(t, &name));
                     }
                 }
@@ -550,15 +624,16 @@ impl Printer<'_> {
                 for (v, decl) in variants.iter().enumerate() {
                     let vname = field_name(&decl.name);
                     match &decl.payload {
-                        Some(p) => {
-                            out.push_str(&format!("    {vname}: {},\n", self.payload_ty(t, v, p)?))
-                        }
+                        Some(p) => out.push_str(&format!(
+                            "    {vname}: {},\n",
+                            self.payload_ty(t, v, p, here)?
+                        )),
                         None => out.push_str(&format!("    {vname}: void,\n")),
                     }
                 }
                 if let Some(codec) = self.prog.types[t].codec {
-                    out.push_str(&self.decode_method(codec, &name)?);
-                    out.push_str(&self.encode_method(codec, &name)?);
+                    out.push_str(&self.decode_method(codec, &name, here)?);
+                    out.push_str(&self.encode_method(codec, &name, here)?);
                     out.push_str(&self.deinit_sum(t, &name));
                 }
                 out.push_str("};\n");
@@ -572,14 +647,14 @@ impl Printer<'_> {
                 }
                 out.push_str("    _,\n");
                 if let Some(codec) = self.prog.types[t].codec {
-                    out.push_str(&self.decode_method(codec, &name)?);
-                    out.push_str(&self.encode_method(codec, &name)?);
+                    out.push_str(&self.decode_method(codec, &name, here)?);
+                    out.push_str(&self.encode_method(codec, &name, here)?);
                 }
                 out.push_str("};\n");
             }
             crate::ir::typed::TypeKind::Alias { target } => {
                 let target = *target;
-                let tname = self.prog.types[target].name.pascal();
+                let tname = self.type_ref(target, here);
                 out.push_str(&format!("pub const {name} = {tname};\n"));
             }
         }
@@ -628,29 +703,43 @@ impl Printer<'_> {
         t: TypeIdx,
         f: usize,
         decl: &crate::ir::typed::FieldDecl,
+        here: &str,
     ) -> BpsResult<String> {
-        let inner = self.zig_ty(&decl.ty)?;
+        let inner = self.zig_ty(&decl.ty, here)?;
         let boxed = self.boxed_field.contains(&(t, f));
         Ok(wrap_optional(wrap_boxed(inner, boxed), decl.optional))
     }
 
     /// Zig type of a sum variant payload.
-    fn payload_ty(&self, t: TypeIdx, v: usize, payload: &Ty) -> BpsResult<String> {
+    fn payload_ty(&self, t: TypeIdx, v: usize, payload: &Ty, here: &str) -> BpsResult<String> {
         Ok(wrap_boxed(
-            self.zig_ty(payload)?,
+            self.zig_ty(payload, here)?,
             self.boxed_variant.contains(&(t, v)),
         ))
     }
 
-    fn zig_ty(&self, ty: &Ty) -> BpsResult<String> {
+    /// A named type as this module spells it: `@import("x.zig").Foo` when the
+    /// type belongs to another module, the bare name inside its own. Zig
+    /// declarations are module-private without `pub`, so nothing else works.
+    fn type_ref(&self, ty: TypeIdx, here: &str) -> String {
+        let name = self.prog.types[ty].name.pascal();
+        let stem = self.prog.output_stem(&self.prog.types[ty].origin);
+        if stem == here {
+            name
+        } else {
+            format!("@import(\"{stem}.zig\").{name}")
+        }
+    }
+
+    fn zig_ty(&self, ty: &Ty, here: &str) -> BpsResult<String> {
         match ty {
             Ty::Int(t) => Ok(int_ty(*t).into()),
             Ty::Bool => Ok("bool".into()),
             Ty::F32 => Ok("f32".into()),
             Ty::F64 => Ok("f64".into()),
             Ty::Str | Ty::Bytes => Ok("[]u8".into()),
-            Ty::List(inner) => Ok(format!("[]{}", self.zig_ty(inner)?)),
-            Ty::Named(t) => Ok(self.prog.types[*t].name.pascal()),
+            Ty::List(inner) => Ok(format!("[]{}", self.zig_ty(inner, here)?)),
+            Ty::Named(t) => Ok(self.type_ref(*t, here)),
         }
     }
 }
@@ -681,17 +770,17 @@ fn int_ty(ty: IntTy) -> &'static str {
 impl Printer<'_> {
     // -- codecs ---------------------------------------------------------
 
-    fn free_codec(&self, c: CodecIdx) -> BpsResult<String> {
+    fn free_codec(&self, c: CodecIdx, here: &str) -> BpsResult<String> {
         let mut out = String::new();
         out.push_str(&format!(
             "/// {}\n",
             self.origin_doc(&self.prog.codecs[c].origin)
         ));
         let name = self.prog.codecs[c].name.pascal();
-        let ret = self.zig_ty(&self.prog.codecs[c].value)?;
-        out.push_str(&self.function(c, None, &format!("decode{name}"), &ret, true)?);
-        let value_ty = self.borrow_ty(&self.prog.codecs[c].value.clone())?;
-        out.push_str(&self.function(c, None, &format!("encode{name}"), &value_ty, false)?);
+        let ret = self.zig_ty(&self.prog.codecs[c].value, here)?;
+        out.push_str(&self.function(c, None, &format!("decode{name}"), &ret, true, here)?);
+        let value_ty = self.borrow_ty(&self.prog.codecs[c].value.clone(), here)?;
+        out.push_str(&self.function(c, None, &format!("encode{name}"), &value_ty, false, here)?);
         Ok(out)
     }
 
@@ -705,6 +794,7 @@ impl Printer<'_> {
         fn_name: &str,
         extra: &str,
         decode: bool,
+        here: &str,
     ) -> BpsResult<String> {
         let codec = &self.prog.codecs[c];
         let body = if decode { &codec.decode } else { &codec.encode };
@@ -727,33 +817,33 @@ impl Printer<'_> {
             _ => {}
         }
         if decode {
-            param(&mut sig, "reader: *Reader");
+            param(&mut sig, "reader: *bps_rt.Reader");
         } else if recv.is_none() {
-            param(&mut sig, "writer: *Writer");
+            param(&mut sig, "writer: *bps_rt.Writer");
             param(&mut sig, &format!("value: {extra}"));
         } else {
-            param(&mut sig, "writer: *Writer");
+            param(&mut sig, "writer: *bps_rt.Writer");
         }
         for pid in &body.params {
             let p = &body.locals[*pid];
             param(
                 &mut sig,
-                &format!("{}: {}", local_name(&p.name), self.param_ty(p)?),
+                &format!("{}: {}", local_name(&p.name), self.param_ty(p, here)?),
             );
         }
         let ret = if decode {
             match recv {
                 Some(t) => t.to_string(),
-                None => self.zig_ty(&codec.value)?,
+                None => self.zig_ty(&codec.value, here)?,
             }
         } else {
             "void".to_string()
         };
-        let mut fgen = FnGen::new(self, body, c, decode, info);
+        let mut fgen = FnGen::new(self, body, c, decode, info, here);
         fgen.depth += if recv.is_some() { 1 } else { 0 };
         fgen.stmts(&body.stmts)?;
         let pad = if recv.is_some() { "    " } else { "" };
-        let mut out = format!("{pad}{sig}) Error!{ret} {{\n");
+        let mut out = format!("{pad}{sig}) bps_rt.Error!{ret} {{\n");
         // `_ = x;` for signature names the body never reads.
         if decode {
             if !fgen.uses_reader {
@@ -793,26 +883,26 @@ impl Printer<'_> {
         local_name(&body.locals[v].name)
     }
 
-    fn decode_method(&self, c: CodecIdx, recv: &str) -> BpsResult<String> {
-        self.function(c, Some(recv), "decode", "", true)
+    fn decode_method(&self, c: CodecIdx, recv: &str, here: &str) -> BpsResult<String> {
+        self.function(c, Some(recv), "decode", "", true, here)
     }
 
-    fn encode_method(&self, c: CodecIdx, recv: &str) -> BpsResult<String> {
-        self.function(c, Some(recv), "encode", "", false)
+    fn encode_method(&self, c: CodecIdx, recv: &str, here: &str) -> BpsResult<String> {
+        self.function(c, Some(recv), "encode", "", false, here)
     }
 
     /// Borrowed form of a type for free encode inputs: slices become const.
-    fn borrow_ty(&self, ty: &Ty) -> BpsResult<String> {
+    fn borrow_ty(&self, ty: &Ty, here: &str) -> BpsResult<String> {
         match ty {
             Ty::Str | Ty::Bytes => Ok("[]const u8".into()),
-            Ty::List(inner) => Ok(format!("[]const {}", self.zig_ty(inner)?)),
-            _ => self.zig_ty(ty),
+            Ty::List(inner) => Ok(format!("[]const {}", self.zig_ty(inner, here)?)),
+            _ => self.zig_ty(ty, here),
         }
     }
 
     /// Zig type of a codec parameter (never a boxed pointer in practice).
-    fn param_ty(&self, p: &crate::ir::typed::Local) -> BpsResult<String> {
-        Ok(wrap_optional(self.zig_ty(&p.ty)?, p.optional))
+    fn param_ty(&self, p: &crate::ir::typed::Local, here: &str) -> BpsResult<String> {
+        Ok(wrap_optional(self.zig_ty(&p.ty, here)?, p.optional))
     }
 }
 impl Printer<'_> {
@@ -976,24 +1066,45 @@ struct BodyInfo {
     /// `bytes` locals consumed once by `Utf8`: no `errdefer` at the read,
     /// ownership moves into the string.
     donors: HashSet<LocalId>,
+    /// `Utf8` results that are their donor under the donor's name (both are
+    /// `[]u8`): the statement only validates, with no second binding.
+    alias: HashMap<LocalId, LocalId>,
 }
 
-/// Collect [`BodyInfo`]: pointer marks plus single-use `Utf8` donors.
+/// Collect [`BodyInfo`]: pointer marks, single-use `Utf8` donors, and the
+/// results that can keep the donor's name.
 fn analyze_body(printer: &Printer<'_>, body: &Body) -> BodyInfo {
     let ptr = ptr_marks(printer, body);
     let mut donors = HashSet::new();
-    walk_stmts(&body.stmts, &mut |s| {
-        if let Stmt::Utf8 {
-            dst: _,
+    let mut items = HashSet::new();
+    walk_stmts(&body.stmts, &mut |s| match s {
+        Stmt::Utf8 {
             src: Expr::Local(id),
-        } = s
-            && body.locals[*id].uses == 1
-            && is_fresh_bytes(body, &body.stmts, *id)
-        {
+            ..
+        } if body.locals[*id].uses == 1 && is_fresh_bytes(body, &body.stmts, *id) => {
             donors.insert(*id);
         }
+        Stmt::Repeat { item, .. } => {
+            items.insert(*item);
+        }
+        _ => {}
     });
-    BodyInfo { ptr, donors }
+    let mut alias = HashMap::new();
+    walk_stmts(&body.stmts, &mut |s| {
+        if let Stmt::Utf8 {
+            dst,
+            src: Expr::Local(id),
+        } = s
+            && donors.contains(id)
+            && dst.declare
+            && !dst.some
+            && !ptr.contains(&dst.local)
+            && !items.contains(&dst.local)
+        {
+            alias.insert(dst.local, *id);
+        }
+    });
+    BodyInfo { ptr, donors, alias }
 }
 
 /// Pointer-marked locals: boxed-position uses, then `Unwrap`/`ExpectVariant`
@@ -1159,6 +1270,8 @@ enum ItemMode {
 struct FnGen<'a, 'p> {
     printer: &'a Printer<'p>,
     body: &'p Body,
+    /// Module being printed; references into other modules qualify.
+    here: String,
     decode: bool,
     /// Encode bodies of type codecs run as methods on `self`.
     method: bool,
@@ -1185,6 +1298,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         codec: CodecIdx,
         decode: bool,
         info: BodyInfo,
+        here: &str,
     ) -> Self {
         let mut taken = HashSet::new();
         for l in &body.locals {
@@ -1199,6 +1313,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         Self {
             printer,
             body,
+            here: here.to_string(),
             decode,
             method: printer.prog.codecs[codec].ty.is_some() && !decode,
             info,
@@ -1228,11 +1343,20 @@ impl<'a, 'p> FnGen<'a, 'p> {
     }
 
     fn ln(&mut self, s: &str) {
-        for _ in 0..self.depth {
-            self.out.push_str("    ");
+        // Expressions broken over lines (long `|`-chains) carry their own
+        // continuation indent; only the first line is indented here.
+        for (i, line) in s.split('\n').enumerate() {
+            if i > 0 {
+                self.out.push_str(line);
+                self.out.push('\n');
+                continue;
+            }
+            for _ in 0..self.depth {
+                self.out.push_str("    ");
+            }
+            self.out.push_str(line);
+            self.out.push('\n');
         }
-        self.out.push_str(s);
-        self.out.push('\n');
     }
 
     fn stmts(&mut self, stmts: &[Stmt]) -> BpsResult<()> {
@@ -1246,7 +1370,10 @@ impl<'a, 'p> FnGen<'a, 'p> {
     fn local_ty(&self, id: LocalId) -> BpsResult<String> {
         let l = &self.body.locals[id];
         Ok(wrap_optional(
-            wrap_boxed(self.printer.zig_ty(&l.ty)?, self.info.ptr.contains(&id)),
+            wrap_boxed(
+                self.printer.zig_ty(&l.ty, &self.here)?,
+                self.info.ptr.contains(&id),
+            ),
             l.optional,
         ))
     }
@@ -1256,6 +1383,12 @@ impl<'a, 'p> FnGen<'a, 'p> {
         if self.method && Some(id) == self.body.value {
             return "self".into();
         }
+        self.name(id)
+    }
+
+    /// A local's Zig name; an aliased `Utf8` result takes its donor's.
+    fn name(&self, id: LocalId) -> String {
+        let id = self.info.alias.get(&id).copied().unwrap_or(id);
         local_name(&self.body.locals[id].name)
     }
 
@@ -1320,7 +1453,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     /// validated string). `rhs_ptr`: `rhs` already has pointer type.
     fn bind(&mut self, dst: &Bind, rhs: String, fresh_owned: bool, rhs_ptr: bool) -> BpsResult<()> {
         let id = dst.local;
-        let name = local_name(&self.body.locals[id].name);
+        let name = self.name(id);
         // Repeat items go to the array, never to a named local.
         if let Some((item, mode)) = self.item
             && item == id
@@ -1371,7 +1504,9 @@ impl<'a, 'p> FnGen<'a, 'p> {
     /// `rhs` (a `T` value) boxed into a `*T` allocation expression for local
     /// `id`, always expanded: `zig fmt` keeps the block form at any width.
     fn boxed(&mut self, id: LocalId, rhs: String) -> BpsResult<String> {
-        let target = self.printer.zig_ty(&self.body.locals[id].ty.clone())?;
+        let target = self
+            .printer
+            .zig_ty(&self.body.locals[id].ty.clone(), &self.here)?;
         let blk = self.temp("bps_blk");
         let ptr = self.temp("bps_p");
         self.uses_alloc = true;
@@ -1409,14 +1544,15 @@ impl<'a, 'p> FnGen<'a, 'p> {
                 let v = self.expr(value)?;
                 self.uses_writer = true;
                 match op {
-                    WriteOp::U8 => self.ln(&format!("try writer.writeU8({v});")),
+                    WriteOp::U8 => {
+                        let byte = byte_literal(value, false).unwrap_or(v);
+                        self.ln(&format!("try writer.writeU8({byte});"));
+                    }
                     WriteOp::F32 => self.ln(&format!("try writer.writeF32Be({v});")),
                     WriteOp::F64 => self.ln(&format!("try writer.writeF64Be({v});")),
                     WriteOp::Bytes(n) => {
-                        let n = self.expr(n)?;
-                        self.ln(&format!(
-                            "try writer.writeSized({v}, @as(usize, @intCast({n})));"
-                        ));
+                        let n = self.usize_arg(n)?;
+                        self.ln(&format!("try writer.writeSized({v}, {n});"));
                     }
                     WriteOp::Rest => self.ln(&format!("try writer.writeBytes({v});")),
                 }
@@ -1428,9 +1564,12 @@ impl<'a, 'p> FnGen<'a, 'p> {
                 Ok(())
             }
             Stmt::Require { cond, text } => {
-                let c = self.expr(cond)?;
+                // Fail when the negation holds; the comment keeps the
+                // program's original condition text.
+                let neg = self.printer.prog.negated(self.body, cond);
+                let c = self.expr(&neg)?;
                 self.ln(&format!(
-                    "if (!({c})) return error.RequireFailed; // require {text}"
+                    "if ({c}) return error.RequireFailed; // require {text}"
                 ));
                 Ok(())
             }
@@ -1441,7 +1580,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                 self.bind(dst, rhs, false, ptr)
             }
             Stmt::If { cond, then, els } => {
-                let c = self.expr(cond)?;
+                let c = self.cond(cond)?;
                 self.ln(&format!("if ({c}) {{"));
                 self.depth += 1;
                 self.stmts(then)?;
@@ -1476,6 +1615,25 @@ impl<'a, 'p> FnGen<'a, 'p> {
                 variant,
             } => self.expect_variant(dst, sum, *ty, *variant),
             Stmt::Return(e) => {
+                // A long struct literal goes one field per line.
+                if let Expr::Construct { ty, fields } = e {
+                    let parts = self.construct_parts(*ty, fields)?;
+                    if !parts.is_empty() {
+                        let single = format!(".{{ {} }}", parts.join(", "));
+                        if self.depth * 4 + "return ".len() + single.len() < MAX_WIDTH {
+                            self.ln(&format!("return {single};"));
+                        } else {
+                            self.ln("return .{");
+                            self.depth += 1;
+                            for part in &parts {
+                                self.ln(&format!("{part},"));
+                            }
+                            self.depth -= 1;
+                            self.ln("};");
+                        }
+                        return Ok(());
+                    }
+                }
                 let r = self.return_expr(e)?;
                 self.ln(&format!("return {r};"));
                 Ok(())
@@ -1527,18 +1685,48 @@ impl<'a, 'p> FnGen<'a, 'p> {
             }
         }
     }
+    /// A length cast to `usize`: a widening hop through `i64` is covered by
+    /// the outer cast, so it is skipped (the negativity guard, if any, still
+    /// reads the original expression).
+    fn usize_arg(&mut self, e: &Expr) -> BpsResult<String> {
+        // A cast widening to `i64` is covered by the outer cast to `usize`.
+        let mut core = e;
+        if let Expr::Cast { expr, to } = e
+            && *to == Ty::Int(IntTy::I64)
+        {
+            let (cty, _) = self.printer.prog.expr_ty(self.body, expr);
+            if let Ty::Int(f) = cty
+                && (f == IntTy::I64 || f.bits() < 64)
+            {
+                core = expr;
+            }
+        }
+        Ok(format!("@as(usize, @intCast({}))", self.expr(core)?))
+    }
 
     fn utf8(&mut self, dst: &Bind, src: &Expr) -> BpsResult<()> {
         self.uses_alloc = true;
         let s = self.expr(src)?;
         let id = dst.local;
-        let name = local_name(&self.body.locals[id].name);
+        let name = self.name(id);
         let donor = matches!(src, Expr::Local(l) if self.info.donors.contains(l));
         // Repeat items bind into the array; validate first, then move or dupe.
         if let Some((item, _)) = self.item
             && item == id
         {
             return self.utf8_item(src, &s, donor);
+        }
+        // The donor becomes the string under its own name: own it and
+        // validate it in place.
+        if self.info.alias.contains_key(&id) {
+            if self.decode && !self.covered.contains(&id) {
+                self.errdefer(&name, id);
+                self.covered.insert(id);
+            }
+            self.ln(&format!(
+                "if (!std.unicode.utf8ValidateSlice({name})) return error.InvalidUtf8;"
+            ));
+            return Ok(());
         }
         let rhs = if donor {
             s.clone()
@@ -1607,7 +1795,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     fn item_name(&self) -> String {
         match self.item {
-            Some((id, _)) => local_name(&self.body.locals[id].name),
+            Some((id, _)) => self.name(id),
             None => "bps_item".into(),
         }
     }
@@ -1658,7 +1846,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         if self.body.locals[item].uses == 0 {
             self.ln(&format!("for ({l}) |_| {{"));
         } else {
-            let name = local_name(&self.body.locals[item].name);
+            let name = self.name(item);
             self.ln(&format!("for ({l}) |{name}| {{"));
         }
         self.depth += 1;
@@ -1682,7 +1870,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         };
         match dst {
             Some(b) => {
-                let name = local_name(&self.body.locals[b.local].name);
+                let name = self.name(b.local);
                 let head = if b.declare {
                     let ty = self.local_ty(b.local)?;
                     format!("const {name}: {ty} = switch ({s}) {{")
@@ -1703,22 +1891,28 @@ impl<'a, 'p> FnGen<'a, 'p> {
         Ok(())
     }
 
+    /// `.name = value` parts of a record construction, in field order.
+    fn construct_parts(&mut self, ty: TypeIdx, fields: &[Expr]) -> BpsResult<Vec<String>> {
+        let names = match &self.printer.prog.types[ty].kind {
+            crate::ir::typed::TypeKind::Record { fields } => fields
+                .iter()
+                .map(|f| field_name(&f.name))
+                .collect::<Vec<_>>(),
+            _ => return Err(emit("zig: construct of non-record".to_string())),
+        };
+        let mut parts = Vec::new();
+        for (n, v) in names.iter().zip(fields.iter()) {
+            parts.push(format!(".{n} = {}", self.expr(v)?));
+        }
+        Ok(parts)
+    }
+
     fn return_expr(&mut self, e: &Expr) -> BpsResult<String> {
         match e {
             Expr::Construct { ty, fields } => {
-                let names = match &self.printer.prog.types[*ty].kind {
-                    crate::ir::typed::TypeKind::Record { fields } => fields
-                        .iter()
-                        .map(|f| field_name(&f.name))
-                        .collect::<Vec<_>>(),
-                    _ => return Err(emit("zig: construct of non-record".to_string())),
-                };
-                if names.is_empty() {
+                let parts = self.construct_parts(*ty, fields)?;
+                if parts.is_empty() {
                     return Ok(".{}".into());
-                }
-                let mut parts = Vec::new();
-                for (n, v) in names.iter().zip(fields.iter()) {
-                    parts.push(format!(".{n} = {}", self.expr(v)?));
                 }
                 Ok(format!(".{{ {} }}", parts.join(", ")))
             }
@@ -1742,10 +1936,36 @@ impl<'a, 'p> FnGen<'a, 'p> {
         }
     }
 
+    /// How this module calls a free codec (`decodeX`), qualified across
+    /// modules, or a method codec (`Type.decode`) on its type.
+    fn codec_path(&self, codec: CodecIdx, decode: bool) -> String {
+        let prog = self.printer.prog;
+        match prog.codecs[codec].ty {
+            None => {
+                let stem = prog.output_stem(&prog.codecs[codec].origin);
+                let name = format!(
+                    "{}{}",
+                    if decode { "decode" } else { "encode" },
+                    prog.codecs[codec].name.pascal()
+                );
+                if stem == self.here {
+                    name
+                } else {
+                    format!("@import(\"{stem}.zig\").{name}")
+                }
+            }
+            Some(_) => {
+                let target = decode_target(prog, codec);
+                let method = if decode { "decode" } else { "encode" };
+                format!("{}.{method}", self.printer.type_ref(target, &self.here))
+            }
+        }
+    }
+
     /// Call another codec's decode: `Type.decode(allocator?, reader, args)`.
     fn decode_call(&mut self, codec: CodecIdx, args: &[Expr]) -> BpsResult<String> {
         self.uses_reader = true;
-        let path = decode_fn(self.printer.prog, codec);
+        let path = self.codec_path(codec, true);
         let mut parts = Vec::new();
         if owns_value(self.printer, &self.printer.prog.codecs[codec].value) {
             parts.push("allocator".to_string());
@@ -1783,7 +2003,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         }
         match ty {
             None => {
-                let path = encode_fn(self.printer.prog, codec);
+                let path = self.codec_path(codec, false);
                 let v = self.encode_value(value)?;
                 if rest.is_empty() {
                     Ok(format!("{path}(writer, {v})"))
@@ -1793,8 +2013,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
             }
             Some(_) => {
                 let v = self.encode_value(value)?;
-                let path = encode_fn(self.printer.prog, codec);
-                let method = path.rsplit('.').next().unwrap_or("encode");
+                let method = "encode";
                 if rest.is_empty() {
                     Ok(format!("{v}.{method}(writer)"))
                 } else {
@@ -1843,23 +2062,24 @@ impl<'a, 'p> FnGen<'a, 'p> {
         }
         self.uses_reader = true;
         self.uses_alloc = true;
-        let list_name = local_name(&self.body.locals[list].name);
+        let list_name = self.name(list);
         let list_ty = self.local_ty(list)?;
         let elem_ty = match &self.body.locals[list].ty.clone() {
-            Ty::List(e) => self.printer.zig_ty(e)?,
+            Ty::List(e) => self.printer.zig_ty(e, &self.here)?,
             _ => return Err(emit("zig: repeat list is not a list".to_string())),
         };
         let rep = self.temp("bps_rep");
         match mode {
             RepeatMode::Count(n) => {
-                let n = self.expr(n)?;
+                let count = self.cond(n)?;
+                let alloc_n = self.usize_arg(n)?;
                 let tmp = self.temp("bps_tmp");
                 let filled = self.temp("bps_filled");
                 self.ln(&format!("const {list_name}: {list_ty} = {rep}: {{"));
                 self.depth += 1;
-                self.ln(&format!("if (({n}) < 0) return error.NegativeLength;"));
+                self.ln(&format!("if ({count} < 0) return error.NegativeLength;"));
                 self.ln(&format!(
-                    "const {tmp} = allocator.alloc({elem_ty}, @as(usize, @intCast({n}))) catch return error.OutOfMemory;"
+                    "const {tmp} = allocator.alloc({elem_ty}, {alloc_n}) catch return error.OutOfMemory;"
                 ));
                 self.ln(&format!("errdefer allocator.free({tmp});"));
                 self.ln(&format!("var {filled}: usize = 0;"));
@@ -1886,16 +2106,29 @@ impl<'a, 'p> FnGen<'a, 'p> {
             }
             _ => {
                 let term = match mode {
-                    RepeatMode::Until(t) => Some(self.expr(t)?),
+                    RepeatMode::Until(t) => Some(t),
                     _ => None,
                 };
                 let arr = self.temp("bps_arr");
                 self.ln(&format!("const {list_name}: {list_ty} = {rep}: {{"));
                 self.depth += 1;
                 if let Some(t) = term {
-                    let term_n = self.temp("bps_term");
-                    let cast = int_cast_expr(IntTy::I64, IntTy::U8, t);
-                    self.ln(&format!("const {term_n}: u8 = {cast};"));
+                    // A literal byte compares directly; anything else is
+                    // evaluated once, before the loop.
+                    let want = match byte_literal(t, false) {
+                        Some(byte) => byte,
+                        None => {
+                            let term_n = self.temp("bps_term");
+                            let printed = self.expr(t)?;
+                            let (tty, _) = self.printer.prog.expr_ty(self.body, t);
+                            let cast = match tty {
+                                Ty::Int(f) => self.int_cast(f, IntTy::U8, t, printed)?,
+                                _ => printed,
+                            };
+                            self.ln(&format!("const {term_n}: u8 = {cast};"));
+                            term_n
+                        }
+                    };
                     self.ln(&format!(
                         "var {arr} = std.ArrayList({elem_ty}).init(allocator);"
                     ));
@@ -1906,7 +2139,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     );
                     self.ln("while (reader.remaining() > 0) {");
                     self.depth += 1;
-                    self.ln(&format!("if (reader.data[reader.pos] == {term_n}) {{"));
+                    self.ln(&format!("if (reader.data[reader.pos] == {want}) {{"));
                     self.depth += 1;
                     self.ln("reader.pos += 1;");
                     self.ln("break;");
@@ -1917,7 +2150,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     self.item = outer;
                     self.ln(&format!(
                         "{arr}.append({}) catch return error.OutOfMemory;",
-                        local_name(&self.body.locals[item].name)
+                        self.name(item)
                     ));
                     self.depth -= 1;
                     self.ln("}");
@@ -1937,7 +2170,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     self.item = outer;
                     self.ln(&format!(
                         "{arr}.append({}) catch return error.OutOfMemory;",
-                        local_name(&self.body.locals[item].name)
+                        self.name(item)
                     ));
                     self.depth -= 1;
                     self.ln("}");
@@ -1974,11 +2207,11 @@ impl<'a, 'p> FnGen<'a, 'p> {
         body: &[Stmt],
     ) -> BpsResult<()> {
         self.uses_writer = true;
-        let name = local_name(&self.body.locals[list].name);
+        let name = self.name(list);
         if self.body.locals[item].uses == 0 {
             self.ln(&format!("for ({name}) |_| {{"));
         } else {
-            let item_name = local_name(&self.body.locals[item].name);
+            let item_name = self.name(item);
             self.ln(&format!("for ({name}) |{item_name}| {{"));
         }
         self.depth += 1;
@@ -1987,10 +2220,18 @@ impl<'a, 'p> FnGen<'a, 'p> {
         self.ln("}");
         match mode {
             RepeatMode::Until(t) => {
-                let t = self.expr(t)?;
-                self.ln(&format!(
-                    "try writer.writeU8(@as(u8, @truncate(@as(u64, @bitCast({t})))));"
-                ));
+                let byte = match byte_literal(t, false) {
+                    Some(byte) => byte,
+                    None => {
+                        let printed = self.expr(t)?;
+                        let (tty, _) = self.printer.prog.expr_ty(self.body, t);
+                        match tty {
+                            Ty::Int(f) => self.int_cast(f, IntTy::U8, t, printed)?,
+                            _ => printed,
+                        }
+                    }
+                };
+                self.ln(&format!("try writer.writeU8({byte});"));
             }
             RepeatMode::UntilEnd => {
                 self.ln("return error.UntilEnd;");
@@ -2025,9 +2266,40 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     Ok(format!("{b}.{f}"))
                 }
             }
-            Expr::Present(inner) => Ok(format!("({} != null)", self.expr(inner)?)),
-            Expr::Get(inner) => Ok(format!("({}.?)", self.expr(inner)?)),
-            Expr::Not(inner) => Ok(format!("!({})", self.expr(inner)?)),
+            Expr::Present(inner) => {
+                let s = self.expr(inner)?;
+                // `!=` needs no outer pair; the inner is a local or field.
+                match **inner {
+                    Expr::Binary { .. } | Expr::Not(_) | Expr::Cond { .. } | Expr::Present(_) => {
+                        Ok(format!("({s}) != null"))
+                    }
+                    _ => Ok(format!("{s} != null")),
+                }
+            }
+            Expr::Get(inner) => {
+                let s = self.expr(inner)?;
+                // Postfix `.?` binds tightest; wrap only a loose inner.
+                match **inner {
+                    Expr::Binary { .. } | Expr::Not(_) | Expr::Cond { .. } | Expr::Present(_) => {
+                        Ok(format!("({s}).?"))
+                    }
+                    _ => Ok(format!("{s}.?")),
+                }
+            }
+            Expr::Not(inner) => {
+                let s = self.expr(inner)?;
+                // Calls, locals, and fields need no pair after `!`.
+                match **inner {
+                    Expr::Local(_)
+                    | Expr::Int { .. }
+                    | Expr::Bool(_)
+                    | Expr::Str(_)
+                    | Expr::Field { .. }
+                    | Expr::Get(_)
+                    | Expr::Call { .. } => Ok(format!("!{s}")),
+                    _ => Ok(format!("!({s})")),
+                }
+            }
             Expr::Binary {
                 op,
                 lhs,
@@ -2041,9 +2313,9 @@ impl<'a, 'p> FnGen<'a, 'p> {
                 els,
                 ty,
             } => Ok(format!(
-                "(@as({}, if ({}) {} else {}))",
-                self.printer.zig_ty(ty)?,
-                self.expr(cond)?,
+                "@as({}, if ({}) {} else {})",
+                self.printer.zig_ty(ty, &self.here)?,
+                self.cond(cond)?,
                 self.expr(then)?,
                 self.expr(els)?
             )),
@@ -2061,51 +2333,138 @@ impl<'a, 'p> FnGen<'a, 'p> {
         }
     }
 
+    /// A condition: wrapped only when too loose (`and`/`or`/if-expression)
+    /// to sit directly in its statement.
+    fn cond(&mut self, e: &Expr) -> BpsResult<String> {
+        let s = self.expr(e)?;
+        match e {
+            Expr::Binary {
+                op: BinOp::And | BinOp::Or,
+                ..
+            }
+            | Expr::Cond { .. } => Ok(format!("({s})")),
+            _ => Ok(s),
+        }
+    }
+
+    /// An operand of `parent`: wrapped only when precedence needs it.
+    fn operand(&mut self, e: &Expr, parent: BinOp, side: Side) -> BpsResult<String> {
+        let s = self.expr(e)?;
+        if need_parens(e, parent, side) {
+            Ok(format!("({s})"))
+        } else {
+            Ok(s)
+        }
+    }
+
+    /// An operand of `&`, `|`, or `^`: integer literals print in hex, as do
+    /// the branches of a ternary continuation flag (`if (c) 0x80 else 0`).
+    fn mask_operand(&mut self, e: &Expr, parent: BinOp, side: Side) -> BpsResult<String> {
+        match e {
+            Expr::Int { value, .. } if hex_literal(parent, *value) => Ok(zig_hex(*value)),
+            Expr::Cond {
+                cond,
+                then,
+                els,
+                ty,
+            } => Ok(format!(
+                "@as({}, if ({}) {} else {})",
+                self.printer.zig_ty(ty, &self.here)?,
+                self.cond(cond)?,
+                self.mask_operand(then, parent, side)?,
+                self.mask_operand(els, parent, side)?,
+            )),
+            _ => self.operand(e, parent, side),
+        }
+    }
+
     fn binary(
         &mut self,
-        op: crate::ir::typed::BinOp,
+        op: BinOp,
         lhs: &Expr,
         rhs: &Expr,
         ty: &Ty,
         wraps: bool,
     ) -> BpsResult<String> {
-        use crate::ir::typed::BinOp::*;
-        let l = self.expr(lhs)?;
-        let r = self.expr(rhs)?;
+        use BinOp::*;
         // String equality is a library call.
         if matches!(op, Eq | Ne) {
             let (lt, _) = self.printer.prog.expr_ty(self.body, lhs);
             if matches!(lt, Ty::Str) {
+                let l = self.expr(lhs)?;
+                let r = self.expr(rhs)?;
                 if matches!(op, Eq) {
                     return Ok(format!("std.mem.eql(u8, {l}, {r})"));
                 }
-                return Ok(format!("(!std.mem.eql(u8, {l}, {r}))"));
+                return Ok(format!("!std.mem.eql(u8, {l}, {r})"));
             }
         }
         let _ = ty;
-        match op {
-            Add if wraps => Ok(format!("({l} +% {r})")),
-            Sub if wraps => Ok(format!("({l} -% {r})")),
-            Mul if wraps => Ok(format!("({l} *% {r})")),
-            Add => Ok(format!("({l} + {r})")),
-            Sub => Ok(format!("({l} - {r})")),
-            Mul => Ok(format!("({l} * {r})")),
-            Div => Ok(format!("@divFloor({l}, {r})")),
-            Mod => Ok(format!("@mod({l}, {r})")),
-            Shl => Ok(format!("({l} << {r})")),
-            Shr => Ok(format!("({l} >> {r})")),
-            BitAnd => Ok(format!("({l} & {r})")),
-            BitOr => Ok(format!("({l} | {r})")),
-            BitXor => Ok(format!("({l} ^ {r})")),
-            Eq => Ok(format!("({l} == {r})")),
-            Ne => Ok(format!("({l} != {r})")),
-            Lt => Ok(format!("({l} < {r})")),
-            Le => Ok(format!("({l} <= {r})")),
-            Gt => Ok(format!("({l} > {r})")),
-            Ge => Ok(format!("({l} >= {r})")),
-            And => Ok(format!("({l} and {r})")),
-            Or => Ok(format!("({l} or {r})")),
+        // `|`, `&`, `^` chains break over lines when they run long.
+        if matches!(op, BitOr | BitAnd | BitXor) {
+            return self.bit_chain(op, lhs, rhs);
         }
+        // `@divFloor`/`@mod` take their operands as call arguments.
+        if matches!(op, Div | Mod) {
+            let l = self.expr(lhs)?;
+            let r = self.expr(rhs)?;
+            return Ok(match op {
+                Div => format!("@divFloor({l}, {r})"),
+                _ => format!("@mod({l}, {r})"),
+            });
+        }
+        let l = self.operand(lhs, op, Side::Left)?;
+        let r = self.operand(rhs, op, Side::Right)?;
+        Ok(match op {
+            Add if wraps => format!("{l} +% {r}"),
+            Sub if wraps => format!("{l} -% {r}"),
+            Mul if wraps => format!("{l} *% {r}"),
+            Add => format!("{l} + {r}"),
+            Sub => format!("{l} - {r}"),
+            Mul => format!("{l} * {r}"),
+            Shl => format!("{l} << {r}"),
+            Shr => format!("{l} >> {r}"),
+            Eq => format!("{l} == {r}"),
+            Ne => format!("{l} != {r}"),
+            Lt => format!("{l} < {r}"),
+            Le => format!("{l} <= {r}"),
+            Gt => format!("{l} > {r}"),
+            Ge => format!("{l} >= {r}"),
+            And => format!("{l} and {r}"),
+            Or => format!("{l} or {r}"),
+            _ => unreachable!("zig: bit/div/mod print above"),
+        })
+    }
+
+    /// A `|`/`&`/`^` spine, one operand per line when the single line would
+    /// run past the width limit (`zig fmt` keeps breaks after operators).
+    fn bit_chain(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr) -> BpsResult<String> {
+        fn spine<'e>(e: &'e Expr, op: BinOp, out: &mut Vec<&'e Expr>) {
+            match e {
+                Expr::Binary {
+                    op: c, lhs, rhs, ..
+                } if *c == op => {
+                    spine(lhs, op, out);
+                    spine(rhs, op, out);
+                }
+                _ => out.push(e),
+            }
+        }
+        let mut parts = Vec::new();
+        spine(lhs, op, &mut parts);
+        spine(rhs, op, &mut parts);
+        let symbol = op.symbol();
+        let mut flat = Vec::with_capacity(parts.len());
+        for (i, p) in parts.iter().enumerate() {
+            let side = if i == 0 { Side::Left } else { Side::Right };
+            flat.push(self.mask_operand(p, op, side)?);
+        }
+        let single = flat.join(&format!(" {symbol} "));
+        if self.depth * 4 + single.len() <= MAX_WIDTH {
+            return Ok(single);
+        }
+        let pad = "    ".repeat(self.depth + 1);
+        Ok(flat.join(&format!(" {symbol}\n{pad}")))
     }
 
     fn cast_expr(&mut self, inner: &Expr, printed: String, to: &Ty) -> BpsResult<String> {
@@ -2119,18 +2478,102 @@ impl<'a, 'p> FnGen<'a, 'p> {
             (Ty::Bool, Ty::Int(_)) => Ok(format!("@intFromBool({printed})")),
             (Ty::F32, Ty::F64) | (Ty::F64, Ty::F32) => Ok(format!(
                 "{}(@floatCast({printed}))",
-                self.printer.zig_ty(to)?
+                self.printer.zig_ty(to, &self.here)?
             )),
             (Ty::Int(_), Ty::F32 | Ty::F64) => Ok(format!(
                 "{}(@floatFromInt({printed}))",
-                self.printer.zig_ty(to)?
+                self.printer.zig_ty(to, &self.here)?
             )),
             (Ty::F32 | Ty::F64, Ty::Int(_)) => Ok(format!(
                 "{}(@intFromFloat({printed}))",
-                self.printer.zig_ty(to)?
+                self.printer.zig_ty(to, &self.here)?
             )),
-            (Ty::Int(f), Ty::Int(t)) => Ok(int_cast_expr(*f, *t, printed)),
+            (Ty::Int(f), Ty::Int(t)) => self.int_cast(*f, *t, inner, printed),
             _ => Err(emit(format!("zig: cannot cast {from:?} to {to:?}"))),
+        }
+    }
+
+    /// A minimal integer cast. The outer `@as` always names the type (never
+    /// rely on inference); the operand keeps its own annotation only when it
+    /// does not already have the source type. A lossless round trip through
+    /// a wider or same-width type (`u64` → `i64` → `u64`) is the value itself.
+    fn int_cast(&mut self, from: IntTy, to: IntTy, inner: &Expr, x: String) -> BpsResult<String> {
+        if from == to {
+            return Ok(x);
+        }
+        if let Expr::Cast {
+            expr: core,
+            to: mid,
+        } = inner
+            && let Ty::Int(mid_ty) = mid
+        {
+            let (core_ty, _) = self.printer.prog.expr_ty(self.body, core);
+            if let Ty::Int(core_from) = core_ty
+                && core_from == to
+                && mid_ty.bits() >= core_from.bits()
+            {
+                return self.expr(core);
+            }
+        }
+        // Literals that fit the target need only the target's annotation.
+        if let Expr::Int { value, .. } = inner
+            && to.contains(*value as i128)
+        {
+            return Ok(format!("@as({}, {value})", int_ty(to)));
+        }
+        let need_inner = match inner {
+            Expr::Int { .. } => true,
+            _ => {
+                let (ity, _) = self.printer.prog.expr_ty(self.body, inner);
+                ity != Ty::Int(from)
+            }
+        };
+        let x = if need_inner {
+            format!("@as({}, {x})", int_ty(from))
+        } else {
+            x
+        };
+        let target = int_ty(to);
+        // A target that holds every value of the source type coerces; one
+        // that holds every value this operand can take (by range) is a
+        // value-preserving `@intCast`; anything else wraps.
+        if to.contains(from.min_value()) && to.contains(from.max_value()) {
+            return Ok(format!("@as({target}, {x})"));
+        }
+        let (lo, hi) = self
+            .printer
+            .prog
+            .int_range(self.body, inner)
+            .unwrap_or((from.min_value(), from.max_value()));
+        if to.contains(lo) && to.contains(hi) {
+            return Ok(format!("@as({target}, @intCast({x}))"));
+        }
+        if to.bits() == from.bits() {
+            return Ok(format!("@as({target}, @bitCast({x}))"));
+        }
+        if to.bits() > from.bits() {
+            // A signed source into a wider unsigned target: widen with the
+            // sign, then reinterpret.
+            return Ok(format!(
+                "@as({target}, @bitCast(@as({}, {x})))",
+                signed_ty(to)
+            ));
+        }
+        // `@truncate` keeps the signedness, so only a sign change goes
+        // through the unsigned types.
+        if from.signed() == to.signed() {
+            return Ok(format!("@as({target}, @truncate({x}))"));
+        }
+        let base = if from.signed() {
+            format!("@as({}, @bitCast({x}))", unsigned_ty(from))
+        } else {
+            x
+        };
+        let mid = format!("@as({}, @truncate({base}))", unsigned_ty(to));
+        if to.signed() {
+            Ok(format!("@as({target}, @bitCast({mid}))"))
+        } else {
+            Ok(mid)
         }
     }
 
@@ -2140,18 +2583,40 @@ impl<'a, 'p> FnGen<'a, 'p> {
                 if args.len() != 2 {
                     return Err(emit("zig: sign_extend arity".to_string()));
                 }
-                let a = self.expr(&args[0])?;
+                // A cast whose operand is already `u64` is skipped: the
+                // value feeds the `u64` parameter directly.
+                let mut val = &args[0];
+                if let Expr::Cast { expr: core, .. } = val {
+                    let (cty, _) = self.printer.prog.expr_ty(self.body, core);
+                    if cty == Ty::Int(IntTy::U64) {
+                        val = core;
+                    }
+                }
+                let a = self.expr(val)?;
                 let b = self.expr(&args[1])?;
-                Ok(format!(
-                    "signExtend(@as(u64, @bitCast({a})), @as(u7, @intCast({b})))"
-                ))
+                // The `u64` input reinterprets bits (`@bitCast`, never a
+                // trapping `@intCast`); the width is a plain literal.
+                let (aty, _) = self.printer.prog.expr_ty(self.body, val);
+                let av = match aty {
+                    Ty::Int(IntTy::U64) => a,
+                    Ty::Int(t) if !t.signed() => format!("@intCast({a})"),
+                    Ty::Int(IntTy::I64) => format!("@bitCast({a})"),
+                    Ty::Int(_) => format!("@bitCast(@as(i64, @intCast({a})))"),
+                    _ if matches!(val, Expr::Int { .. }) => a,
+                    _ => format!("@intCast({a})"),
+                };
+                let bv = match &args[1] {
+                    Expr::Int { .. } => b,
+                    _ => format!("@intCast({b})"),
+                };
+                Ok(format!("bps_rt.signExtend({av}, {bv})"))
             }
             Func::Utf16Units => {
                 if args.len() != 1 {
                     return Err(emit("zig: utf16_units arity".to_string()));
                 }
                 let s = self.expr(&args[0])?;
-                Ok(format!("@as(i64, @intCast(utf16Units({s})))"))
+                Ok(format!("@as(i64, @intCast(bps_rt.utf16Units({s})))"))
             }
             Func::Utf8Len => {
                 if args.len() != 1 {
@@ -2165,7 +2630,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     return Err(emit("zig: str_len arity".to_string()));
                 }
                 let s = self.expr(&args[0])?;
-                Ok(format!("strLen({s})"))
+                Ok(format!("bps_rt.strLen({s})"))
             }
             Func::BytesLen | Func::ListLen => {
                 if args.len() != 1 {
@@ -2198,29 +2663,75 @@ impl<'a, 'p> FnGen<'a, 'p> {
     }
 }
 
-/// Integer-to-integer cast: widening is `@intCast` (values fit), same-width
-/// cross-sign is `@bitCast`, narrowing truncates through the unsigned domain
-/// (`@truncate` only accepts unsigned operands).
-fn int_cast_expr(from: IntTy, to: IntTy, x: String) -> String {
-    if from == to {
-        return x;
+/// Break `|`/`&`/`^` chains past this width (statement indent included).
+const MAX_WIDTH: usize = 100;
+/// Lowercase hex with `_` every four digits (`0x80`, `0x0f`, `0xffff_ffff`).
+fn zig_hex(value: i64) -> String {
+    debug_assert!(value > 9);
+    let mut digits = format!("{value:x}");
+    // Whole bytes read best (`0x0f`, not `0xf`).
+    if digits.len() % 2 == 1 {
+        digits.insert(0, '0');
     }
-    // `@bitCast` rejects `comptime_int` literals: give the operand its type.
-    let x = format!("@as({}, {x})", int_ty(from));
-    let target = int_ty(to);
-    if to.bits() > from.bits() {
-        return format!("@as({target}, @intCast({x}))");
+    if digits.len() <= 4 {
+        return format!("0x{digits}");
     }
-    if to.bits() == from.bits() {
-        return format!("@as({target}, @bitCast({x}))");
+    let mut out = String::from("0x");
+    let first = digits.len() % 4;
+    let (head, tail) = digits.split_at(first);
+    out.push_str(head);
+    for (i, chunk) in tail.as_bytes().chunks(4).enumerate() {
+        if i > 0 || !head.is_empty() {
+            out.push('_');
+        }
+        out.push_str(std::str::from_utf8(chunk).unwrap_or("?"));
     }
-    let wide = format!("@as({}, @bitCast({x}))", unsigned_ty(from));
-    let base = if from.signed() { wide } else { x };
-    let mid = format!("@as({}, @truncate({base}))", unsigned_ty(to));
-    if to.signed() {
-        format!("@as({target}, @bitCast({mid}))")
-    } else {
-        mid
+    out
+}
+
+/// Which side of its parent an operand sits on (for non-associative ops).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Left,
+    Right,
+}
+
+/// Zig precedence, tightest last (`&` binds tighter than `!=`, shifts sit
+/// between addition and `&`; `@divFloor`/`@mod` are calls, hence atomic).
+fn bin_prec(op: BinOp) -> u8 {
+    match op {
+        BinOp::Or => 1,
+        BinOp::And => 2,
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => 3,
+        BinOp::BitOr => 4,
+        BinOp::BitXor => 5,
+        BinOp::BitAnd => 6,
+        BinOp::Shl | BinOp::Shr => 7,
+        BinOp::Add | BinOp::Sub => 8,
+        BinOp::Mul => 9,
+        BinOp::Div | BinOp::Mod => 10,
+    }
+}
+
+/// Whether a binary child needs a pair of parentheses inside `parent`.
+fn need_parens(child: &Expr, parent: BinOp, side: Side) -> bool {
+    use BinOp::*;
+    if matches!(parent, Div | Mod) {
+        return false;
+    }
+    let Expr::Binary { op: c, .. } = child else {
+        return false;
+    };
+    let (cp, pp) = (bin_prec(*c), bin_prec(parent));
+    if cp != pp {
+        return cp < pp;
+    }
+    // Same precedence: associative ops (`+`, `*`, `&`, `|`, `^`, `and`,
+    // `or`) need none; the rest regroup on the right.
+    match parent {
+        Add | Mul | BitAnd | BitOr | BitXor | And | Or => false,
+        Sub | Shl | Shr => side == Side::Right,
+        _ => true,
     }
 }
 
@@ -2231,6 +2742,16 @@ fn unsigned_ty(ty: IntTy) -> &'static str {
         IntTy::I32 | IntTy::U32 => "u32",
         IntTy::I64 | IntTy::U64 => "u64",
         IntTy::I128 => "u128",
+    }
+}
+
+fn signed_ty(ty: IntTy) -> &'static str {
+    match ty {
+        IntTy::I8 | IntTy::U8 => "i8",
+        IntTy::I16 | IntTy::U16 => "i16",
+        IntTy::I32 | IntTy::U32 => "i32",
+        IntTy::I64 | IntTy::U64 => "i64",
+        IntTy::I128 => "i128",
     }
 }
 

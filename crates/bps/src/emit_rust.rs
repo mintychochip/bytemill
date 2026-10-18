@@ -3,7 +3,7 @@
 //! Emits a dependency-free generated crate: a runtime, one decoder per packet,
 //! a route table, and a golden test. Decoders mirror the reference interpreter.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 use crate::analyze::reject_unlowered_scalars;
@@ -593,7 +593,7 @@ impl<'a> Walker<'a> {
         self.fns.push((name.to_string(), String::new()));
         let body = self.block_expr(items, "    ")?;
         let text = format!(
-            "\nfn {}_at(\n    cur: &mut Cursor,\n    env: &std::collections::HashMap<String, i64>,\n) -> Result<Value, BpsError> {{\n    Ok({body})\n}}\n",
+            "\npub(crate) fn {}_at(\n    cur: &mut Cursor,\n    env: &std::collections::HashMap<String, i64>,\n) -> Result<Value, BpsError> {{\n    Ok({body})\n}}\n",
             snake(name)
         );
         if let Some(slot) = self.fns.iter_mut().find(|(n, _)| n == name) {
@@ -742,6 +742,43 @@ impl<'a> Walker<'a> {
     }
 }
 
+/// A path segment: ASCII letters and digits, lowercased, other characters
+/// collapsed to a single `_`.
+fn file_token(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "item".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Route category for one packet: `{state}_{direction}`, `shared` when the
+/// packet is routed more than one way, `unrouted` when it has no route.
+fn packet_stem(resolved: &ResolvedSchema, name: &str) -> String {
+    let mut keys: Vec<String> = resolved
+        .routes
+        .iter()
+        .filter(|(_, pkt)| pkt.name == name)
+        .map(|(route, _)| format!("{}_{}", file_token(&route.state), file_token(&route.direction)))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    match keys.as_slice() {
+        [] => "unrouted".to_string(),
+        [one] => one.clone(),
+        _ => "shared".to_string(),
+    }
+}
+
 fn write_file(path: &Path, text: &str) -> BpsResult<()> {
     std::fs::write(path, text).map_err(|e| emit(e.to_string()))
 }
@@ -764,18 +801,51 @@ pub fn emit_rust(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
         .unwrap_or(0);
 
     let mut walker = Walker::new(resolved);
-    let mut decoders: Vec<String> = Vec::new();
+    let mut by_stem: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for pkt in resolved.packets.values() {
-        match rest_only(pkt) {
-            Some(field) => decoders.push(format!(
+        let text = match rest_only(pkt) {
+            Some(field) => format!(
                 "\npub fn decode_{}(cur: &mut Cursor) -> Result<Value, BpsError> {{\n    Ok(json!({{ \"{field}\": cur.read(cur.remaining())?.to_vec() }}))\n}}\n",
                 snake(&pkt.name)
-            )),
-            None => decoders.push(walker.packet_fn(pkt)?),
-        }
+            ),
+            None => walker.packet_fn(pkt)?,
+        };
+        by_stem
+            .entry(packet_stem(resolved, &pkt.name))
+            .or_default()
+            .push(text);
     }
-    decoders.extend(walker.fns.iter().map(|(_, text)| text.clone()));
-
+    let helpers: Vec<String> = walker.fns.iter().map(|(_, text)| text.clone()).collect();
+    let packets_dir = src.join("packets");
+    std::fs::create_dir_all(&packets_dir).map_err(|e| emit(e.to_string()))?;
+    let header = "//! Generated packet decoders.\n#![allow(unused_mut, unused_variables, unused_imports, clippy::all)]\n\nuse super::super::runtime::{self, *};\nuse serde_json::{json, Value};\n";
+    if helpers.is_empty() {
+        let _ = std::fs::remove_file(packets_dir.join("codecs.rs"));
+    } else {
+        write_file(
+            &packets_dir.join("codecs.rs"),
+            &format!("{header}\n{}\n", helpers.join("\n")),
+        )?;
+    }
+    let mut mods = String::from("//! Generated packet decoders, one module per route category.\n");
+    if !helpers.is_empty() {
+        mods.push_str("mod codecs;\n");
+    }
+    for (stem, bodies) in &by_stem {
+        let mut file = String::from(header);
+        if !helpers.is_empty() {
+            file.push_str("use super::codecs::*;\n");
+        }
+        file.push('\n');
+        file.push_str(&bodies.join("\n"));
+        file.push('\n');
+        write_file(&packets_dir.join(format!("{stem}.rs")), &file)?;
+        mods.push_str(&format!("mod {stem};\npub use {stem}::*;\n"));
+    }
+    if by_stem.is_empty() {
+        mods.push_str("// This schema defines no packets.\n");
+    }
+    write_file(&src.join("packets.rs"), &mods)?;
     let route_arms = resolved
         .routes
         .iter()
@@ -792,13 +862,7 @@ pub fn emit_rust(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
         .join("\n");
 
     write_file(&src.join("runtime.rs"), RUNTIME_RS)?;
-    write_file(
-        &src.join("packets.rs"),
-        &format!(
-            "//! Generated packet decoders.\n#![allow(unused_mut, unused_variables, unused_imports, clippy::all)]\n\nuse super::runtime::{{self, *}};\nuse serde_json::{{json, Value}};\n\n{}\n",
-            decoders.join("\n")
-        ),
-    )?;
+
     write_file(
         &src.join("lib.rs"),
         &format!(

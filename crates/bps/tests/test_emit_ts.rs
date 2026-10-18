@@ -1,15 +1,17 @@
-//! `emit typescript` produces a module node can round-trip.
+//! `emit typescript` produces a `bpsgen.ts` index over per-category modules
+//! that node can round-trip.
 //!
 //! Function names resolve through the printer (`decode_fn`/`encode_fn`),
 //! never by string munging in the test.
 
 use bps::ir::typed::Program;
+use std::path::Path;
 
 fn repo(rel: &str) -> std::path::PathBuf {
     std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../")).join(rel)
 }
 
-fn node(dir: &std::path::Path, script: &str) -> std::process::Output {
+fn node(dir: &Path, script: &str) -> std::process::Output {
     std::process::Command::new("node")
         .arg("--experimental-strip-types")
         .arg(script)
@@ -24,9 +26,36 @@ fn scratch(name: &str) -> std::path::PathBuf {
     dir
 }
 
-fn check_ok(dir: &std::path::Path, source: &str, main: &str) {
-    let mut src = source.to_string();
-    src.push_str(main);
+/// Concatenated generated modules, so text assertions see the whole tree.
+fn generated(dir: &Path) -> String {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("ts")
+                && p.file_name().and_then(|n| n.to_str()) != Some("check.ts")
+        })
+        .collect();
+    files.sort();
+    let mut out = String::new();
+    for file in files {
+        out.push_str(&format!(
+            "// ---- {} ----\n",
+            file.file_name().unwrap().to_string_lossy()
+        ));
+        out.push_str(&std::fs::read_to_string(&file).unwrap());
+        out.push('\n');
+    }
+    out
+}
+
+/// The public entry point re-exports every generated module.
+fn index(dir: &Path) -> String {
+    std::fs::read_to_string(dir.join("bpsgen.ts")).unwrap()
+}
+
+fn check_ok(dir: &Path, main: &str) {
+    let src = format!("import * as bps from \"./bpsgen.ts\";\n{main}");
     std::fs::write(dir.join("check.ts"), &src).unwrap();
     let out = node(dir, "check.ts");
     assert!(
@@ -45,21 +74,26 @@ fn ts_varint_roundtrip() {
     let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
     let dir = scratch("varint");
     bps::emit_ts::emit_typescript(&resolved, &dir).unwrap();
-    let src = std::fs::read_to_string(dir.join("bpsgen.ts")).unwrap();
+    let src = generated(&dir);
     // 32-bit-or-narrower integers are plain `number`, not `bigint`.
     assert!(src.contains("export function decodeVarint(r: Reader): number"));
+    assert!(
+        index(&dir).contains("export * from \"./encoding.ts\";"),
+        "bpsgen.ts must re-export the encoding module\n{}",
+        index(&dir)
+    );
+    assert!(dir.join("encoding.ts").is_file(), "missing encoding.ts");
     check_ok(
         &dir,
-        &src,
         r#"
-const w = new Writer();
-encodeVarint(w, 300);
+const w = new bps.Writer();
+bps.encodeVarint(w, 300);
 if (w.toBytes().join(",") !== "172,2") throw new Error("300 " + w.toBytes());
-if (decodeVarint(new Reader(w.toBytes())) !== 300) throw new Error("dec 300");
-const w2 = new Writer();
-encodeVarint(w2, -1);
+if (bps.decodeVarint(new bps.Reader(w.toBytes())) !== 300) throw new Error("dec 300");
+const w2 = new bps.Writer();
+bps.encodeVarint(w2, -1);
 if (w2.toBytes().join(",") !== "255,255,255,255,15") throw new Error("-1 " + w2.toBytes());
-if (decodeVarint(new Reader(w2.toBytes())) !== -1) throw new Error("dec -1");
+if (bps.decodeVarint(new bps.Reader(w2.toBytes())) !== -1) throw new Error("dec -1");
 console.log("ok");
 "#,
     );
@@ -84,7 +118,6 @@ packet probe {
     let program = bps::ir::typed(&resolved).unwrap();
     let dir = scratch("scalars");
     bps::emit_ts::emit_typescript(&resolved, &dir).unwrap();
-    let src = std::fs::read_to_string(dir.join("bpsgen.ts")).unwrap();
     let c = program.packet_codec("probe").unwrap();
     let (dec, enc) = (
         bps::emit_ts::decode_fn(&program, c),
@@ -92,15 +125,14 @@ packet probe {
     );
     check_ok(
         &dir,
-        &src,
         &format!(
             r#"
 const v = {{ a: true, b: -5, c: 0xcafe, d: 1.5, e: -123.456, f: "héllo" }};
-const w = new Writer();
-{enc}(w, v);
-const back = {dec}(new Reader(w.toBytes()));
-const w2 = new Writer();
-{enc}(w2, back);
+const w = new bps.Writer();
+bps.{enc}(w, v);
+const back = bps.{dec}(new bps.Reader(w.toBytes()));
+const w2 = new bps.Writer();
+bps.{enc}(w2, back);
 if (w2.toBytes().join(",") !== w.toBytes().join(",")) throw new Error("re-encode");
 if (back.a !== true || back.b !== -5 || back.c !== 0xcafe) throw new Error("ints " + JSON.stringify(back));
 if (back.d !== 1.5 || back.e !== -123.456 || back.f !== "héllo") throw new Error("rest " + JSON.stringify(back));
@@ -123,12 +155,10 @@ packet probe {
     let program: Program = bps::ir::typed(&resolved).unwrap();
     let dir = scratch("errors");
     bps::emit_ts::emit_typescript(&resolved, &dir).unwrap();
-    let src = std::fs::read_to_string(dir.join("bpsgen.ts")).unwrap();
     let c = program.packet_codec("probe").unwrap();
     let dec = bps::emit_ts::decode_fn(&program, c);
     check_ok(
         &dir,
-        &src,
         &format!(
             r#"
 function kindOf(f) {{
@@ -136,20 +166,20 @@ function kindOf(f) {{
     f();
     return "no-throw";
   }} catch (e) {{
-    return e instanceof BpsError ? e.kind + "@" + e.codec : "foreign:" + e;
+    return e instanceof bps.BpsError ? e.kind + "@" + e.codec : "foreign:" + e;
   }}
 }}
-if (kindOf(() => decodeVarint(new Reader(new Uint8Array(0)))) !== "shortBuffer@varint")
+if (kindOf(() => bps.decodeVarint(new bps.Reader(new Uint8Array(0)))) !== "shortBuffer@varint")
   throw new Error("empty varint");
-if (kindOf(() => decodeVarint(new Reader(Uint8Array.from([0xac])))) !== "shortBuffer@varint")
+if (kindOf(() => bps.decodeVarint(new bps.Reader(Uint8Array.from([0xac])))) !== "shortBuffer@varint")
   throw new Error("truncated varint");
-const w = new Writer();
-encodeVarint(w, 299);
-if (kindOf(() => {dec}(new Reader(w.toBytes()))) !== "requireFailed@probe")
+const w = new bps.Writer();
+bps.encodeVarint(w, 299);
+if (kindOf(() => bps.{dec}(new bps.Reader(w.toBytes()))) !== "requireFailed@probe")
   throw new Error("require should fail");
-const w2 = new Writer();
-encodeVarint(w2, 300);
-const v = {dec}(new Reader(w2.toBytes()));
+const w2 = new bps.Writer();
+bps.encodeVarint(w2, 300);
+const v = bps.{dec}(new bps.Reader(w2.toBytes()));
 if (v.n !== 300) throw new Error("require should pass");
 console.log("ok");
 "#
@@ -166,10 +196,20 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) {
     let program: Program = bps::ir::typed(&resolved).unwrap();
     let dir = scratch(tag);
     bps::emit_ts::emit_typescript(&resolved, &dir).unwrap();
-    let generated = std::fs::read_to_string(dir.join("bpsgen.ts")).unwrap();
-    let mut body = generated.clone();
-    body.push_str(
-        "const fails: string[] = [];\nfunction check(name: string, raw: number[], v: unknown, enc: (w: Writer, v: never) => void) {\n  try {\n    const w = new Writer();\n    enc(w, v as never);\n    const back = w.toBytes();\n    if (back.length !== raw.length || back.some((b, i) => b !== raw[i])) fails.push(name + \" bytes \" + back.length + \" \" + raw.length);\n  } catch (e) { fails.push(name + \" \" + e); }\n}\n",
+    assert!(
+        index(&dir).contains("export * from \"./encoding.ts\";"),
+        "missing index re-export for {schema_rel}"
+    );
+    assert!(dir.join("encoding.ts").is_file(), "missing encoding.ts");
+    if schema_rel.contains("26_3") {
+        assert!(
+            dir.join("play_clientbound.ts").is_file(),
+            "missing play_clientbound.ts"
+        );
+        assert!(dir.join("shared.ts").is_file(), "missing shared.ts");
+    }
+    let mut body = String::from(
+        "const fails: string[] = [];\nfunction check(name: string, raw: number[], v: unknown, enc: (w: bps.Writer, v: never) => void) {\n  try {\n    const w = new bps.Writer();\n    enc(w, v as never);\n    const back = w.toBytes();\n    if (back.length !== raw.length || back.some((b, i) => b !== raw[i])) fails.push(name + \" bytes \" + back.length + \" \" + raw.length);\n  } catch (e) { fails.push(name + \" \" + e); }\n}\n",
     );
     let mut n = 0;
     let mut packets: Vec<String> = resolved.packets.values().map(|p| p.name.clone()).collect();
@@ -197,7 +237,7 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) {
             .collect::<Vec<_>>()
             .join(",");
         body.push_str(&format!(
-            "check({name:?}, [{list}], {dec}(new Reader(Uint8Array.from([{list}]))), {enc});\n",
+            "check({name:?}, [{list}], bps.{dec}(new bps.Reader(Uint8Array.from([{list}]))), bps.{enc});\n",
             name = packet.name
         ));
         n += 1;
@@ -207,7 +247,11 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) {
     );
     body.push_str(&format!("console.log(\"packets\", {n});\n"));
     assert!(n >= min_packets, "only {n} packets for {schema_rel}");
-    std::fs::write(dir.join("check.ts"), &body).unwrap();
+    std::fs::write(
+        dir.join("check.ts"),
+        format!("import * as bps from \"./bpsgen.ts\";\n{body}"),
+    )
+    .unwrap();
     let out = node(&dir, "check.ts");
     assert!(
         out.status.success(),

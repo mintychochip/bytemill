@@ -15,7 +15,7 @@ fn scratch(name: &str) -> PathBuf {
 
 fn py_compile(dir: &std::path::Path) {
     let out = Command::new("python3")
-        .args(["-m", "py_compile", "bpsgen.py"])
+        .args(["-m", "compileall", "-q", "bpsgen"])
         .current_dir(dir)
         .output()
         .unwrap();
@@ -102,14 +102,14 @@ w = bpsgen.Writer()
 w.write_f32(1.5)
 w.write_f64(-2.25)
 eq(w.get_bytes(), struct.pack(">f", 1.5) + struct.pack(">d", -2.25), "float bytes")
-# a short buffer carries the offset, with no codec path attached
+# a short buffer carries the offset and the inner-to-outer codec path
 try:
     bpsgen.Probe.decode(bpsgen.Reader(b""))
     raise AssertionError("expected ShortBuffer")
 except bpsgen.ShortBuffer as exc:
     assert "offset 0" in str(exc), f"offset missing: {exc}"
     assert "need 1, have 0" in str(exc), f"counts missing: {exc}"
-    assert "[in " not in str(exc), f"unexpected codec path: {exc}"
+    assert "[in varint <- probe]" in str(exc), f"codec path missing: {exc}"
 # a require failure names the condition and the codec
 try:
     bpsgen.ProbeGuarded.decode(bpsgen.Reader(bytes([0x00])))

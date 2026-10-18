@@ -5,7 +5,8 @@
 //! `Cargo.toml`, `src/lib.rs` (`forbid(unsafe_code)`, re-exports),
 //! `src/runtime.rs` (the [`Error`], [`Reader`], [`Writer`] and integer
 //! helpers below), `src/model.rs` (shared encodings, enums, and every nested
-//! record or sum), and `src/packets.rs` (packets and frames).
+//! record or sum that is not a packet), and `src/packets/` (one module per
+//! route category: `play_clientbound`, `shared`, `encoding`, ...).
 //!
 //! Every codec is printed from its typed body: scalar and string codecs
 //! (`varint`, `string`, `u16be`, ...) become free `decode_*`/`encode_*`
@@ -61,7 +62,7 @@
 //! [`Func`]: crate::ir::typed::Func
 //! [`Program::int_range`]: crate::ir::typed::Program::int_range
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -69,7 +70,7 @@ use crate::ast::ResolvedSchema;
 use crate::errors::{BpsResult, emit};
 use crate::ir::typed::{
     BinOp, Body, CodecIdx, CodecKind, Expr, Func, IntTy, LocalId, Origin, Program, ReadOp,
-    RepeatMode, Stmt, Ty, TypeIdx, escape, typed,
+    RepeatMode, Stmt, Ty, TypeIdx, escape, hex_literal, typed,
 };
 
 /// Rust 2024 keywords (lowercase) plus `Self`: any identifier spelling one of
@@ -86,19 +87,31 @@ const KEYWORDS: &[&str] = &[
 pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let program = typed(resolved)?;
     let printer = Gen::new(&program);
-    fs::create_dir_all(out_dir.join("src")).map_err(|e| emit(e.to_string()))?;
+    let src = out_dir.join("src");
+    let packets = src.join("packets");
+    fs::create_dir_all(&packets).map_err(|e| emit(e.to_string()))?;
+    let _ = fs::remove_file(src.join("packets.rs"));
     fs::write(out_dir.join("Cargo.toml"), cargo_toml()).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("src").join("lib.rs"), printer.lib_rs())
+    fs::write(src.join("lib.rs"), printer.lib_rs()).map_err(|e| emit(e.to_string()))?;
+    fs::write(src.join("runtime.rs"), RUNTIME).map_err(|e| emit(e.to_string()))?;
+    fs::write(src.join("model.rs"), printer.file_rs(false, None))
         .map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("src").join("runtime.rs"), RUNTIME).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("src").join("model.rs"), printer.file_rs(false))
+    let stems = printer.packet_stems();
+    fs::write(packets.join("mod.rs"), printer.packets_index(&stems))
         .map_err(|e| emit(e.to_string()))?;
-    fs::write(
-        out_dir.join("src").join("packets.rs"),
-        printer.file_rs(true),
-    )
-    .map_err(|e| emit(e.to_string()))?;
-    rustfmt_generated(out_dir);
+    let mut paths = vec![
+        src.join("lib.rs"),
+        src.join("runtime.rs"),
+        src.join("model.rs"),
+        packets.join("mod.rs"),
+    ];
+    for stem in &stems {
+        let path = packets.join(format!("{stem}.rs"));
+        fs::write(&path, printer.file_rs(true, Some(stem.as_str())))
+            .map_err(|e| emit(e.to_string()))?;
+        paths.push(path);
+    }
+    rustfmt_paths(&paths);
     Ok(())
 }
 
@@ -106,12 +119,11 @@ pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<(
 /// output is canonically formatted even where the line writer's breaking
 /// differs from `rustfmt`'s (long operator chains, nested calls). The pass
 /// is deterministic; without `rustfmt` the writer's output stands as is.
-fn rustfmt_generated(out_dir: &Path) {
-    for name in ["lib.rs", "runtime.rs", "model.rs", "packets.rs"] {
-        let path = out_dir.join("src").join(name);
+fn rustfmt_paths(paths: &[std::path::PathBuf]) {
+    for path in paths {
         let Ok(status) = std::process::Command::new("rustfmt")
             .args(["--edition", "2024"])
-            .arg(&path)
+            .arg(path)
             .status()
         else {
             return;
@@ -272,6 +284,15 @@ pub enum Error {
         /// Codec being encoded.
         codec: &'static str,
     },
+    /// No packet is routed at `id` in this state and direction.
+    NoRoute {
+        /// Protocol state (`play`, `login`, ...).
+        state: &'static str,
+        /// `clientbound` or `serverbound`.
+        direction: &'static str,
+        /// Packet id that was not routed.
+        id: i128,
+    },
 }
 
 impl Display for Error {
@@ -302,6 +323,11 @@ impl Display for Error {
             Self::EncodeUntilEnd { codec } => {
                 write!(f, "{codec}: cannot encode `until-end` item")
             }
+            Self::NoRoute {
+                state,
+                direction,
+                id,
+            } => write!(f, "no packet for id {id} in {state} {direction}"),
         }
     }
 }
@@ -541,10 +567,14 @@ impl W {
 struct Uses {
     /// Names from `model.rs`.
     model: bool,
-    /// Names from `packets.rs`.
+    /// Names from the `packets` module (set when `model.rs` names a packet).
     packets: bool,
     /// Names from `runtime.rs`.
     runtime: bool,
+    /// Category currently being written. `None` for `model.rs`.
+    here_stem: Option<String>,
+    /// Other packet-category modules this file names.
+    stems: BTreeSet<String>,
 }
 
 /// Emission state for one function body: the line writer, module-use
@@ -702,23 +732,53 @@ impl<'a> Gen<'a> {
 
     /// Record a reference to the file holding `ty`.
     fn note_ty(&self, uses: &mut Uses, here_packets: bool, ty: TypeIdx) {
-        if self.file_of_ty(ty) != here_packets {
-            if self.file_of_ty(ty) {
+        let there = self.file_of_ty(ty);
+        if there != here_packets {
+            if there {
                 uses.packets = true;
             } else {
                 uses.model = true;
             }
+            return;
+        }
+        if !here_packets {
+            return;
+        }
+        let Some(here) = uses.here_stem.clone() else {
+            return;
+        };
+        let stem = self
+            .prog
+            .output_stem(type_origin(self.prog, ty))
+            .to_string();
+        if stem != here {
+            uses.stems.insert(stem);
         }
     }
 
     /// Record a reference to the file holding `codec`.
     fn note_codec(&self, uses: &mut Uses, here_packets: bool, codec: CodecIdx) {
-        if self.file_of_codec(codec) != here_packets {
-            if self.file_of_codec(codec) {
+        let there = self.file_of_codec(codec);
+        if there != here_packets {
+            if there {
                 uses.packets = true;
             } else {
                 uses.model = true;
             }
+            return;
+        }
+        if !here_packets {
+            return;
+        }
+        let Some(here) = uses.here_stem.clone() else {
+            return;
+        };
+        let stem = self
+            .prog
+            .output_stem(&self.prog.codecs[codec].origin)
+            .to_string();
+        if stem != here {
+            uses.stems.insert(stem);
         }
     }
 
@@ -745,14 +805,20 @@ impl<'a> Gen<'a> {
         w.text
     }
 
-    /// `src/model.rs` (`packets_side = false`) or `src/packets.rs`.
-    fn file_rs(&self, packets_side: bool) -> String {
-        let mut uses = Uses::default();
+    /// `src/model.rs` when `only_stem` is `None`, otherwise one category
+    /// module under `src/packets/`.
+    fn file_rs(&self, packets_side: bool, only_stem: Option<&str>) -> String {
+        let mut uses = Uses {
+            here_stem: only_stem.map(str::to_string),
+            ..Uses::default()
+        };
         let mut defs = W::new();
         let mut items = W::new();
         let mut first_def = true;
-        for (ti, _) in self.prog.types.iter().enumerate() {
-            if self.file_of_ty(ti) == packets_side {
+        for ti in 0..self.prog.types.len() {
+            if self.file_of_ty(ti) == packets_side
+                && stem_selected(self.prog, type_origin(self.prog, ti), only_stem)
+            {
                 if !first_def {
                     defs.line("");
                 }
@@ -761,8 +827,10 @@ impl<'a> Gen<'a> {
             }
         }
         let mut first_item = true;
-        for (ci, _) in self.prog.codecs.iter().enumerate() {
-            if self.file_of_codec(ci) == packets_side {
+        for (ci, c) in self.prog.codecs.iter().enumerate() {
+            if self.file_of_codec(ci) == packets_side
+                && stem_selected(self.prog, &c.origin, only_stem)
+            {
                 if !first_item {
                     items.line("");
                 }
@@ -770,17 +838,33 @@ impl<'a> Gen<'a> {
                 self.emit_codec(&mut items, &mut uses, packets_side, ci);
             }
         }
+        if let Some(stem) = only_stem {
+            self.emit_route_enums(&mut items, &mut uses, stem);
+        }
+        let up = if only_stem.is_some() {
+            "super::super"
+        } else {
+            "super"
+        };
         let mut w = W::new();
+        let mut imported = false;
         if uses.model && packets_side {
-            w.line("use super::model::*;");
+            w.line(&format!("use {up}::model::*;"));
+            imported = true;
         }
         if uses.packets && !packets_side {
             w.line("use super::packets::*;");
+            imported = true;
+        }
+        for stem in &uses.stems {
+            w.line(&format!("use super::{stem}::*;"));
+            imported = true;
         }
         if uses.runtime {
-            w.line("use super::runtime::*;");
+            w.line(&format!("use {up}::runtime::*;"));
+            imported = true;
         }
-        if uses.model || uses.packets || uses.runtime {
+        if imported {
             w.line("");
         }
         w.text.push_str(&defs.text);
@@ -797,6 +881,232 @@ impl<'a> Gen<'a> {
         }
         w.text
     }
+
+    /// A typed enum of every packet routed in this category. `decode` returns
+    /// the packet struct or [`Error::NoRoute`]. Shared packets live in their
+    /// own module; this enum names them and records the import.
+    fn emit_route_enums(&self, w: &mut W, uses: &mut Uses, stem: &str) {
+        let mut groups: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
+        for (i, route) in self.prog.routes.iter().enumerate() {
+            let key = format!(
+                "{}_{}",
+                crate::ir::typed::file_token(&route.state),
+                crate::ir::typed::file_token(&route.direction)
+            );
+            if key == stem {
+                groups
+                    .entry((route.state.clone(), route.direction.clone()))
+                    .or_default()
+                    .push(i);
+            }
+        }
+        for ((state, direction), mut idxs) in groups {
+            idxs.sort_by_key(|i| (self.prog.routes[*i].id, *i));
+            let mut seen = BTreeSet::new();
+            let mut arms: Vec<(i128, String, String, String)> = Vec::new();
+            for i in idxs {
+                let route = &self.prog.routes[i];
+                let ci = route.packet;
+                let codec = &self.prog.codecs[ci];
+                if !codec.params.is_empty() || !is_method(&codec.kind) {
+                    continue;
+                }
+                let Some(ty) = codec.ty else {
+                    continue;
+                };
+                let type_name = self.type_name[ty].clone();
+                let mut variant = type_name.clone();
+                if !seen.insert(variant.clone()) {
+                    variant = format!("{variant}_{}", route.id.unsigned_abs());
+                    if !seen.insert(variant.clone()) {
+                        variant = format!("{variant}_{ci}");
+                        seen.insert(variant.clone());
+                    }
+                }
+                self.note_ty(uses, true, ty);
+                let schema = match &codec.origin {
+                    Origin::Packet { name, .. } => name.clone(),
+                    _ => codec.name.snake().to_string(),
+                };
+                arms.push((route.id, variant, type_name, schema));
+            }
+            if arms.is_empty() {
+                continue;
+            }
+            uses.runtime = true;
+            if !w.text.is_empty() {
+                w.line("");
+            }
+            let enum_name = pascal_stem(stem);
+            let state_lit = rust_str(&state);
+            let dir_lit = rust_str(&direction);
+            w.line(&format!(
+                "/// `{state}` `{direction}` packets. [`{enum_name}::decode`] returns the packet or [`Error::NoRoute`]."
+            ));
+            w.line("#[allow(clippy::large_enum_variant, reason = \"packet payloads differ in size; boxing every decode would allocate\")]");
+            w.line("#[derive(Debug, Clone, PartialEq)]");
+            w.line(&format!("pub enum {enum_name} {{"));
+            w.ind();
+            for (id, variant, type_name, schema) in &arms {
+                w.line(&format!("/// `{schema}`, id {id}."));
+                w.line(&format!("{variant}({type_name}),"));
+            }
+            w.out();
+            w.line("}");
+            w.line("");
+            w.line(&format!("impl {enum_name} {{"));
+            w.ind();
+            w.line("/// Decode the packet body for `id`.");
+            w.line("///");
+            w.line("/// Returns [`Error::NoRoute`] when nothing is routed at `id`.");
+            w.line("pub fn decode(id: i128, r: &mut Reader<'_>) -> Result<Self, Error> {");
+            w.ind();
+            w.line("match id {");
+            w.ind();
+            for (id, variant, type_name, _) in &arms {
+                w.line(&format!(
+                    "{id} => Ok(Self::{variant}({type_name}::decode(r)?)),"
+                ));
+            }
+            w.line(&format!(
+                "_ => Err(Error::NoRoute {{ state: {state_lit}, direction: {dir_lit}, id }}),"
+            ));
+            w.out();
+            w.line("}");
+            w.out();
+            w.line("}");
+            w.line("");
+            w.line("/// Packet id of this variant.");
+            w.line("pub fn id(&self) -> i128 {");
+            w.ind();
+            w.line("match self {");
+            w.ind();
+            for (id, variant, _, _) in &arms {
+                w.line(&format!("Self::{variant}(_) => {id},"));
+            }
+            w.out();
+            w.line("}");
+            w.out();
+            w.line("}");
+            w.line("");
+            w.line("/// Encode this packet's body.");
+            w.line("pub fn encode(&self, w: &mut Writer) -> Result<(), Error> {");
+            w.ind();
+            w.line("match self {");
+            w.ind();
+            for (_, variant, _, _) in &arms {
+                w.line(&format!("Self::{variant}(v) => v.encode(w),"));
+            }
+            w.out();
+            w.line("}");
+            w.out();
+            w.line("}");
+            w.out();
+            w.line("}");
+        }
+    }
+
+    /// Route categories that hold at least one packet or frame.
+    fn packet_stems(&self) -> Vec<String> {
+        let mut stems = BTreeSet::new();
+        for (ci, c) in self.prog.codecs.iter().enumerate() {
+            if self.file_of_codec(ci) {
+                stems.insert(self.prog.output_stem(&c.origin).to_string());
+            }
+        }
+        for ti in 0..self.prog.types.len() {
+            if self.file_of_ty(ti) {
+                stems.insert(
+                    self.prog
+                        .output_stem(type_origin(self.prog, ti))
+                        .to_string(),
+                );
+            }
+        }
+        for route in &self.prog.routes {
+            stems.insert(format!(
+                "{}_{}",
+                crate::ir::typed::file_token(&route.state),
+                crate::ir::typed::file_token(&route.direction)
+            ));
+        }
+        stems.into_iter().collect()
+    }
+
+    /// `src/packets/mod.rs`: one `pub mod` and `pub use` per category.
+    fn packets_index(&self, stems: &[String]) -> String {
+        if stems.is_empty() {
+            return "// This schema defines no packets.\n".to_string();
+        }
+        let mut w = W::new();
+        w.line("//! Packets and frames, one module per route category.");
+        for stem in stems {
+            w.line(&format!("/// Packets and frames in the `{stem}` category."));
+            w.line(&format!("pub mod {stem};"));
+        }
+        w.line("");
+        for stem in stems {
+            w.line(&format!("pub use {stem}::*;"));
+        }
+        w.text
+    }
+}
+
+/// `true` when `only_stem` is unset or `origin` belongs to that category.
+fn stem_selected(prog: &Program, origin: &Origin, only_stem: Option<&str>) -> bool {
+    match only_stem {
+        None => true,
+        Some(stem) => prog.output_stem(origin) == stem,
+    }
+}
+
+/// The origin that decides a type's category file: its codec when it has one
+/// (the struct and its impl must land in the same module), otherwise its own.
+fn type_origin(prog: &Program, ty: TypeIdx) -> &Origin {
+    match prog.types[ty].codec {
+        Some(codec) => &prog.codecs[codec].origin,
+        None => &prog.types[ty].origin,
+    }
+}
+
+/// `play_clientbound` to `PlayClientbound`.
+fn pascal_stem(stem: &str) -> String {
+    let mut out = String::new();
+    let mut cap = true;
+    for c in stem.chars() {
+        if c == '_' {
+            cap = true;
+            continue;
+        }
+        if cap {
+            out.extend(c.to_uppercase());
+            cap = false;
+        } else {
+            out.push(c);
+        }
+    }
+    if out.is_empty() {
+        out.push_str("Packets");
+    }
+    if KEYWORDS.contains(&out.as_str()) {
+        out.push('_');
+    }
+    out
+}
+
+/// A Rust string literal.
+fn rust_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Direct size edges `owner -> target`: record fields and sum payloads that
@@ -1050,7 +1360,6 @@ impl<'a> Gen<'a> {
                     w.line(&format!("pub struct {} {{", self.type_name[ti]));
                     w.ind();
                     for (fi, f) in fields.iter().enumerate() {
-                        w.line(&format!("/// Field `{}`.", f.ir));
                         let mut ty = self.rust_ty(&f.ty, false);
                         self.note_ty_tree(uses, here_packets, &f.ty);
                         if self.boxed_field.contains(&(ti, fi)) {
@@ -1058,6 +1367,14 @@ impl<'a> Gen<'a> {
                         }
                         if f.optional {
                             ty = format!("Option<{ty}>");
+                        }
+                        if f.optional {
+                            w.line(&format!(
+                                "/// `{}` (optional; `None` when absent on the wire): `{ty}`.",
+                                f.ir
+                            ));
+                        } else {
+                            w.line(&format!("/// `{}`: `{ty}`.", f.ir));
                         }
                         w.line(&format!("pub {}: {ty},", self.field_names[ti][fi]));
                     }
@@ -1127,7 +1444,7 @@ impl<'a> Gen<'a> {
             .join(" | ");
         match &v.payload {
             None => format!("/// Arm `{tags}`."),
-            Some(payload) => format!("/// `{tags}` => {}.", self.rust_ty(payload, false)),
+            Some(payload) => format!("/// `{tags}` => `{}`.", self.rust_ty(payload, false)),
         }
     }
 
@@ -1544,9 +1861,7 @@ fn mut_locals(
         // Two stores always need `mut`; so does one reassignment of an
         // initialized local (`let x = None; x = v;` cannot reuse an immutable
         // binding, while `let x: T; x = v;` is deferred initialization).
-        if *n >= 2
-            || looping.contains(local)
-            || (nondecl.contains(local) && inits.contains(local))
+        if *n >= 2 || looping.contains(local) || (nondecl.contains(local) && inits.contains(local))
         {
             out.insert(*local);
         }
@@ -1683,7 +1998,13 @@ impl<'a> Gen<'a> {
     }
 
     /// Decode signature (locals come from the context for parameter names).
-    fn decode_sig(&self, ctx: &Ctx<'_>, ci: CodecIdx, ty: Option<TypeIdx>, depth: usize) -> Vec<String> {
+    fn decode_sig(
+        &self,
+        ctx: &Ctx<'_>,
+        ci: CodecIdx,
+        ty: Option<TypeIdx>,
+        depth: usize,
+    ) -> Vec<String> {
         let c = &self.prog.codecs[ci];
         let r = if touches_cursor(&c.decode) { "r" } else { "_r" };
         let mut parts = vec![format!("{r}: &mut Reader<'_>")];
@@ -1707,7 +2028,13 @@ impl<'a> Gen<'a> {
     }
 
     /// Encode signature.
-    fn encode_sig(&self, ctx: &Ctx<'_>, ci: CodecIdx, ty: Option<TypeIdx>, depth: usize) -> Vec<String> {
+    fn encode_sig(
+        &self,
+        ctx: &Ctx<'_>,
+        ci: CodecIdx,
+        ty: Option<TypeIdx>,
+        depth: usize,
+    ) -> Vec<String> {
         let c = &self.prog.codecs[ci];
         let mut parts = Vec::new();
         if ty.is_some() {
@@ -1717,7 +2044,11 @@ impl<'a> Gen<'a> {
         parts.push(format!("{w}: &mut Writer"));
         if ty.is_none() {
             let value = c.encode.value.expect("free encode takes a value");
-            parts.push(format!("{}: {}", ctx.local(value), self.encode_value_ty(&c.value)));
+            parts.push(format!(
+                "{}: {}",
+                ctx.local(value),
+                self.encode_value_ty(&c.value)
+            ));
         }
         for (pi, p) in c.params.iter().enumerate() {
             let local = c.encode.params[pi];
@@ -1752,22 +2083,12 @@ impl<'a> Gen<'a> {
     }
 
     /// All statements of a body; the last one is in tail position when `tail`.
-    fn emit_body(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        body: &Body,
-        tail: bool,
-    ) {
+    fn emit_body(&self, cx: &mut Cx<'_, '_, '_, '_>, body: &Body, tail: bool) {
         self.emit_stmts(cx, &body.stmts, tail);
     }
 
     /// Statements with tail threading for the final one.
-    fn emit_stmts(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        stmts: &[Stmt],
-        tail: bool,
-    ) {
+    fn emit_stmts(&self, cx: &mut Cx<'_, '_, '_, '_>, stmts: &[Stmt], tail: bool) {
         let mut iter = stmts.iter().peekable();
         while let Some(s) = iter.next() {
             let last = iter.peek().is_none();
@@ -1776,12 +2097,7 @@ impl<'a> Gen<'a> {
     }
 
     /// One statement.
-    fn emit_stmt(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        s: &Stmt,
-        tail: bool,
-    ) {
+    fn emit_stmt(&self, cx: &mut Cx<'_, '_, '_, '_>, s: &Stmt, tail: bool) {
         match s {
             Stmt::Declare { local, zero } => self.emit_declare(cx, *local, *zero),
             Stmt::Let { dst, value } => self.emit_let(cx, dst, value),
@@ -1794,12 +2110,8 @@ impl<'a> Gen<'a> {
             Stmt::Encode { codec, args, value } => {
                 self.emit_encode_call(cx, *codec, args, value);
             }
-            Stmt::Require { cond, text } => {
-                self.emit_require(cx, cond, text)
-            }
-            Stmt::Unwrap { dst, src, field } => {
-                self.emit_unwrap(cx, dst, src, field)
-            }
+            Stmt::Require { cond, text } => self.emit_require(cx, cond, text),
+            Stmt::Unwrap { dst, src, field } => self.emit_unwrap(cx, dst, src, field),
             Stmt::If { cond, then, els } => {
                 self.emit_if(cx, cond, then, els, tail);
             }
@@ -1836,12 +2148,7 @@ impl<'a> Gen<'a> {
 
     /// `let name: Ty [= zero];`, skipped for loop-introduced and merged
     /// (single-store deferred) locals.
-    fn emit_declare(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        local: LocalId,
-        zero: bool,
-    ) {
+    fn emit_declare(&self, cx: &mut Cx<'_, '_, '_, '_>, local: LocalId, zero: bool) {
         if cx.ctx.intro.contains(&local) || cx.ctx.merge.contains(&local) {
             return;
         }
@@ -1874,19 +2181,10 @@ impl<'a> Gen<'a> {
     }
 
     /// `let`/`=`/`= Some` with a width-aware right-hand side.
-    fn emit_let(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        dst: &crate::ir::typed::Bind,
-        value: &Expr,
-    ) {
+    fn emit_let(&self, cx: &mut Cx<'_, '_, '_, '_>, dst: &crate::ir::typed::Bind, value: &Expr) {
         let decl = &cx.ctx.body.locals[dst.local];
         let name = cx.ctx.local(dst.local).to_string();
-        let mutable = if cx.ctx.decl_mut(dst) {
-            "mut "
-        } else {
-            ""
-        };
+        let mutable = if cx.ctx.decl_mut(dst) { "mut " } else { "" };
         let stem = if cx.ctx.declares(dst) {
             let inner = self.rust_ty(&decl.ty, false);
             let ty = if dst.some || decl.optional {
@@ -1915,10 +2213,11 @@ impl<'a> Gen<'a> {
     }
 }
 
-/// Zero value of a type for `Declare`.
+/// Zero value of a type for `Declare` (always under a `let …: Ty`
+/// annotation, so integer zeros stay unsuffixed and infer).
 fn zero_of(ty: &Ty) -> String {
     match ty {
-        Ty::Int(t) => format!("0{}", Gen::int_name(*t)),
+        Ty::Int(_) => "0".to_string(),
         Ty::Bool => "false".to_string(),
         Ty::F32 => "0f32".to_string(),
         Ty::F64 => "0f64".to_string(),
@@ -1931,12 +2230,7 @@ fn zero_of(ty: &Ty) -> String {
 impl<'a> Gen<'a> {
     /// `Read`: cursor operations with conversions into the destination type.
     /// A negative `Bytes(n)` fails with `NegativeLength` like the interpreter.
-    fn emit_read(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        dst: &crate::ir::typed::Bind,
-        op: &ReadOp,
-    ) {
+    fn emit_read(&self, cx: &mut Cx<'_, '_, '_, '_>, dst: &crate::ir::typed::Bind, op: &ReadOp) {
         let decl = &cx.ctx.body.locals[dst.local];
         let name = cx.ctx.local(dst.local).to_string();
         match op {
@@ -1944,7 +2238,10 @@ impl<'a> Gen<'a> {
                 let len_expr = self.expr(cx, n);
                 let codec = cx.ctx.snake.clone();
                 self.emit_guarded_len(&mut *cx.w, &len_expr, &codec);
-                let rhs = format!("r.read_bytes(({len_expr}) as usize)?.to_vec()");
+                let rhs = format!(
+                    "r.read_bytes({} as usize)?.to_vec()",
+                    cast_operand(n, &len_expr)
+                );
                 self.emit_store(cx, dst, &decl.ty.clone(), decl.optional, &name, &rhs);
             }
             ReadOp::Rest => {
@@ -1955,6 +2252,9 @@ impl<'a> Gen<'a> {
                 let rhs = match &decl.ty {
                     Ty::Bool => "r.read_u8()? != 0".to_string(),
                     Ty::Int(IntTy::U8) => "r.read_u8()?".to_string(),
+                    Ty::Int(t) if lossless_widen(&Ty::Int(IntTy::U8), &Ty::Int(*t)) => {
+                        format!("{}::from(r.read_u8()?)", Self::int_name(*t))
+                    }
                     Ty::Int(t) => format!("r.read_u8()? as {}", Self::int_name(*t)),
                     _ => "r.read_u8()?".to_string(),
                 };
@@ -1987,11 +2287,7 @@ impl<'a> Gen<'a> {
         name: &str,
         rhs: &str,
     ) {
-        let mutable = if cx.ctx.decl_mut(dst) {
-            "mut "
-        } else {
-            ""
-        };
+        let mutable = if cx.ctx.decl_mut(dst) { "mut " } else { "" };
         if cx.ctx.declares(dst) {
             let ascribe = self.rust_ty(ty, opt || dst.some);
             if dst.some {
@@ -2063,7 +2359,12 @@ impl<'a> Gen<'a> {
                 self.stmt_call(&mut *cx.w, &stem, &arg_strs, ")?;");
             }
         } else if dst.some {
-            self.stmt_call(&mut *cx.w, &format!("{name} = Some({base}"), &arg_strs, ")?);");
+            self.stmt_call(
+                &mut *cx.w,
+                &format!("{name} = Some({base}"),
+                &arg_strs,
+                ")?);",
+            );
         } else {
             self.stmt_call(&mut *cx.w, &format!("{name} = {base}"), &arg_strs, ")?;");
         }
@@ -2071,11 +2372,7 @@ impl<'a> Gen<'a> {
 
     /// By-value call argument: bare when `Copy`, cloned otherwise (the
     /// callee takes ownership, so the clone is never redundant).
-    fn call_arg(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        e: &Expr,
-    ) -> String {
+    fn call_arg(&self, cx: &mut Cx<'_, '_, '_, '_>, e: &Expr) -> String {
         let s = self.expr(cx, e);
         if self.copy_of(cx.ctx, e) {
             s
@@ -2117,15 +2414,11 @@ impl<'a> Gen<'a> {
     }
 
     /// `Utf8`: validate bytes as UTF-8, reporting the slice start.
-    fn emit_utf8(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        dst: &crate::ir::typed::Bind,
-        src: &Expr,
-    ) {
+    fn emit_utf8(&self, cx: &mut Cx<'_, '_, '_, '_>, dst: &crate::ir::typed::Bind, src: &Expr) {
         let src_str = self.expr(cx, src);
+        let borrowed = borrow_of(src, &src_str);
         let rhs = format!(
-            "std::str::from_utf8(&({src_str})).map_err(|_| Error::InvalidUtf8 {{ offset: r.offset().saturating_sub(({src_str}).len()) }})?.to_owned()"
+            "std::str::from_utf8({borrowed}).map_err(|_| Error::InvalidUtf8 {{ offset: r.offset().saturating_sub(({src_str}).len()) }})?.to_owned()"
         );
         let decl = &cx.ctx.body.locals[dst.local];
         let name = cx.ctx.local(dst.local).to_string();
@@ -2145,10 +2438,12 @@ impl<'a> Gen<'a> {
             crate::ir::typed::WriteOp::U8 => {
                 let v = self.expr(cx, value);
                 let (ty, _) = self.prog.expr_ty(cx.ctx.body, value);
-                let arg = if matches!(ty, Ty::Int(IntTy::U8)) {
+                let arg = if let Some(byte) = crate::ir::typed::byte_literal(value, true) {
+                    byte
+                } else if matches!(ty, Ty::Int(IntTy::U8)) {
                     v
                 } else {
-                    format!("({v}) as u8")
+                    format!("{} as u8", cast_operand(value, &v))
                 };
                 self.stmt_call(&mut *cx.w, "w.write_u8(", std::slice::from_ref(&arg), ");");
             }
@@ -2160,7 +2455,12 @@ impl<'a> Gen<'a> {
                 } else {
                     format!("({v}) as f32")
                 };
-                self.stmt_call(&mut *cx.w, "w.write_f32_be(", std::slice::from_ref(&arg), ");");
+                self.stmt_call(
+                    &mut *cx.w,
+                    "w.write_f32_be(",
+                    std::slice::from_ref(&arg),
+                    ");",
+                );
             }
             crate::ir::typed::WriteOp::F64 => {
                 let v = self.expr(cx, value);
@@ -2170,7 +2470,12 @@ impl<'a> Gen<'a> {
                 } else {
                     format!("({v}) as f64")
                 };
-                self.stmt_call(&mut *cx.w, "w.write_f64_be(", std::slice::from_ref(&arg), ");");
+                self.stmt_call(
+                    &mut *cx.w,
+                    "w.write_f64_be(",
+                    std::slice::from_ref(&arg),
+                    ");",
+                );
             }
             crate::ir::typed::WriteOp::Bytes(n) => {
                 let n_str = self.expr(cx, n);
@@ -2180,11 +2485,11 @@ impl<'a> Gen<'a> {
                 let bytes = match value {
                     Expr::StrBytes(_) => v,
                     _ if self.is_ref_local(cx.ctx, value) => v,
-                    _ => format!("&({v})"),
+                    _ => borrow_of(value, &v),
                 };
                 let args = [
                     bytes,
-                    format!("({n_str}) as usize"),
+                    format!("{} as usize", cast_operand(n, &n_str)),
                     format!("\"{}\"", cx.ctx.snake),
                 ];
                 self.stmt_call(&mut *cx.w, "w.write_bytes_fixed(", &args, ")?;");
@@ -2194,9 +2499,14 @@ impl<'a> Gen<'a> {
                 let bytes = match value {
                     Expr::StrBytes(_) => v,
                     _ if self.is_ref_local(cx.ctx, value) => v,
-                    _ => format!("&({v})"),
+                    _ => borrow_of(value, &v),
                 };
-                self.stmt_call(&mut *cx.w, "w.write_bytes(", std::slice::from_ref(&bytes), ");");
+                self.stmt_call(
+                    &mut *cx.w,
+                    "w.write_bytes(",
+                    std::slice::from_ref(&bytes),
+                    ");",
+                );
             }
         }
     }
@@ -2228,7 +2538,7 @@ impl<'a> Gen<'a> {
             let varg = if self.copy_ty_in(&ty) || self.is_ref_local(cx.ctx, value) {
                 v
             } else {
-                format!("&({v})")
+                borrow_of(value, &v)
             };
             let mut full_args = vec!["w".to_string(), varg];
             full_args.extend(arg_strs);
@@ -2241,15 +2551,12 @@ impl<'a> Gen<'a> {
         }
     }
 
-    /// `Require`: fail with the codec and condition text unless `cond`.
-    fn emit_require(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        cond: &Expr,
-        text: &str,
-    ) {
-        let cond_str = self.expr(cx, cond);
-        cx.w.line(&format!("if !({cond_str}) {{"));
+    /// `Require`: fail with the codec and condition text when the negation
+    /// holds (`if x != y`, never `if !(x == y)`).
+    fn emit_require(&self, cx: &mut Cx<'_, '_, '_, '_>, cond: &Expr, text: &str) {
+        let neg = self.prog.negated(cx.ctx.body, cond);
+        let cond_str = self.expr(cx, &neg);
+        cx.w.line(&format!("if {cond_str} {{"));
         cx.w.ind();
         cx.w.line("return Err(Error::RequireFailed {");
         cx.w.ind();
@@ -2281,11 +2588,7 @@ impl<'a> Gen<'a> {
         }
         let rhs = format!("{src_str}.ok_or(Error::MissingField {{ field: {field:?} }})?");
         let name = cx.ctx.local(dst.local).to_string();
-        let mutable = if cx.ctx.decl_mut(dst) {
-            "mut "
-        } else {
-            ""
-        };
+        let mutable = if cx.ctx.decl_mut(dst) { "mut " } else { "" };
         if cx.ctx.declares(dst) {
             cx.w.line(&format!("let {mutable}{name} = {rhs};"));
         } else {
@@ -2368,10 +2671,10 @@ impl<'a> Gen<'a> {
         };
         let tag = if matches!(sty, Ty::Int(IntTy::I64)) {
             scrut.clone()
-        } else if is_bool {
+        } else if is_bool || lossless_widen(&sty, &Ty::Int(IntTy::I64)) {
             format!("i64::from({scrut})")
         } else {
-            format!("({scrut}) as i64")
+            format!("{scrut} as i64")
         };
         cx.w.line(&format!("match {scrut} {{"));
         cx.w.ind();
@@ -2440,13 +2743,7 @@ impl<'a> Gen<'a> {
 
     /// One match arm: a lone trailing `Return`/`Fail` prints as a value arm
     /// when it fits on one line, anything else as a braced block.
-    fn emit_arm(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        pat: &str,
-        body: &[Stmt],
-        tail: bool,
-    ) {
+    fn emit_arm(&self, cx: &mut Cx<'_, '_, '_, '_>, pat: &str, body: &[Stmt], tail: bool) {
         if body.len() == 1 {
             match &body[0] {
                 Stmt::Return(e) if cx.ctx.mode == Mode::Decode => {
@@ -2504,15 +2801,22 @@ impl<'a> Gen<'a> {
                 cx.w.line("}");
             }
             RepeatMode::Until(term) => {
-                let t = self.expr(cx, term);
-                cx.w.line("loop {");
+                // A literal byte compares to the peeked `u8` directly.
+                let check = match crate::ir::typed::byte_literal(term, true) {
+                    Some(byte) => format!("r.peek_u8()? == {byte}"),
+                    None => {
+                        let t = self.expr(cx, term);
+                        let t = if matches!(term, Expr::Cond { .. }) {
+                            format!("({t})")
+                        } else {
+                            t
+                        };
+                        format!("i64::from(r.peek_u8()?) == {t}")
+                    }
+                };
+                cx.w.line("while r.remaining() > 0 {");
                 cx.w.ind();
-                cx.w.line("if r.remaining() == 0 {");
-                cx.w.ind();
-                cx.w.line("break;");
-                cx.w.out();
-                cx.w.line("}");
-                cx.w.line(&format!("if i64::from(r.peek_u8()?) == ({t}) {{"));
+                cx.w.line(&format!("if {check} {{"));
                 cx.w.ind();
                 cx.w.line("r.read_u8()?;");
                 cx.w.line("break;");
@@ -2535,23 +2839,12 @@ impl<'a> Gen<'a> {
     }
 
     /// `list.push(item);` for a repeat iteration.
-    fn emit_push(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        list_name: &str,
-        item: LocalId,
-    ) {
+    fn emit_push(&self, cx: &mut Cx<'_, '_, '_, '_>, list_name: &str, item: LocalId) {
         cx.w.line(&format!("{list_name}.push({});", cx.ctx.local(item)));
     }
 
     /// `ForEach` (encode): borrow the list, copying `Copy` items.
-    fn emit_foreach(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        list: &Expr,
-        item: LocalId,
-        body: &[Stmt],
-    ) {
+    fn emit_foreach(&self, cx: &mut Cx<'_, '_, '_, '_>, list: &Expr, item: LocalId, body: &[Stmt]) {
         let list_str = self.expr(cx, list);
         let item_ty = cx.ctx.body.locals[item].ty.clone();
         let iter = if self.copy_ty_in(&item_ty) && self.foreach_moves(body, item) {
@@ -2579,6 +2872,7 @@ impl<'a> Gen<'a> {
         variant: usize,
     ) {
         let sum_str = self.expr(cx, sum);
+        let sum_ref = borrow_of(sum, &sum_str);
         let type_name = &self.type_name[ty];
         self.note_ty(&mut *cx.uses, cx.here, ty);
         let variant_name = &self.variant_names[ty][variant];
@@ -2588,7 +2882,7 @@ impl<'a> Gen<'a> {
         );
         match dst {
             None => {
-                cx.w.line(&format!("match &({sum_str}) {{"));
+                cx.w.line(&format!("match {sum_ref} {{"));
                 cx.w.ind();
                 cx.w.line(&format!("{type_name}::{variant_name} => {{}}"));
                 // Unit or payload: a bare `_` arm would also match; bind the
@@ -2603,11 +2897,7 @@ impl<'a> Gen<'a> {
             }
             Some(d) => {
                 let name = cx.ctx.local(d.local).to_string();
-                let mutable = if cx.ctx.decl_mut(d) {
-                    "mut "
-                } else {
-                    ""
-                };
+                let mutable = if cx.ctx.decl_mut(d) { "mut " } else { "" };
                 let payload = &self.prog.types[ty];
                 let unit = match &payload.kind {
                     crate::ir::typed::TypeKind::Sum { variants } => {
@@ -2619,7 +2909,7 @@ impl<'a> Gen<'a> {
                 // elsewhere) stays unused by construction of the program.
                 let _ = (name.clone(), mutable);
                 if unit {
-                    cx.w.line(&format!("match &({sum_str}) {{"));
+                    cx.w.line(&format!("match {sum_ref} {{"));
                     cx.w.ind();
                     cx.w.line(&format!("{type_name}::{variant_name} => {{}}"));
                     cx.w.line("_ => {");
@@ -2649,9 +2939,9 @@ impl<'a> Gen<'a> {
                     };
                     // The destination infers (boxed payloads included).
                     let head = if cx.ctx.declares(d) {
-                        format!("let {mutable}{name} = match &({sum_str}) {{")
+                        format!("let {mutable}{name} = match {sum_ref} {{")
                     } else {
-                        format!("{name} = match &({sum_str}) {{")
+                        format!("{name} = match {sum_ref} {{")
                     };
                     let arm = format!("{type_name}::{variant_name}(v) => {binding},");
                     let one = format!("{head} {arm} _ => {{ {err}; }} }};");
@@ -2677,12 +2967,7 @@ impl<'a> Gen<'a> {
     /// `Return`: bare `Ok(..)` in tail position (which `clippy` requires),
     /// `return` otherwise. Encode bodies never return (verified on 26.3 and
     /// Hytale); a stray one still yields `()`.
-    fn emit_return(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        e: &Expr,
-        tail: bool,
-    ) {
+    fn emit_return(&self, cx: &mut Cx<'_, '_, '_, '_>, e: &Expr, tail: bool) {
         if cx.ctx.mode == Mode::Encode {
             cx.w.line(if tail { "Ok(())" } else { "return Ok(());" });
             return;
@@ -2708,12 +2993,7 @@ impl<'a> Gen<'a> {
     /// `Fail`: always fails, bare in tail position on decode; `return`
     /// elsewhere and always on encode (a bare `Err` would not match the
     /// `()` arms of an encode `match` or `if`).
-    fn emit_fail(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        fail: crate::ir::typed::Failure,
-        tail: bool,
-    ) {
+    fn emit_fail(&self, cx: &mut Cx<'_, '_, '_, '_>, fail: crate::ir::typed::Failure, tail: bool) {
         let expr = self.fail_expr(cx.ctx, fail);
         if tail && cx.ctx.mode == Mode::Decode {
             cx.w.line(&expr);
@@ -2736,11 +3016,7 @@ impl<'a> Gen<'a> {
     /// Single-line rendering of an expression. Wide results are broken by
     /// `expr_fit`; purely structural forms (records, `if`) are multiline
     /// there and single-line (possibly long) here.
-    fn expr(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        e: &Expr,
-    ) -> String {
+    fn expr(&self, cx: &mut Cx<'_, '_, '_, '_>, e: &Expr) -> String {
         match e {
             Expr::Int { value, ty } => int_lit(*value, *ty),
             Expr::Bool(b) => b.to_string(),
@@ -2801,13 +3077,15 @@ impl<'a> Gen<'a> {
                     .map(|(fi, f)| {
                         let v = self.expr(cx, f);
                         let boxed = self.boxed_field.contains(&(*ty, fi));
-                        let short =
-                            !boxed && matches!(f, Expr::Local(id) if cx.ctx.local(*id) == names[fi]);
+                        let short = !boxed
+                            && matches!(f, Expr::Local(id) if cx.ctx.local(*id) == names[fi]);
                         if short {
                             names[fi].clone()
                         } else if boxed {
                             let field_opt = match &self.prog.types[*ty].kind {
-                                crate::ir::typed::TypeKind::Record { fields } => fields[fi].optional,
+                                crate::ir::typed::TypeKind::Record { fields } => {
+                                    fields[fi].optional
+                                }
                                 _ => false,
                             };
                             self.boxed_arg(cx.ctx, &names[fi], f, &v, field_opt)
@@ -2880,9 +3158,7 @@ impl<'a> Gen<'a> {
         }
         match e {
             Expr::Binary { .. } => self.binary_fit(cx, e, indent, used),
-            Expr::Call { func, args } => {
-                self.call_fit(cx, *func, args, indent)
-            }
+            Expr::Call { func, args } => self.call_fit(cx, *func, args, indent),
             Expr::Cond {
                 cond,
                 then,
@@ -2893,8 +3169,7 @@ impl<'a> Gen<'a> {
                 let c = self.expr(cx, cond);
                 let pad = "    ".repeat(indent + 1);
                 let mut out = vec![format!("if {c} {{")];
-                for l in self.expr_fit(cx, then, indent + 1, (indent + 1) * 4)
-                {
+                for l in self.expr_fit(cx, then, indent + 1, (indent + 1) * 4) {
                     out.push(format!("{pad}{l}"));
                 }
                 out.push(format!("{}}} else {{", "    ".repeat(indent)));
@@ -2917,7 +3192,8 @@ impl<'a> Gen<'a> {
                     self.note_ty_tree(&mut *cx.uses, cx.here, &decls[fi].ty);
                     let boxed = self.boxed_field.contains(&(*ty, fi));
                     let name = &self.field_names[*ty][fi];
-                    let short = !boxed && matches!(f, Expr::Local(id) if cx.ctx.local(*id) == *name);
+                    let short =
+                        !boxed && matches!(f, Expr::Local(id) if cx.ctx.local(*id) == *name);
                     if short {
                         out.push(format!("{pad}{name},"));
                     } else if boxed {
@@ -2962,7 +3238,25 @@ impl<'a> Gen<'a> {
         }
     }
 
-    /// One operand of a binary operator: parenthesized unless atomic.
+    /// One operand of a binary operator with its operator known: a mask
+    /// literal prints in hex on one line, anything else like `operand_fit`.
+    fn operand_fit_op(
+        &self,
+        cx: &mut Cx<'_, '_, '_, '_>,
+        op: BinOp,
+        e: &Expr,
+        indent: usize,
+        used: usize,
+    ) -> Vec<String> {
+        if let Expr::Int { value, .. } = e
+            && hex_literal(op, *value)
+        {
+            let _ = (indent, used);
+            return vec![hex_lit(*value)];
+        }
+        self.operand_fit(cx, e, indent, used)
+    }
+
     fn operand_fit(
         &self,
         cx: &mut Cx<'_, '_, '_, '_>,
@@ -2970,7 +3264,7 @@ impl<'a> Gen<'a> {
         indent: usize,
         used: usize,
     ) -> Vec<String> {
-        if atomic(e) {
+        if atomic(e) || self.call_cast(cx.ctx, e) {
             return self.expr_fit(cx, e, indent, used);
         }
         let mut lines = self.expr_fit(cx, e, indent, used + 1);
@@ -2980,13 +3274,9 @@ impl<'a> Gen<'a> {
         lines
     }
 
-    /// `!x` with double-negation cancelling. Negated comparisons keep their
-    /// `!(..)` shape, which `clippy` accepts.
-    fn not_str(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        inner: &Expr,
-    ) -> String {
+    /// `!x` with double-negation cancelling and flippable comparisons
+    /// negated (`!(a == b)` prints as `a != b`); the rest keeps `!(..)`.
+    fn not_str(&self, cx: &mut Cx<'_, '_, '_, '_>, inner: &Expr) -> String {
         match inner {
             Expr::Bool(b) => (!b).to_string(),
             Expr::Not(x) => self.expr(cx, x),
@@ -3010,26 +3300,35 @@ impl<'a> Gen<'a> {
                 };
                 match flip {
                     Some(f) => {
-                        let l = self.operand_str(cx, lhs);
-                        let r = self.operand_str(cx, rhs);
+                        let l = self.operand_str(cx, f, lhs);
+                        let r = self.operand_str(cx, f, rhs);
                         format!("{l} {} {r}", f.symbol())
                     }
                     None => format!("!({})", self.expr(cx, inner)),
                 }
             }
+            Expr::Local(_) | Expr::Field { .. } | Expr::Call { .. } => {
+                format!("!{}", self.expr(cx, inner))
+            }
             _ => format!("!({})", self.expr(cx, inner)),
         }
     }
 
-    /// One operand in single-line rendering: parenthesized unless atomic.
-    /// Single-level clarifying parentheses never trip `clippy`.
-    fn operand_str(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        e: &Expr,
-    ) -> String {
+    /// One operand in single-line rendering: a mask literal in hex,
+    /// otherwise parenthesized unless atomic. Single-level clarifying
+    /// parentheses never trip `clippy`.
+    fn operand_str(&self, cx: &mut Cx<'_, '_, '_, '_>, op: BinOp, e: &Expr) -> String {
+        if let Expr::Int { value, .. } = e
+            && hex_literal(op, *value)
+        {
+            return hex_lit(*value);
+        }
         let s = self.expr(cx, e);
-        if atomic(e) { s } else { format!("({s})") }
+        if atomic(e) || self.call_cast(cx.ctx, e) {
+            s
+        } else {
+            format!("({s})")
+        }
     }
 
     /// Single-line binary rendering: plain operators, `bps_*` helpers where
@@ -3045,14 +3344,10 @@ impl<'a> Gen<'a> {
     ) -> String {
         match self.binary_form(cx.ctx, op, ty, wraps, lhs, rhs) {
             BinForm::Plain => {
-                let l = self.operand_str(cx, lhs);
-                let r = self.operand_str(cx, rhs);
+                let l = self.operand_str(cx, op, lhs);
+                let r = self.operand_str(cx, op, rhs);
                 if matches!(op, BinOp::Shl | BinOp::Shr) {
-                    format!(
-                        "{l} {} {}",
-                        op.symbol(),
-                        self.shift_amount(cx, rhs)
-                    )
+                    format!("{l} {} {}", op.symbol(), self.shift_amount(cx, rhs))
                 } else {
                     format!("{l} {} {r}", op.symbol())
                 }
@@ -3062,8 +3357,8 @@ impl<'a> Gen<'a> {
                 let r = self.expr(cx, rhs);
                 let (lt, _) = self.prog.expr_ty(cx.ctx.body, lhs);
                 let (rt, _) = self.prog.expr_ty(cx.ctx.body, rhs);
-                let l = wide_i64(&l, &lt);
-                let r = wide_i64(&r, &rt);
+                let l = wide_i64(&l, &lt, lhs);
+                let r = wide_i64(&r, &rt, rhs);
                 let call = format!("{callee}({l}, {r})");
                 match ty {
                     Ty::Int(IntTy::I64) => call,
@@ -3112,12 +3407,22 @@ impl<'a> Gen<'a> {
                 let mut out = vec![format!("{callee}(")];
                 for side in [lhs, rhs] {
                     let (st, _) = self.prog.expr_ty(cx.ctx.body, side);
-                    let mut lines =
-                        self.expr_fit(cx, side, indent + 1, (indent + 1) * 4);
+                    let mut lines = self.expr_fit(cx, side, indent + 1, (indent + 1) * 4);
                     if !matches!(st, Ty::Int(IntTy::I64)) {
-                        lines[0].insert(0, '(');
                         let last = lines.len() - 1;
-                        lines[last] = format!("{}) as i64", lines[last]);
+                        if let Expr::Int { value, ty: lty } = side.as_ref() {
+                            lines = vec![format!(
+                                "{}_{} as i64",
+                                grouped_lit(i128::from(*value)),
+                                Self::int_name(*lty)
+                            )];
+                        } else if lossless_widen(&st, &Ty::Int(IntTy::I64)) {
+                            lines[0].insert_str(0, "i64::from(");
+                            lines[last].push(')');
+                        } else {
+                            lines[0].insert(0, '(');
+                            lines[last] = format!("{}) as i64", lines[last]);
+                        }
                     }
                     let last = lines.len() - 1;
                     for (i, l) in lines.iter().enumerate() {
@@ -3160,19 +3465,14 @@ impl<'a> Gen<'a> {
                 out
             }
             BinForm::Plain => {
-                let mut out = self.operand_fit(cx, lhs, indent, used);
+                let mut out = self.operand_fit_op(cx, *op, lhs, indent, used);
                 let sym = op.symbol().to_string();
                 let cont = indent + 1;
                 let pad = "    ".repeat(cont);
                 let r = if matches!(*op, BinOp::Shl | BinOp::Shr) {
                     self.shift_amount(cx, rhs)
                 } else {
-                    let rlines = self.operand_fit(
-                        cx,
-                        rhs,
-                        cont,
-                        pad.len() + sym.len() + 1,
-                    );
+                    let rlines = self.operand_fit_op(cx, *op, rhs, cont, pad.len() + sym.len() + 1);
                     if rlines.len() == 1 {
                         rlines.into_iter().next().unwrap_or_default()
                     } else {
@@ -3267,11 +3567,7 @@ impl<'a> Gen<'a> {
 
     /// Shift amount: bare when already `u32` or a literal, else `as u32`
     /// (`wrapping_shl`/`wrapping_shr` take `u32`).
-    fn shift_amount(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        rhs: &Expr,
-    ) -> String {
+    fn shift_amount(&self, cx: &mut Cx<'_, '_, '_, '_>, rhs: &Expr) -> String {
         let (ty, _) = self.prog.expr_ty(cx.ctx.body, rhs);
         if matches!(ty, Ty::Int(IntTy::U32)) {
             return self.expr(cx, rhs);
@@ -3280,16 +3576,11 @@ impl<'a> Gen<'a> {
             return grouped_lit(i128::from(*value));
         }
         let r = self.expr(cx, rhs);
-        format!("({r}) as u32")
+        format!("{} as u32", cast_operand(rhs, &r))
     }
 
     /// Single-line builtin call.
-    fn call_str(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        func: Func,
-        args: &[Expr],
-    ) -> String {
+    fn call_str(&self, cx: &mut Cx<'_, '_, '_, '_>, func: Func, args: &[Expr]) -> String {
         match func {
             Func::SignExtend => {
                 let a = self.arg(cx, args, 0);
@@ -3301,27 +3592,15 @@ impl<'a> Gen<'a> {
                 if self.is_ref_local(cx.ctx, &args[0]) {
                     format!("utf16_units({s}) as i64")
                 } else {
-                    format!("utf16_units(&({s})) as i64")
+                    format!("utf16_units({}) as i64", borrow_of(&args[0], &s))
                 }
             }
-            Func::Utf8Len => format!(
-                "({}).len() as i64",
-                self.arg(cx, args, 0)
-            ),
+            Func::Utf8Len => format!("({}).len() as i64", self.arg(cx, args, 0)),
             Func::StrLen => {
-                format!(
-                    "({}).chars().count() as i64",
-                    self.arg(cx, args, 0)
-                )
+                format!("({}).chars().count() as i64", self.arg(cx, args, 0))
             }
-            Func::BytesLen => format!(
-                "({}).len() as i64",
-                self.arg(cx, args, 0)
-            ),
-            Func::ListLen => format!(
-                "({}).len() as i64",
-                self.arg(cx, args, 0)
-            ),
+            Func::BytesLen => format!("({}).len() as i64", self.arg(cx, args, 0)),
+            Func::ListLen => format!("({}).len() as i64", self.arg(cx, args, 0)),
             Func::Min => {
                 let a = self.arg(cx, args, 0);
                 let b = self.arg(cx, args, 1);
@@ -3345,18 +3624,9 @@ impl<'a> Gen<'a> {
         indent: usize,
     ) -> Vec<String> {
         match func {
-            Func::Utf8Len => {
-                self.len_fit(cx, &args[0], indent, ".len() as i64")
-            }
-            Func::StrLen => self.len_fit(
-                cx,
-                &args[0],
-                indent,
-                ".chars().count() as i64",
-            ),
-            Func::BytesLen | Func::ListLen => {
-                self.len_fit(cx, &args[0], indent, ".len() as i64")
-            }
+            Func::Utf8Len => self.len_fit(cx, &args[0], indent, ".len() as i64"),
+            Func::StrLen => self.len_fit(cx, &args[0], indent, ".chars().count() as i64"),
+            Func::BytesLen | Func::ListLen => self.len_fit(cx, &args[0], indent, ".len() as i64"),
             _ => {
                 let callee = match func {
                     Func::SignExtend => "sign_extend",
@@ -3382,7 +3652,7 @@ impl<'a> Gen<'a> {
                         bodies.push(vec![if self.is_ref_local(cx.ctx, &args[0]) {
                             s
                         } else {
-                            format!("&({s})")
+                            borrow_of(&args[0], &s)
                         }]);
                     }
                     Func::Min | Func::Max => {
@@ -3428,21 +3698,12 @@ impl<'a> Gen<'a> {
     }
 
     /// One argument fitted at the next indent level.
-    fn fitted_arg(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        arg: &Expr,
-        indent: usize,
-    ) -> Vec<String> {
+    fn fitted_arg(&self, cx: &mut Cx<'_, '_, '_, '_>, arg: &Expr, indent: usize) -> Vec<String> {
         self.expr_fit(cx, arg, indent + 1, (indent + 1) * 4)
     }
 
     /// `u32` argument: bare for literals and `u32` values, `as u32` else.
-    fn u32_arg(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        e: &Expr,
-    ) -> String {
+    fn u32_arg(&self, cx: &mut Cx<'_, '_, '_, '_>, e: &Expr) -> String {
         let (ty, _) = self.prog.expr_ty(cx.ctx.body, e);
         if matches!(ty, Ty::Int(IntTy::U32)) {
             return self.expr(cx, e);
@@ -3451,15 +3712,10 @@ impl<'a> Gen<'a> {
             return grouped_lit(i128::from(*value));
         }
         let s = self.expr(cx, e);
-        format!("({s}) as u32")
+        format!("{} as u32", cast_operand(e, &s))
     }
     /// One call argument as a single-line expression.
-    fn arg(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        args: &[Expr],
-        i: usize,
-    ) -> String {
+    fn arg(&self, cx: &mut Cx<'_, '_, '_, '_>, args: &[Expr], i: usize) -> String {
         self.expr(cx, &args[i])
     }
 
@@ -3488,16 +3744,66 @@ impl<'a> Gen<'a> {
         format!("if {c} {{ {t} }} else {{ {f} }}")
     }
 
-    /// Casts: truncating `as` between numerics, `from_`/`to_` across enums.
-    fn cast_str(
-        &self,
-        cx: &mut Cx<'_, '_, '_, '_>,
-        e: &Expr,
-        to: &Ty,
-    ) -> String {
+    /// Whether a cast renders as a call (`T::from(..)`, `from_x(..)`,
+    /// `..to_x()`): a call binds tighter than any operator, so it never
+    /// needs clarifying parentheses as an operand. Mirrors `cast_str`.
+    fn call_cast(&self, ctx: &Ctx<'_>, e: &Expr) -> bool {
+        let Expr::Cast { expr: inner, to } = e else {
+            return false;
+        };
+        let (from, _) = self.prog.expr_ty(ctx.body, inner);
+        let numeric = |t: &Ty| matches!(t, Ty::Int(_) | Ty::Bool | Ty::F32 | Ty::F64);
+        if numeric(&from) && numeric(to) {
+            if matches!(to, Ty::Bool) {
+                return false;
+            }
+            if let Ty::Int(_) = to
+                && let Expr::Cond { then, els, .. } = inner.as_ref()
+                && let Expr::Int { value: 1, .. } = then.as_ref()
+                && let Expr::Int { value: 0, .. } = els.as_ref()
+            {
+                return true;
+            }
+            if !matches!(inner.as_ref(), Expr::Int { .. }) && lossless_widen(&from, to) {
+                return true;
+            }
+            return false;
+        }
+        if let Ty::Named(t) = to
+            && let crate::ir::typed::TypeKind::Enum { .. } = &self.prog.types[*t].kind
+        {
+            return true;
+        }
+        if let Ty::Named(t) = &from
+            && let crate::ir::typed::TypeKind::Enum { .. } = &self.prog.types[*t].kind
+            && numeric(to)
+        {
+            return true;
+        }
+        false
+    }
+
+    /// Casts: `T::from(..)` for lossless widening (including a `1`-vs-`0`
+    /// boolean ternary), truncating `as` otherwise, `from_`/`to_` across
+    /// enums. Cast operands skip their clarifying pair when they are a
+    /// plain path, call, or literal (`!x` always keeps its parens: `!flag
+    /// as u8` would reparse as `!(flag as u8)`).
+    fn cast_str(&self, cx: &mut Cx<'_, '_, '_, '_>, e: &Expr, to: &Ty) -> String {
         let (from, _) = self.prog.expr_ty(cx.ctx.body, e);
         if &from == to {
             return self.expr(cx, e);
+        }
+        // Boolean ternary to an integer: `u8::from(value)`, not
+        // `(if value { 1 } else { 0 }) as u8`.
+        if let Ty::Int(_) = to
+            && let Expr::Cond {
+                cond, then, els, ..
+            } = e
+            && let Expr::Int { value: 1, .. } = then.as_ref()
+            && let Expr::Int { value: 0, .. } = els.as_ref()
+        {
+            let c = self.expr(cx, cond);
+            return format!("{}::from({c})", self.rust_ty(to, false));
         }
         let s = self.expr(cx, e);
         let numeric = |t: &Ty| matches!(t, Ty::Int(_) | Ty::Bool | Ty::F32 | Ty::F64);
@@ -3507,7 +3813,14 @@ impl<'a> Gen<'a> {
             if matches!(to, Ty::Bool) {
                 return format!("({s}) != 0");
             }
-            return format!("({s}) as {}", self.rust_ty(to, false));
+            // Literals keep their source suffix through `cast_operand`
+            // (`20_i64 as usize`); `T::from(5)` would leave the literal's
+            // type to inference.
+            if !matches!(e, Expr::Int { .. }) && lossless_widen(&from, to) {
+                return format!("{}::from({s})", self.rust_ty(to, false));
+            }
+            let o = cast_operand(e, &s);
+            return format!("{o} as {}", self.rust_ty(to, false));
         }
         if let Ty::Named(t) = to
             && let crate::ir::typed::TypeKind::Enum { base, .. } = &self.prog.types[*t].kind
@@ -3539,7 +3852,32 @@ enum BinForm {
     Method(&'static str),
 }
 
-/// Expressions that print without wrapping parentheses as operands.
+/// Borrow of an already-rendered expression: `&path` for a plain path,
+/// `&(…)` otherwise (`&self.x`, never `&(self.x)`).
+fn borrow_of(e: &Expr, s: &str) -> String {
+    match e {
+        Expr::Local(_) | Expr::Field { .. } => format!("&{s}"),
+        _ => format!("&({s})"),
+    }
+}
+
+/// Truncating-cast operand: a literal keeps its source suffix (`20_i64 as
+/// usize` — an unsuffixed literal would infer the target and trip
+/// `clippy::unnecessary_cast`), a plain path, call, or bool is bare,
+/// anything else parenthesized (`!x` always keeps its parens).
+fn cast_operand(e: &Expr, s: &str) -> String {
+    if let Expr::Int { value, ty } = e {
+        if *value == i64::MIN {
+            return format!("({s})");
+        }
+        return format!("{}_{}", grouped_lit(i128::from(*value)), Gen::int_name(*ty));
+    }
+    match e {
+        Expr::Local(_) | Expr::Field { .. } | Expr::Call { .. } | Expr::Bool(_) => s.to_string(),
+        _ => format!("({s})"),
+    }
+}
+
 fn atomic(e: &Expr) -> bool {
     matches!(
         e,
@@ -3557,25 +3895,78 @@ fn atomic(e: &Expr) -> bool {
     )
 }
 
-/// `expr as i64`, unless it already is one.
-fn wide_i64(s: &str, ty: &Ty) -> String {
+/// `expr` widened to `i64`: bare when it already is one, a suffixed literal
+/// plus `as` for literals (unsuffixed would infer `i64`), `i64::from(..)`
+/// for lossless widening, truncating `as` otherwise (`u64` reinterpretation
+/// and float casts keep `as`).
+fn wide_i64(s: &str, ty: &Ty, e: &Expr) -> String {
     if matches!(ty, Ty::Int(IntTy::I64)) {
         s.to_string()
+    } else if let Expr::Int { value, ty: lty } = e {
+        format!(
+            "{}_{} as i64",
+            grouped_lit(i128::from(*value)),
+            Gen::int_name(*lty)
+        )
+    } else if lossless_widen(ty, &Ty::Int(IntTy::I64)) {
+        format!("i64::from({s})")
     } else {
         format!("({s}) as i64")
     }
 }
 
-/// Integer literal with its suffix and grouping for long runs.
+/// Value range of an integer-valued type for the lossless-widening check.
+fn int_bounds(ty: &Ty) -> Option<(i128, i128)> {
+    match ty {
+        Ty::Bool => Some((0, 1)),
+        Ty::Int(IntTy::U8) => Some((0, u8::MAX as i128)),
+        Ty::Int(IntTy::U16) => Some((0, u16::MAX as i128)),
+        Ty::Int(IntTy::U32) => Some((0, u32::MAX as i128)),
+        Ty::Int(IntTy::U64) => Some((0, u64::MAX as i128)),
+        Ty::Int(IntTy::I8) => Some((i8::MIN as i128, i8::MAX as i128)),
+        Ty::Int(IntTy::I16) => Some((i16::MIN as i128, i16::MAX as i128)),
+        Ty::Int(IntTy::I32) => Some((i32::MIN as i128, i32::MAX as i128)),
+        Ty::Int(IntTy::I64) => Some((i64::MIN as i128, i64::MAX as i128)),
+        Ty::Int(IntTy::I128) => Some((i128::MIN, i128::MAX)),
+        _ => None,
+    }
+}
+
+/// True when every `from` value survives the trip to `to`: emit
+/// `To::from(v)` there and keep `as` for the truncating rest.
+fn lossless_widen(from: &Ty, to: &Ty) -> bool {
+    match (int_bounds(from), int_bounds(to)) {
+        (Some((flo, fhi)), Some((tlo, thi))) => flo >= tlo && fhi <= thi,
+        _ => false,
+    }
+}
+
+/// Hexadecimal mask literal in Rust style (`0xFF`, `0xFFFF_FFFF`): uppercase,
+/// `_` every four digits once it runs long.
+fn hex_lit(value: i64) -> String {
+    let mut digits = format!("{:X}", value);
+    if digits.len() > 4 {
+        let mut out = String::new();
+        while digits.len() > 4 {
+            out = format!("_{}", &digits[digits.len() - 4..]) + &out;
+            digits.truncate(digits.len() - 4);
+        }
+        digits.push_str(&out);
+    }
+    format!("0x{digits}")
+}
+
+/// Integer literal: unsuffixed throughout (every `let` is ascribed and every
+/// other position infers from its operator or callee), decimal except via
+/// [`hex_lit`] at mask operands.
 fn int_lit(value: i64, ty: IntTy) -> String {
-    let suffix = Gen::int_name(ty);
     if value == i64::MIN {
         if ty == IntTy::I128 {
             return "(i64::MIN as i128)".to_string();
         }
         return "i64::MIN".to_string();
     }
-    format!("{}{suffix}", grouped_lit(i128::from(value)))
+    grouped_lit(i128::from(value))
 }
 
 /// Whether a statement list diverges (no fallthrough): a trailing `Return`
@@ -3585,9 +3976,7 @@ fn int_lit(value: i64, ty: IntTy) -> String {
 fn diverges(stmts: &[Stmt]) -> bool {
     match stmts.last() {
         Some(Stmt::Return(_)) | Some(Stmt::Fail(_)) => true,
-        Some(Stmt::If { then, els, .. }) => {
-            !els.is_empty() && diverges(then) && diverges(els)
-        }
+        Some(Stmt::If { then, els, .. }) => !els.is_empty() && diverges(then) && diverges(els),
         Some(Stmt::Match { arms, other, .. }) => {
             arms.iter().all(|a| diverges(&a.body)) && other.as_ref().is_some_and(|o| diverges(o))
         }
@@ -3623,7 +4012,9 @@ fn live_inits(body: &Body) -> HashSet<LocalId> {
                     self.use_expr(lhs);
                     self.use_expr(rhs);
                 }
-                Expr::Cond { cond, then, els, .. } => {
+                Expr::Cond {
+                    cond, then, els, ..
+                } => {
                     self.use_expr(cond);
                     self.use_expr(then);
                     self.use_expr(els);
@@ -3638,7 +4029,9 @@ fn live_inits(body: &Body) -> HashSet<LocalId> {
                         self.use_expr(f);
                     }
                 }
-                Expr::Variant { payload: Some(p), .. } => {
+                Expr::Variant {
+                    payload: Some(p), ..
+                } => {
                     self.use_expr(p);
                 }
                 _ => {}
@@ -3696,7 +4089,11 @@ fn live_inits(body: &Body) -> HashSet<LocalId> {
                         let els_out = std::mem::replace(&mut self.stored, entry);
                         self.stored = then_out.intersection(&els_out).copied().collect();
                     }
-                    Stmt::Match { scrutinee, arms, other } => {
+                    Stmt::Match {
+                        scrutinee,
+                        arms,
+                        other,
+                    } => {
                         self.use_expr(scrutinee);
                         let entry = self.stored.clone();
                         let mut exits = Vec::new();
@@ -3770,9 +4167,9 @@ fn has_remaining(e: &Expr) -> bool {
         | Expr::StrBytes(x)
         | Expr::Cast { expr: x, .. } => has_remaining(x),
         Expr::Binary { lhs, rhs, .. } => has_remaining(lhs) || has_remaining(rhs),
-        Expr::Cond { cond, then, els, .. } => {
-            has_remaining(cond) || has_remaining(then) || has_remaining(els)
-        }
+        Expr::Cond {
+            cond, then, els, ..
+        } => has_remaining(cond) || has_remaining(then) || has_remaining(els),
         Expr::Call { args, .. } => args.iter().any(has_remaining),
         Expr::Construct { fields, .. } => fields.iter().any(has_remaining),
         Expr::Variant { payload, .. } => payload.as_ref().is_some_and(|p| has_remaining(p)),
@@ -3809,8 +4206,7 @@ fn touches_cursor(body: &Body) -> bool {
                     hit = true;
                 }
             }
-            Stmt::Require { cond, .. }
-            | Stmt::Unwrap { src: cond, .. } => {
+            Stmt::Require { cond, .. } | Stmt::Unwrap { src: cond, .. } => {
                 if has_remaining(cond) {
                     hit = true;
                 }
@@ -3899,7 +4295,9 @@ impl<'a> Gen<'a> {
                 Stmt::Require { cond, .. }
                 | Stmt::Unwrap { src: cond, .. }
                 | Stmt::If { cond, .. }
-                | Stmt::Match { scrutinee: cond, .. } => {
+                | Stmt::Match {
+                    scrutinee: cond, ..
+                } => {
                     hit |= expr_moves_item(cond, item);
                 }
                 Stmt::ExpectVariant { sum, .. } => {
@@ -3934,13 +4332,11 @@ fn expr_moves_item(e: &Expr, item: LocalId) -> bool {
         Expr::Binary { op, lhs, rhs, .. } if op.is_comparison() => {
             moves_nonbare(lhs, item) || moves_nonbare(rhs, item)
         }
-        Expr::Binary { lhs, rhs, .. } => {
-            expr_moves_item(lhs, item) || expr_moves_item(rhs, item)
-        }
-        Expr::Cond { cond, then, els, .. } => {
-            expr_moves_item(cond, item)
-                || expr_moves_item(then, item)
-                || expr_moves_item(els, item)
+        Expr::Binary { lhs, rhs, .. } => expr_moves_item(lhs, item) || expr_moves_item(rhs, item),
+        Expr::Cond {
+            cond, then, els, ..
+        } => {
+            expr_moves_item(cond, item) || expr_moves_item(then, item) || expr_moves_item(els, item)
         }
         Expr::Not(x)
         | Expr::Cast { expr: x, .. }
@@ -3948,9 +4344,7 @@ fn expr_moves_item(e: &Expr, item: LocalId) -> bool {
         | Expr::Field { base: x, .. } => expr_moves_item(x, item),
         Expr::Call { args, .. } => args.iter().any(|a| expr_moves_item(a, item)),
         Expr::Construct { fields, .. } => fields.iter().any(|f| expr_moves_item(f, item)),
-        Expr::Variant { payload, .. } => {
-            payload.as_ref().is_some_and(|p| expr_moves_item(p, item))
-        }
+        Expr::Variant { payload, .. } => payload.as_ref().is_some_and(|p| expr_moves_item(p, item)),
         _ => false,
     }
 }

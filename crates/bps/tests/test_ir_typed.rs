@@ -133,7 +133,7 @@ fn a_fragment_gets_no_codec() {
 }
 
 #[test]
-fn scalar_codecs_start_every_wire_name_at_zero() {
+fn scalar_codecs_zero_only_conditionally_read_wire_names() {
     let p = load("schemas/std/varint.bps");
     let c = codec(&p, "varint");
     assert_eq!(c.kind, CodecKind::Scalar);
@@ -147,7 +147,20 @@ fn scalar_codecs_start_every_wire_name_at_zero() {
             _ => None,
         })
         .collect();
-    assert_eq!(declared, ["b0", "b1", "b2", "b3", "b4"]);
+    // `b1`..`b4` are read under `if`s and checked after them: they start at
+    // zero. `b0` is read unconditionally first, so its read declares it.
+    assert_eq!(declared, ["b1", "b2", "b3", "b4"]);
+    let first_read = c
+        .decode
+        .stmts
+        .iter()
+        .find_map(|s| match s {
+            Stmt::Read { dst, .. } => Some(dst),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(c.decode.locals[first_read.local].name.snake(), "b0");
+    assert!(first_read.declare);
     assert!(matches!(
         c.decode.stmts.last(),
         Some(Stmt::Return(Expr::Cast {
@@ -318,6 +331,34 @@ fn nested_blocks_capture_the_parent_values_they_read() {
     assert_eq!(item.params.len(), 1);
     assert_eq!(item.params[0].role, ParamRole::Capture { ir: "n".into() });
     assert_eq!(item.params[0].ty, Ty::Int(IntTy::U8));
+}
+
+#[test]
+fn negation_flips_integer_comparisons_but_not_float_ones() {
+    let p = source("packet p {\n  n: u8\n  f: f32be\n  g: f32be\n  require n == 3 && f < g\n}\n");
+    let c = codec(&p, "p");
+    let cond = all(&c.decode.stmts)
+        .into_iter()
+        .find_map(|s| match s {
+            Stmt::Require { cond, .. } => Some(cond.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let Expr::Binary {
+        op: BinOp::Or,
+        lhs,
+        rhs,
+        ..
+    } = p.negated(&c.decode, &cond)
+    else {
+        panic!("{cond:?}")
+    };
+    assert!(
+        matches!(*lhs, Expr::Binary { op: BinOp::Ne, .. }),
+        "{lhs:?}"
+    );
+    // `!(f < g)` is not `f >= g` when either is NaN.
+    assert!(matches!(*rhs, Expr::Not(_)), "{rhs:?}");
 }
 
 #[test]

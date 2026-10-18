@@ -205,16 +205,37 @@ fn synthesized_value_round_trips() {
 
 // Deviation from the Python test: `Walker`/`packet_fn` are private in the Rust
 // port, so the check runs the public `emit_rust` entry point and reads the
-// generated `src/packets.rs` instead of rendering one packet in memory. The
+// generated sources instead of rendering one packet in memory. The decoder
+// lives in its route-category module, not the `packets.rs` index. The
 // assertion's meaning — the decoder emits a `1 | 2` or-pattern — is unchanged.
 #[test]
 fn rust_decoder_emits_or_pattern() {
     let r = resolved(STATEMENT_SOURCE);
     let dir = temp_dir("or-pattern");
     bps::emit_rust::emit_rust(&r, &dir.join("crate")).unwrap();
-    let text = std::fs::read_to_string(dir.join("crate/src/packets.rs")).unwrap();
+    let src = dir.join("crate/src");
+    let mut text = String::new();
+    for entry in walkdir_rs(&src) {
+        text.push_str(&std::fs::read_to_string(&entry).unwrap());
+    }
     let _ = std::fs::remove_dir_all(&dir);
     assert!(text.contains("1 | 2"), "{text}");
+}
+
+fn walkdir_rs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(walkdir_rs(&path));
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+    out
 }
 
 // Deviation from the Python test: `_flatten` is private in the Rust port, so

@@ -7,8 +7,11 @@
 //! # Files
 //!
 //! `go.mod` (`module bpsgen`, `go 1.23`), `runtime.go` (reader, writer, errors,
-//! helpers), `packets.go` (types and codecs, in program order). Package
-//! `bpsgen`.
+//! helpers), and one `{category}.go` per route category (types and codecs, in
+//! program order). A packet routed only as `play`/`clientbound` is
+//! `play_clientbound.go`; a packet routed in several state/direction pairs is
+//! `shared.go`; encodings, enums, frames, and unrouted packets are
+//! `encoding.go`. Package `bpsgen`.
 //!
 //! # Names
 //!
@@ -33,8 +36,10 @@
 //! decode, a sentinel kind for `errors.Is`, and a detail message.
 //! Integer operators are plain Go operators (fixed-width Go arithmetic wraps,
 //! never traps); signed division and modulo use floor helpers when the
-//! dividend may be negative; a `Cond` becomes a hoisted `if`/`else` over a
-//! function-scoped temporary.
+//! dividend may be negative; a `Cond` becomes a temporary declared in place
+//! and set by an `if`. Locals are declared where first stored (`x, err :=`)
+//! unless used outside that block; loops are `for range n` and
+//! `for _, item := range list`.
 //!
 //! Output is deterministic and gofmt-canonical (`gofmt -l` clean, `go vet`
 //! clean).
@@ -46,21 +51,23 @@ use std::path::Path;
 use crate::ResolvedSchema;
 use crate::errors::{BpsResult, emit};
 use crate::ir::typed::{
-    BinOp, Body, CodecIdx, Expr, Failure, Func, IntTy, Name, Origin, Program, ReadOp, RepeatMode,
-    Stmt, Ty, TypeIdx, WriteOp, escape,
+    BinOp, Body, CodecIdx, Expr, Failure, Func, IntTy, Local, Name, Origin, Program, ReadOp,
+    RepeatMode, Stmt, Ty, TypeIdx, WriteOp, byte_literal, diverges, escape, hex_literal,
 };
 
-/// `emit go`: write `go.mod`, `runtime.go`, `packets.go` for `resolved`.
+/// `emit go`: write `go.mod`, `runtime.go`, and one file per [`Program::output_stem`].
 pub fn emit_go(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
     let mut printer = Printer::new(&program)?;
-    let packets = printer.packets_go()?;
+    let files = printer.packets_files()?;
     let runtime = printer.runtime_go();
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
     fs::write(out_dir.join("go.mod"), "module bpsgen\n\ngo 1.23\n")
         .map_err(|e| emit(e.to_string()))?;
     fs::write(out_dir.join("runtime.go"), runtime).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("packets.go"), packets).map_err(|e| emit(e.to_string()))?;
+    for (stem, body) in files {
+        fs::write(out_dir.join(format!("{stem}.go")), body).map_err(|e| emit(e.to_string()))?;
+    }
     Ok(())
 }
 
@@ -256,6 +263,7 @@ impl<'a> Data<'a> {
             "NewReader",
             "failDecode",
             "failEncode",
+            "requireFailed",
             "signExtend",
             "utf16Units",
             "floorDiv",
@@ -489,6 +497,16 @@ func (e *Error) Unwrap() error {
 	return e.Kind
 }
 
+// decodeError reports a decode failure in codec at the reader's offset.
+func decodeError(codec string, r *Reader, kind ErrorKind, detail string) *Error {
+	return &Error{Codec: codec, Offset: r.Offset(), Kind: kind, Detail: detail}
+}
+
+// encodeError reports an encode failure in codec.
+func encodeError(codec string, kind ErrorKind, detail string) *Error {
+	return &Error{Codec: codec, Offset: -1, Kind: kind, Detail: detail}
+}
+
 // failDecode attaches the calling codec to a reader or sub-codec error.
 func failDecode(codec string, r *Reader, err error) *Error {
 	var bpsErr *Error
@@ -496,9 +514,9 @@ func failDecode(codec string, r *Reader, err error) *Error {
 		if bpsErr.Codec != "" {
 			return bpsErr
 		}
-		return &Error{Codec: codec, Offset: r.Offset(), Kind: bpsErr.Kind, Detail: bpsErr.Detail}
+		return decodeError(codec, r, bpsErr.Kind, bpsErr.Detail)
 	}
-	return &Error{Codec: codec, Offset: r.Offset(), Kind: ErrShortBuffer, Detail: err.Error()}
+	return decodeError(codec, r, ErrShortBuffer, err.Error())
 }
 
 // failEncode attaches the calling codec to a writer or sub-codec error.
@@ -508,9 +526,14 @@ func failEncode(codec string, err error) *Error {
 		if bpsErr.Codec != "" {
 			return bpsErr
 		}
-		return &Error{Codec: codec, Offset: -1, Kind: bpsErr.Kind, Detail: bpsErr.Detail}
+		return encodeError(codec, bpsErr.Kind, bpsErr.Detail)
 	}
-	return &Error{Codec: codec, Offset: -1, Kind: ErrBytesTooLong, Detail: err.Error()}
+	return encodeError(codec, ErrBytesTooLong, err.Error())
+}
+
+// requireFailed reports a failed require in codec.
+func requireFailed(codec string, r *Reader, detail string) *Error {
+	return decodeError(codec, r, ErrRequire, "require failed: "+detail)
 }
 
 // Reader reads big-endian wire primitives over a byte slice.
@@ -738,42 +761,104 @@ fn align_gap(name: &str, width: usize) -> String {
     " ".repeat(width - name.len() + 1)
 }
 
-impl Printer<'_> {
-    fn packets_go(&mut self) -> BpsResult<String> {
-        let mut out = String::from("package bpsgen\n");
-        // Types first, in program order.
-        let mut types_out = String::new();
-        for t in 0..self.data.prog.types.len() {
-            types_out.push_str(&self.type_go(t)?);
+/// `Key: value,` lines of a multi-line composite literal, aligned the way
+/// gofmt (go/printer's `exprList`) aligns them: consecutive keys share a
+/// value column unless a key is longer than 40 columns and its size breaks
+/// from the running geometric mean of its section by 2.5x either way, which
+/// starts a new section. A one-element literal is not aligned.
+fn gofmt_key_values(pairs: &[(String, String)]) -> Vec<String> {
+    if pairs.len() < 2 {
+        return pairs.iter().map(|(k, v)| format!("{k}: {v},")).collect();
+    }
+    let mut sections: Vec<Vec<usize>> = vec![Vec::new()];
+    let (mut lnsum, mut count) = (0.0f64, 0u32);
+    for (i, (key, _)) in pairs.iter().enumerate() {
+        let size = key.len();
+        if i > 0 {
+            let prev = pairs[i - 1].0.len();
+            let new_section = if count == 0 || (prev <= 40 && size <= 40) {
+                false
+            } else {
+                let ratio = size as f64 / (lnsum / f64::from(count)).exp();
+                2.5 * ratio <= 1.0 || 2.5 <= ratio
+            };
+            if new_section {
+                sections.push(Vec::new());
+                lnsum = 0.0;
+                count = 0;
+            }
         }
-        // Codecs next, in program order (records helper usage).
-        let mut codecs_out = String::new();
-        for c in 0..self.data.prog.codecs.len() {
-            codecs_out.push_str(&self.codec_go(c)?);
+        if let Some(section) = sections.last_mut() {
+            section.push(i);
         }
-        let mut imports = Vec::new();
-        if self.flags.sprintf {
-            imports.push("\t\"fmt\"\n");
+        lnsum += (size as f64).ln();
+        count += 1;
+    }
+    let mut out = Vec::with_capacity(pairs.len());
+    for section in sections {
+        let width = section.iter().map(|&i| pairs[i].0.len()).max().unwrap_or(0);
+        for i in section {
+            let (key, value) = &pairs[i];
+            out.push(format!(
+                "{key}:{}{value},",
+                " ".repeat(width - key.len() + 1)
+            ));
         }
-        if self.flags.utf8_valid {
-            imports.push("\t\"unicode/utf8\"\n");
+    }
+    out
+}
+
+/// `package bpsgen` plus the imports this file's text actually uses.
+fn go_file(body: &str) -> String {
+    let mut imports = Vec::new();
+    if body.contains("fmt.") {
+        imports.push("\"fmt\"");
+    }
+    if body.contains("utf8.") {
+        imports.push("\"unicode/utf8\"");
+    }
+    let mut out = String::from("package bpsgen\n");
+    match imports.as_slice() {
+        [] => {}
+        [one] => {
+            out.push('\n');
+            out.push_str(&format!("import {one}\n"));
         }
-        if !imports.is_empty() {
+        many => {
             out.push_str("\nimport (\n");
-            for import in imports {
-                out.push_str(import);
+            for import in many {
+                out.push_str(&format!("\t{import}\n"));
             }
             out.push_str(")\n");
         }
-        if !types_out.is_empty() {
-            out.push('\n');
-            out.push_str(&types_out);
+    }
+    if !body.is_empty() {
+        out.push('\n');
+        out.push_str(body);
+    }
+    while out.ends_with("\n\n") {
+        out.pop();
+    }
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+impl Printer<'_> {
+    fn packets_files(&mut self) -> BpsResult<BTreeMap<String, String>> {
+        let mut bodies: BTreeMap<String, String> = BTreeMap::new();
+        for t in 0..self.data.prog.types.len() {
+            let stem = self.data.prog.output_stem(&self.data.prog.types[t].origin);
+            bodies.entry(stem).or_default().push_str(&self.type_go(t)?);
         }
-        out.push_str(&codecs_out);
-        while out.ends_with("\n\n") {
-            out.pop();
+        for c in 0..self.data.prog.codecs.len() {
+            let stem = self.data.prog.output_stem(&self.data.prog.codecs[c].origin);
+            bodies.entry(stem).or_default().push_str(&self.codec_go(c)?);
         }
-        Ok(out)
+        Ok(bodies
+            .into_iter()
+            .map(|(stem, body)| (stem, go_file(&body)))
+            .collect())
     }
 
     fn type_go(&mut self, t: TypeIdx) -> BpsResult<String> {
@@ -935,7 +1020,19 @@ struct BodyGen<'a> {
     local_go: Vec<String>,
     taken: BTreeSet<String>,
     tmp: usize,
-    hoisted: Vec<(String, String)>,
+    /// Locals needing an upfront `var`: first stored inside a nested block
+    /// but used outside it (see [`prescan`]).
+    predeclared: BTreeSet<usize>,
+    /// Locals declared and in scope at this point of the output
+    /// (`predeclared`, parameters, and every `:=` or `var` so far in an
+    /// enclosing block). A store uses `:=` only when it introduces one.
+    declared: BTreeSet<usize>,
+    /// Whether `err` is in scope: an upfront `var` (see [`prescan`]), or the
+    /// first `name, err := call` of this or an enclosing block.
+    err_declared: bool,
+    /// What each open block will restore when it closes: Go scopes `:=` and
+    /// `var` to the block, so names declared inside are gone after it.
+    scopes: Vec<(bool, BTreeSet<usize>, BTreeSet<String>)>,
     flags: Flags,
     out: String,
     indent: usize,
@@ -969,11 +1066,22 @@ impl<'a> BodyGen<'a> {
             local_go,
             taken,
             tmp: 0,
-            hoisted: Vec::new(),
+            scopes: Vec::new(),
+            predeclared: BTreeSet::new(),
+            declared: BTreeSet::new(),
+            err_declared: false,
             flags: Flags::default(),
             out: String::new(),
             indent: 1,
         };
+        let (pre, nested_err) = prescan(&body.stmts, &body.locals);
+        bg.predeclared.extend(pre);
+        bg.declared.extend(&bg.predeclared);
+        bg.declared.extend(body.params.iter().copied());
+        if !is_decode && let Some(value) = body.value {
+            bg.declared.insert(value);
+        }
+        bg.err_declared = nested_err;
         bg.cursor = bg.pick(if is_decode { "r" } else { "w" });
         bg.err_name = bg.pick("err");
         bg
@@ -1003,6 +1111,28 @@ impl<'a> BodyGen<'a> {
         }
     }
 
+    /// `=` or `:=` for storing into local `id`: declare at first assignment.
+    fn store_op(&mut self, id: usize) -> &'static str {
+        if self.declared.contains(&id) {
+            "="
+        } else {
+            self.declared.insert(id);
+            ":="
+        }
+    }
+
+    /// `=` or `:=` for `dst, err := call`: `:=` while either side is new, so
+    /// at least one side is always introduced and the line always compiles.
+    /// `dst` is `None` for a discarded value (`_, err := call`).
+    fn call_op(&mut self, dst: Option<usize>) -> &'static str {
+        let fresh = !self.err_declared || dst.is_some_and(|d| !self.declared.contains(&d));
+        self.err_declared = true;
+        if let Some(d) = dst {
+            self.declared.insert(d);
+        }
+        if fresh { ":=" } else { "=" }
+    }
+
     fn line(&mut self, text: &str) {
         for _ in 0..self.indent {
             self.out.push('\t');
@@ -1014,26 +1144,48 @@ impl<'a> BodyGen<'a> {
     fn open(&mut self, text: &str) {
         self.line(&format!("{text} {{"));
         self.indent += 1;
+        self.enter();
     }
 
     fn close(&mut self) {
+        self.leave();
         self.indent -= 1;
         self.line("}");
     }
 
+    /// Start a Go block: what it declares goes out of scope at [`Self::leave`].
+    fn enter(&mut self) {
+        self.scopes
+            .push((self.err_declared, self.declared.clone(), self.taken.clone()));
+    }
+
+    fn leave(&mut self) {
+        if let Some((err_declared, declared, taken)) = self.scopes.pop() {
+            self.err_declared = err_declared;
+            self.declared = declared;
+            self.taken = taken;
+        }
+    }
+
+    /// `stmts` as the body of an `if`, `else`, or `case`: one indent, one scope.
+    fn block(&mut self, stmts: &[Stmt]) -> BpsResult<()> {
+        self.indent += 1;
+        self.enter();
+        let result = self.stmts(stmts);
+        self.leave();
+        self.indent -= 1;
+        result
+    }
+
     fn fail(&mut self, kind: &str, detail: &str) -> String {
+        let codec = go_quote(&self.codec_snake);
         if self.is_decode {
             format!(
-                "return {}, &Error{{Codec: {}, Offset: {}.Offset(), Kind: {kind}, Detail: {detail}}}",
-                self.ret_zero,
-                go_quote(&self.codec_snake),
-                self.cursor,
+                "return {}, decodeError({codec}, {}, {kind}, {detail})",
+                self.ret_zero, self.cursor,
             )
         } else {
-            format!(
-                "return &Error{{Codec: {}, Offset: -1, Kind: {kind}, Detail: {detail}}}",
-                go_quote(&self.codec_snake),
-            )
+            format!("return encodeError({codec}, {kind}, {detail})")
         }
     }
 
@@ -1044,7 +1196,7 @@ impl<'a> BodyGen<'a> {
         if !optional && matches!(ty, Ty::Int(IntTy::I64)) {
             Ok(text)
         } else if optional {
-            Ok(format!("int64(*({text}))"))
+            Ok(format!("int64({})", deref(&text)))
         } else {
             Ok(format!("int64({text})"))
         }
@@ -1059,6 +1211,43 @@ impl<'a> BodyGen<'a> {
         } else {
             Ok(format!("{want}({text})"))
         }
+    }
+
+    /// A repeat count that is a plain integer local or field (possibly widened
+    /// to `int64` by the program): `for range` takes any integer type, so the
+    /// loop uses it as is. Returns its text and whether it is unsigned (and
+    /// so needs no negative check).
+    fn plain_count(&mut self, n: &Expr) -> BpsResult<Option<(String, bool)>> {
+        let inner = match n {
+            Expr::Cast {
+                expr,
+                to: Ty::Int(IntTy::I64),
+            } => expr.as_ref(),
+            other => other,
+        };
+        if !matches!(inner, Expr::Local(_) | Expr::Field { .. }) {
+            return Ok(None);
+        }
+        let (ty, optional) = self.data.prog.expr_ty(self.body, inner);
+        let Ty::Int(int) = ty else {
+            return Ok(None);
+        };
+        if optional || int == IntTy::I128 {
+            return Ok(None);
+        }
+        Ok(Some((self.expr(inner)?, !int.signed())))
+    }
+}
+
+/// `*x`, with parentheses only when `x` is more than a name or selector.
+fn deref(text: &str) -> String {
+    let plain = text
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+    if plain {
+        format!("*{text}")
+    } else {
+        format!("*({text})")
     }
 }
 
@@ -1087,13 +1276,17 @@ impl Printer<'_> {
                 sig.push_str(&format!(", {} {ty}", bg.local_go[*local]));
             }
             sig.push_str(&format!(") ({ret_go}, error) {{\n"));
-            let forced = forced_locals(&decode_body.stmts);
             let mut vars = String::new();
+            if bg.err_declared {
+                vars.push_str(&format!("\tvar {} error\n", bg.err_name));
+            }
             for (i, local) in decode_body.locals.iter().enumerate() {
                 if decode_body.params.contains(&i) {
                     continue;
                 }
-                if local.uses == 0 && !forced.contains(&i) {
+                // Declared where first stored below; only locals used outside
+                // the block of that store need an upfront `var`.
+                if !bg.predeclared.contains(&i) {
                     continue;
                 }
                 vars.push_str(&format!(
@@ -1103,18 +1296,15 @@ impl Printer<'_> {
                 ));
             }
             bg.stmts(&decode_body.stmts)?;
+            // A `Cond` declares its temporary in place (see `Expr::Cond`).
             if !diverges(&decode_body.stmts) {
                 let fail = bg.fail("ErrNoMatchArm", &go_quote("unreachable"));
                 bg.line(&fail);
             }
-            let mut hoisted = String::new();
-            for (name, ty) in &bg.hoisted {
-                hoisted.push_str(&format!("\tvar {name} {ty}\n"));
-            }
             let flags = std::mem::take(&mut bg.flags);
             let out = std::mem::take(&mut bg.out);
             self.flags.absorb(&flags);
-            (format!("{sig}{hoisted}{vars}"), out)
+            (format!("{sig}{vars}"), out)
         };
         // Encode.
         let (esig, eout) = {
@@ -1135,13 +1325,17 @@ impl Printer<'_> {
                 sig.push_str(&format!(", {} {ty}", bg.local_go[*local]));
             }
             sig.push_str(") error {\n");
-            let forced = forced_locals(&encode_body.stmts);
             let mut vars = String::new();
+            if bg.err_declared {
+                vars.push_str(&format!("\tvar {} error\n", bg.err_name));
+            }
             for (i, local) in encode_body.locals.iter().enumerate() {
                 if i == value_id || encode_body.params.contains(&i) {
                     continue;
                 }
-                if local.uses == 0 && !forced.contains(&i) {
+                // Declared where first stored below; only locals used outside
+                // the block of that store need an upfront `var`.
+                if !bg.predeclared.contains(&i) {
                     continue;
                 }
                 vars.push_str(&format!(
@@ -1152,56 +1346,239 @@ impl Printer<'_> {
             }
             bg.stmts(&encode_body.stmts)?;
             bg.line("return nil");
-            let mut hoisted = String::new();
-            for (name, ty) in &bg.hoisted {
-                hoisted.push_str(&format!("\tvar {name} {ty}\n"));
-            }
             let flags = std::mem::take(&mut bg.flags);
             let out = std::mem::take(&mut bg.out);
             self.flags.absorb(&flags);
-            (format!("{sig}{hoisted}{vars}"), out)
+            (format!("{sig}{vars}"), out)
         };
         Ok(format!("{dsig}{dout}}}\n\n{esig}{eout}}}\n\n"))
     }
 }
 
-/// Locals the generated code references beyond the program's reads: repeat
-/// lists and items are assigned and appended by the loop scaffolding, and
-/// `for` items are assigned from the range variable, so they need a
-/// declaration even when nothing reads them.
-fn forced_locals(stmts: &[Stmt]) -> BTreeSet<usize> {
-    let mut out = BTreeSet::new();
-    forced_into(stmts, &mut out);
-    out
+/// Where each local is declared, and whether `err` needs an upfront `var`.
+///
+/// A local is declared at its first store (`:=`, or an in-place `var` for a
+/// `Declare`) when every later occurrence, store or read, lies inside the
+/// block of that store: a sum arm's payload, a loop item, a group's own
+/// temporaries. A local first stored in a nested block and used outside it
+/// must be function-scoped, so it gets an upfront `var`; that set is
+/// returned.
+///
+/// A nested fallible call that stores into a local declared in an enclosing
+/// block prints `name, err = call`, so an `err` must already be in scope
+/// there. It is when an earlier top-level call declared it (`x, err :=`);
+/// otherwise `err` gets an upfront `var` too. An optional destination goes
+/// through a fresh `tmp, err :=` and an unused one through `_, err :=`, which
+/// need nothing.
+fn prescan(stmts: &[Stmt], locals: &[Local]) -> (BTreeSet<usize>, bool) {
+    let mut scan = Scan::new();
+    scan.list(stmts);
+    let upfront: BTreeSet<usize> = scan
+        .first
+        .iter()
+        .filter(|(id, home)| home.len() > 1 && scan.escapes.contains(*id))
+        .map(|(id, _)| *id)
+        .collect();
+    let nested_err = scan.nested.iter().any(|(id, path, top_err)| {
+        let local = &locals[*id];
+        let outer = upfront.contains(id)
+            || scan
+                .first
+                .get(id)
+                .is_some_and(|home| home.len() < path.len());
+        !top_err && outer && local.uses > 0 && !local.optional
+    });
+    (upfront, nested_err)
 }
 
-fn forced_into(stmts: &[Stmt], out: &mut BTreeSet<usize>) {
-    for stmt in stmts {
-        match stmt {
-            Stmt::Repeat {
-                list, item, body, ..
+/// [`prescan`]'s walk: block paths of first stores and of every occurrence.
+struct Scan {
+    /// The block path of each local's first store.
+    first: BTreeMap<usize, Vec<usize>>,
+    /// Locals with an occurrence outside the block of their first store.
+    escapes: BTreeSet<usize>,
+    /// Nested fallible stores: local, block path, and whether a top-level
+    /// fallible call had already declared `err` at function scope.
+    nested: Vec<(usize, Vec<usize>, bool)>,
+    top_err: bool,
+    path: Vec<usize>,
+    blocks: usize,
+}
+
+impl Scan {
+    fn new() -> Scan {
+        Scan {
+            first: BTreeMap::new(),
+            escapes: BTreeSet::new(),
+            nested: Vec::new(),
+            top_err: false,
+            path: vec![0],
+            blocks: 1,
+        }
+    }
+
+    fn touch(&mut self, id: usize) {
+        match self.first.get(&id) {
+            None => {
+                self.first.insert(id, self.path.clone());
+            }
+            Some(home) => {
+                if !self.path.starts_with(home) {
+                    self.escapes.insert(id);
+                }
+            }
+        }
+    }
+
+    fn fallible(&mut self, id: usize) {
+        self.touch(id);
+        if self.path.len() > 1 {
+            self.nested.push((id, self.path.clone(), self.top_err));
+        } else {
+            self.top_err = true;
+        }
+    }
+
+    fn enter(&mut self) {
+        self.path.push(self.blocks);
+        self.blocks += 1;
+    }
+
+    fn block(&mut self, stmts: &[Stmt]) {
+        self.enter();
+        self.list(stmts);
+        self.path.pop();
+    }
+
+    fn expr(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Local(id) => self.touch(*id),
+            Expr::Field { base, .. }
+            | Expr::Present(base)
+            | Expr::Get(base)
+            | Expr::Not(base)
+            | Expr::StrBytes(base)
+            | Expr::Cast { expr: base, .. } => self.expr(base),
+            Expr::Binary { lhs, rhs, .. } => {
+                self.expr(lhs);
+                self.expr(rhs);
+            }
+            Expr::Cond {
+                cond, then, els, ..
             } => {
-                out.insert(*list);
-                out.insert(*item);
-                forced_into(body, out);
+                self.expr(cond);
+                self.expr(then);
+                self.expr(els);
             }
-            Stmt::ForEach { item, body, .. } => {
-                out.insert(*item);
-                forced_into(body, out);
-            }
-            Stmt::If { then, els, .. } => {
-                forced_into(then, out);
-                forced_into(els, out);
-            }
-            Stmt::Match { arms, other, .. } => {
-                for arm in arms {
-                    forced_into(&arm.body, out);
-                }
-                if let Some(other) = other {
-                    forced_into(other, out);
+            Expr::Call { args, .. } | Expr::Construct { fields: args, .. } => {
+                for arg in args {
+                    self.expr(arg);
                 }
             }
-            _ => {}
+            Expr::Variant { payload, .. } => {
+                if let Some(payload) = payload {
+                    self.expr(payload);
+                }
+            }
+            Expr::Int { .. } | Expr::Bool(_) | Expr::Str(_) | Expr::Remaining => {}
+        }
+    }
+
+    fn list(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::Declare { local, .. } => self.touch(*local),
+                Stmt::Let { dst, value } => {
+                    self.expr(value);
+                    self.touch(dst.local);
+                }
+                Stmt::Read { dst, op } => match op {
+                    ReadOp::Rest => self.touch(dst.local),
+                    ReadOp::Bytes(n) => {
+                        self.expr(n);
+                        self.fallible(dst.local);
+                    }
+                    _ => self.fallible(dst.local),
+                },
+                Stmt::Decode { dst, args, .. } => {
+                    for arg in args {
+                        self.expr(arg);
+                    }
+                    self.fallible(dst.local);
+                }
+                Stmt::Utf8 { dst, src } => {
+                    self.expr(src);
+                    self.touch(dst.local);
+                }
+                Stmt::Write { op, value } => {
+                    if let WriteOp::Bytes(n) = op {
+                        self.expr(n);
+                    }
+                    self.expr(value);
+                }
+                Stmt::Encode { args, value, .. } => {
+                    for arg in args {
+                        self.expr(arg);
+                    }
+                    self.expr(value);
+                }
+                Stmt::Require { cond, .. } => self.expr(cond),
+                Stmt::Unwrap { dst, src, .. } => {
+                    self.expr(src);
+                    self.touch(dst.local);
+                }
+                Stmt::If { cond, then, els } => {
+                    self.expr(cond);
+                    self.block(then);
+                    self.block(els);
+                }
+                Stmt::Match {
+                    scrutinee,
+                    arms,
+                    other,
+                } => {
+                    self.expr(scrutinee);
+                    for arm in arms {
+                        self.block(&arm.body);
+                    }
+                    if let Some(other) = other {
+                        self.block(other);
+                    }
+                }
+                Stmt::Repeat {
+                    mode,
+                    list,
+                    item,
+                    body,
+                } => {
+                    if let RepeatMode::Count(e) | RepeatMode::Until(e) = mode {
+                        self.expr(e);
+                    }
+                    self.touch(*list);
+                    // The body stores the item; the loop appends it there.
+                    self.enter();
+                    self.list(body);
+                    self.touch(*item);
+                    self.touch(*list);
+                    self.path.pop();
+                }
+                Stmt::ForEach { list, item, body } => {
+                    self.expr(list);
+                    // The range clause declares the item in the loop body.
+                    self.enter();
+                    self.touch(*item);
+                    self.list(body);
+                    self.path.pop();
+                }
+                Stmt::ExpectVariant { dst, sum, .. } => {
+                    self.expr(sum);
+                    if let Some(dst) = dst {
+                        self.touch(dst.local);
+                    }
+                }
+                Stmt::Return(value) => self.expr(value),
+                Stmt::Fail(_) => {}
+            }
         }
     }
 }
@@ -1314,10 +1691,44 @@ fn reduce_depth(depth: u8) -> u8 {
 
 impl<'a> BodyGen<'a> {
     fn stmts(&mut self, stmts: &[Stmt]) -> BpsResult<()> {
-        for stmt in stmts {
-            self.stmt(stmt)?;
+        let mut i = 0;
+        while let Some(stmt) = stmts.get(i) {
+            if matches!(stmt, Stmt::Declare { .. }) {
+                i = self.declare_run(stmts, i)?;
+            } else {
+                self.stmt(stmt)?;
+                i += 1;
+            }
         }
         Ok(())
+    }
+
+    /// The run of `Declare`s from `stmts[at]`: each type in a row shares one
+    /// `var a, b T` line, and locals already in scope print nothing. Returns
+    /// the index after the run.
+    fn declare_run(&mut self, stmts: &[Stmt], at: usize) -> BpsResult<usize> {
+        let mut names: Vec<String> = Vec::new();
+        let mut run_ty = String::new();
+        let mut end = at;
+        while let Some(Stmt::Declare { local: id, .. }) = stmts.get(end) {
+            end += 1;
+            if self.declared.contains(id) {
+                continue;
+            }
+            let local = &self.body.locals[*id];
+            let ty = self.data.go_ty(&local.ty, local.optional)?;
+            if ty != run_ty && !names.is_empty() {
+                self.line(&format!("var {} {run_ty}", names.join(", ")));
+                names.clear();
+            }
+            run_ty = ty;
+            names.push(self.local_go[*id].clone());
+            self.declared.insert(*id);
+        }
+        if !names.is_empty() {
+            self.line(&format!("var {} {run_ty}", names.join(", ")));
+        }
+        Ok(end)
     }
 
     /// Wrap a fallible read in its error check, preserving the inner codec.
@@ -1336,8 +1747,24 @@ impl<'a> BodyGen<'a> {
         Ok(())
     }
 
+    /// Check the error of a sub-codec call, preserving the inner codec.
+    fn check_call_err(&mut self, err: &str) -> BpsResult<()> {
+        if self.is_decode {
+            let zero = self.ret_zero.clone();
+            self.open(&format!("if {err} != nil"));
+            self.line(&format!("return {zero}, {err}"));
+            self.close();
+        } else {
+            self.open(&format!("if {err} != nil"));
+            self.line(&format!("return {err}"));
+            self.close();
+        }
+        Ok(())
+    }
+
     fn stmt(&mut self, stmt: &Stmt) -> BpsResult<()> {
         match stmt {
+            // Printed by `declare_run`, which sees the whole run.
             Stmt::Declare { .. } => Ok(()),
             Stmt::Let { dst, value } => {
                 let uses = self.body.locals[dst.local].uses;
@@ -1347,29 +1774,42 @@ impl<'a> BodyGen<'a> {
                 let text = self.expr(value)?;
                 let name = self.local_go[dst.local].clone();
                 if dst.some {
+                    // `tmp := x`, converted when `x` is an untyped constant
+                    // or prints as another Go type.
                     let (ty, _) = self.data.prog.expr_ty(self.body, value);
                     let goty = self.data.go_ty(&ty, false)?;
+                    let (got, _) = self.data.expr_go_ty(self.body, value)?;
+                    let typed = if got == goty && !matches!(value, Expr::Int { .. }) {
+                        text
+                    } else {
+                        format!("{goty}({text})")
+                    };
                     let tmp = self.temp();
-                    self.line(&format!("var {tmp} {goty} = {text}"));
-                    self.line(&format!("{name} = &{tmp}"));
+                    self.line(&format!("{tmp} := {typed}"));
+                    let op = self.store_op(dst.local);
+                    self.line(&format!("{name} {op} &{tmp}"));
                 } else {
-                    self.line(&format!("{name} = {text}"));
+                    let op = self.store_op(dst.local);
+                    self.line(&format!("{name} {op} {text}"));
                 }
                 Ok(())
             }
             Stmt::Read { dst, op } => {
                 let uses = self.body.locals[dst.local].uses;
+                let optional = self.body.locals[dst.local].optional;
                 let name = self.local_go[dst.local].clone();
                 let cur = self.cursor.clone();
                 if matches!(op, ReadOp::Rest) {
                     if uses == 0 {
                         self.line(&format!("{cur}.Rest()"));
-                    } else if self.body.locals[dst.local].optional {
+                    } else if optional {
                         let tmp = self.temp();
                         self.line(&format!("{tmp} := {cur}.Rest()"));
-                        self.line(&format!("{name} = &{tmp}"));
+                        let assign = self.store_op(dst.local);
+                        self.line(&format!("{name} {assign} &{tmp}"));
                     } else {
-                        self.line(&format!("{name} = {cur}.Rest()"));
+                        let assign = self.store_op(dst.local);
+                        self.line(&format!("{name} {assign} {cur}.Rest()"));
                     }
                     return Ok(());
                 }
@@ -1380,16 +1820,25 @@ impl<'a> BodyGen<'a> {
                     ReadOp::Bytes(n) => format!("{cur}.ReadBytes({})", self.as_i64(n, 1)?),
                     ReadOp::Rest => unreachable!(),
                 };
-                let tmp = self.temp();
                 let err = self.err_name.clone();
-                self.line(&format!("{tmp}, {err} := {call}"));
-                self.decode_check(&err)?;
                 if uses == 0 {
-                    self.line(&format!("_ = {tmp}"));
-                } else if self.body.locals[dst.local].optional {
-                    self.line(&format!("{name} = &{tmp}"));
+                    let assign = self.call_op(None);
+                    self.line(&format!("_, {err} {assign} {call}"));
+                    self.decode_check(&err)?;
+                } else if optional {
+                    // A fresh temporary; `:=` always introduces it. In a
+                    // nested block this shadows the outer `err`, which is
+                    // still correct: it is checked immediately below.
+                    let tmp = self.temp();
+                    self.line(&format!("{tmp}, {err} := {call}"));
+                    self.err_declared = true;
+                    self.decode_check(&err)?;
+                    let assign = self.store_op(dst.local);
+                    self.line(&format!("{name} {assign} &{tmp}"));
                 } else {
-                    self.line(&format!("{name} = {tmp}"));
+                    let assign = self.call_op(Some(dst.local));
+                    self.line(&format!("{name}, {err} {assign} {call}"));
+                    self.decode_check(&err)?;
                 }
                 Ok(())
             }
@@ -1409,25 +1858,25 @@ impl<'a> BodyGen<'a> {
                     ));
                 }
                 call.push(')');
-                let tmp = self.temp();
                 let err = self.err_name.clone();
-                self.line(&format!("{tmp}, {err} := {call}"));
-                if self.is_decode {
-                    let zero = self.ret_zero.clone();
-                    self.open(&format!("if {err} != nil"));
-                    self.line(&format!("return {zero}, {err}"));
-                    self.close();
-                } else {
-                    self.open(&format!("if {err} != nil"));
-                    self.line(&format!("return {err}"));
-                    self.close();
-                }
                 if uses == 0 {
-                    self.line(&format!("_ = {tmp}"));
+                    let assign = self.call_op(None);
+                    self.line(&format!("_, {err} {assign} {call}"));
+                    self.check_call_err(&err)?;
                 } else if optional {
-                    self.line(&format!("{name} = &{tmp}"));
+                    // A fresh temporary; `:=` always introduces it. In a
+                    // nested block this shadows the outer `err`, which is
+                    // still correct: it is checked immediately below.
+                    let tmp = self.temp();
+                    self.line(&format!("{tmp}, {err} := {call}"));
+                    self.err_declared = true;
+                    self.check_call_err(&err)?;
+                    let assign = self.store_op(dst.local);
+                    self.line(&format!("{name} {assign} &{tmp}"));
                 } else {
-                    self.line(&format!("{name} = {tmp}"));
+                    let assign = self.call_op(Some(dst.local));
+                    self.line(&format!("{name}, {err} {assign} {call}"));
+                    self.check_call_err(&err)?;
                 }
                 Ok(())
             }
@@ -1436,20 +1885,26 @@ impl<'a> BodyGen<'a> {
                 let optional = self.body.locals[dst.local].optional;
                 let name = self.local_go[dst.local].clone();
                 let text = self.expr(src)?;
-                let tmp = self.temp();
-                self.line(&format!("{tmp} := string({text})"));
                 self.flags.utf8_valid = true;
                 let detail = go_quote(&format!("invalid utf-8 in {}", self.codec_snake));
-                self.open(&format!("if !utf8.ValidString({tmp})"));
-                let fail = self.fail("ErrInvalidUTF8", &detail);
-                self.line(&fail);
-                self.close();
-                if uses == 0 {
-                    self.line(&format!("_ = {tmp}"));
-                } else if optional {
-                    self.line(&format!("{name} = &{tmp}"));
+                if uses == 0 || optional {
+                    let tmp = self.temp();
+                    self.line(&format!("{tmp} := string({text})"));
+                    self.open(&format!("if !utf8.ValidString({tmp})"));
+                    let fail = self.fail("ErrInvalidUTF8", &detail);
+                    self.line(&fail);
+                    self.close();
+                    if uses > 0 {
+                        let assign = self.store_op(dst.local);
+                        self.line(&format!("{name} {assign} &{tmp}"));
+                    }
                 } else {
-                    self.line(&format!("{name} = {tmp}"));
+                    let assign = self.store_op(dst.local);
+                    self.line(&format!("{name} {assign} string({text})"));
+                    self.open(&format!("if !utf8.ValidString({name})"));
+                    let fail = self.fail("ErrInvalidUTF8", &detail);
+                    self.line(&fail);
+                    self.close();
                 }
                 Ok(())
             }
@@ -1457,7 +1912,10 @@ impl<'a> BodyGen<'a> {
                 let cur = self.cursor.clone();
                 match op {
                     WriteOp::U8 => {
-                        let text = self.as_ty(value, "uint8", 1)?;
+                        let text = match byte_literal(value, true) {
+                            Some(byte) => byte,
+                            None => self.as_ty(value, "uint8", 1)?,
+                        };
                         self.line(&format!("{cur}.WriteU8({text})"));
                     }
                     WriteOp::F32 => {
@@ -1518,11 +1976,22 @@ impl<'a> BodyGen<'a> {
                 Ok(())
             }
             Stmt::Require { cond, text } => {
-                let check = self.expr(cond)?;
-                let detail = go_quote(&format!("require failed: {text}"));
-                self.open(&format!("if !({check})"));
-                let fail = self.fail("ErrRequire", &detail);
-                self.line(&fail);
+                let neg = self.data.prog.negated(self.body, cond);
+                let check = self.expr(&neg)?;
+                self.open(&format!("if {check}"));
+                if self.is_decode {
+                    let zero = self.ret_zero.clone();
+                    let cur = self.cursor.clone();
+                    let snake = go_quote(&self.codec_snake);
+                    let detail = go_quote(text);
+                    self.line(&format!(
+                        "return {zero}, requireFailed({snake}, {cur}, {detail})"
+                    ));
+                } else {
+                    let detail = go_quote(&format!("require failed: {text}"));
+                    let fail = self.fail("ErrRequire", &detail);
+                    self.line(&fail);
+                }
                 self.close();
                 Ok(())
             }
@@ -1536,21 +2005,18 @@ impl<'a> BodyGen<'a> {
                 self.line(&fail);
                 self.close();
                 if uses > 0 {
-                    self.line(&format!("{name} = *({source})"));
+                    let assign = self.store_op(dst.local);
+                    self.line(&format!("{name} {assign} {}", deref(&source)));
                 }
                 Ok(())
             }
             Stmt::If { cond, then, els } => {
                 let check = self.expr(cond)?;
                 self.line(&format!("if {check} {{"));
-                self.indent += 1;
-                self.stmts(then)?;
-                self.indent -= 1;
+                self.block(then)?;
                 if !els.is_empty() {
                     self.line("} else {");
-                    self.indent += 1;
-                    self.stmts(els)?;
-                    self.indent -= 1;
+                    self.block(els)?;
                 }
                 self.line("}");
                 Ok(())
@@ -1570,15 +2036,11 @@ impl<'a> BodyGen<'a> {
                         .collect::<Vec<_>>()
                         .join(", ");
                     self.line(&format!("case {tags}:"));
-                    self.indent += 1;
-                    self.stmts(&arm.body)?;
-                    self.indent -= 1;
+                    self.block(&arm.body)?;
                 }
                 if let Some(other) = other {
                     self.line("default:");
-                    self.indent += 1;
-                    self.stmts(other)?;
-                    self.indent -= 1;
+                    self.block(other)?;
                 } else {
                     self.flags.sprintf = true;
                     self.line("default:");
@@ -1610,52 +2072,65 @@ impl<'a> BodyGen<'a> {
                     return Err(emit("emit go: Repeat list is not a list".to_string()));
                 };
                 let made = format!("make({}, 0)", self.data.go_ty(&list_ty, false)?);
+                let cur = self.cursor.clone();
                 match mode {
                     RepeatMode::Count(n) => {
-                        let count = self.as_i64(n, 1)?;
-                        let total = self.temp();
-                        let index = self.temp();
-                        self.line(&format!("var {total} int64 = {count}"));
-                        self.open(&format!("if {total} < 0"));
-                        let fail =
-                            self.fail("ErrNegativeLength", &go_quote("negative repeat count"));
-                        self.line(&fail);
-                        self.close();
-                        self.line(&format!("{list_go} = {made}"));
-                        self.open(&format!(
-                            "for {index} := int64(0); {index} < {total}; {index}++"
-                        ));
-                        self.stmts(body)?;
-                        self.line(&format!("{list_go} = append({list_go}, {item_go})"));
-                        self.close();
+                        let (total, unsigned) = match self.plain_count(n)? {
+                            Some(plain) => plain,
+                            None => {
+                                let count = self.as_i64(n, 1)?;
+                                let total = self.pick("n");
+                                self.line(&format!("{total} := {count}"));
+                                (total, false)
+                            }
+                        };
+                        if !unsigned {
+                            self.open(&format!("if {total} < 0"));
+                            let fail =
+                                self.fail("ErrNegativeLength", &go_quote("negative repeat count"));
+                            self.line(&fail);
+                            self.close();
+                        }
+                        let list_assign = self.store_op(*list);
+                        self.line(&format!("{list_go} {list_assign} {made}"));
+                        self.open(&format!("for range {total}"));
                     }
                     RepeatMode::Until(term) => {
-                        let (term_ty, _) = self.data.prog.expr_ty(self.body, term);
-                        let term_go = self.data.go_ty(&term_ty, false)?;
-                        let text = self.expr(term)?;
-                        let want = self.temp();
-                        let peek = self.temp();
-                        let cur = self.cursor.clone();
-                        self.line(&format!("var {want} {term_go} = {text}"));
+                        // A byte literal compares directly; anything else is
+                        // evaluated once, before the loop.
+                        let byte = byte_literal(term, true);
+                        let want = match &byte {
+                            Some(byte) => byte.clone(),
+                            None => {
+                                let text = self.as_i64(term, 1)?;
+                                let want = self.pick("want");
+                                self.line(&format!("{want} := {text}"));
+                                want
+                            }
+                        };
+                        let list_assign = self.store_op(*list);
+                        self.line(&format!("{list_go} {list_assign} {made}"));
                         self.open(&format!("for {cur}.Remaining() > 0"));
-                        self.line(&format!("{peek}, _ := {cur}.peekU8()"));
-                        self.open(&format!("if {term_go}({peek}) == {want}"));
+                        let next = self.pick("next");
+                        let check = if byte.is_some() {
+                            format!("{next} == {want}")
+                        } else {
+                            format!("int64({next}) == {want}")
+                        };
+                        self.open(&format!("if {next}, _ := {cur}.peekU8(); {check}"));
                         self.line(&format!("{cur}.skip(1)"));
                         self.line("break");
                         self.close();
-                        self.stmts(body)?;
-                        self.line(&format!("{list_go} = append({list_go}, {item_go})"));
-                        self.close();
                     }
                     RepeatMode::UntilEnd => {
-                        let cur = self.cursor.clone();
-                        self.line(&format!("{list_go} = {made}"));
+                        let list_assign = self.store_op(*list);
+                        self.line(&format!("{list_go} {list_assign} {made}"));
                         self.open(&format!("for {cur}.Remaining() > 0"));
-                        self.stmts(body)?;
-                        self.line(&format!("{list_go} = append({list_go}, {item_go})"));
-                        self.close();
                     }
                 }
+                self.stmts(body)?;
+                self.line(&format!("{list_go} = append({list_go}, {item_go})"));
+                self.close();
                 Ok(())
             }
             Stmt::ForEach { list, item, body } => {
@@ -1664,11 +2139,14 @@ impl<'a> BodyGen<'a> {
                 }
                 let text = self.expr(list)?;
                 let (_, optional) = self.data.prog.expr_ty(self.body, list);
-                let range = if optional { format!("*({text})") } else { text };
-                let item_go = self.local_go[*item].clone();
-                let elem = self.temp();
-                self.open(&format!("for _, {elem} := range {range}"));
-                self.line(&format!("{item_go} = {elem}"));
+                let range = if optional { deref(&text) } else { text };
+                if self.body.locals[*item].uses == 0 {
+                    self.open(&format!("for range {range}"));
+                } else {
+                    let item_go = self.local_go[*item].clone();
+                    self.open(&format!("for _, {item_go} := range {range}"));
+                    self.declared.insert(*item);
+                }
                 self.stmts(body)?;
                 self.close();
                 Ok(())
@@ -1682,7 +2160,7 @@ impl<'a> BodyGen<'a> {
                 let prog = self.data.prog;
                 let text = self.expr(sum)?;
                 let (_, optional) = prog.expr_ty(self.body, sum);
-                let subject = if optional { format!("*({text})") } else { text };
+                let subject = if optional { deref(&text) } else { text };
                 let variant_decl = match &prog.types[*ty].kind {
                     crate::ir::typed::TypeKind::Sum { variants } => variants[*variant].clone(),
                     _ => {
@@ -1707,35 +2185,45 @@ impl<'a> BodyGen<'a> {
                     "wrong variant for {}: expected {}",
                     self.codec_snake, variant_name
                 ));
-                let bind_needed = match dst {
-                    Some(bind) => self.body.locals[bind.local].uses > 0,
-                    None => false,
+                let ok = self.pick("ok");
+                let bind = dst.filter(|b| self.body.locals[b.local].uses > 0);
+                let Some(bind) = bind else {
+                    self.open(&format!("if _, {ok} := {subject}.({wrap}); !{ok}"));
+                    let fail = self.fail("ErrWrongVariant", &detail);
+                    self.line(&fail);
+                    self.close();
+                    return Ok(());
                 };
-                let payload = self.temp();
-                let ok = self.temp();
-                let target = if bind_needed {
-                    payload.clone()
+                let local = bind.local;
+                let fresh = !self.declared.contains(&local) && !self.body.locals[local].optional;
+                let holder = if fresh && direct {
+                    // The asserted record is the payload: bind it by name.
+                    self.declared.insert(local);
+                    self.local_go[local].clone()
                 } else {
-                    "_".to_string()
+                    self.pick("v")
                 };
-                self.line(&format!("{target}, {ok} := {subject}.({wrap})"));
+                self.line(&format!("{holder}, {ok} := {subject}.({wrap})"));
                 self.open(&format!("if !{ok}"));
                 let fail = self.fail("ErrWrongVariant", &detail);
                 self.line(&fail);
                 self.close();
-                if let Some(bind) = dst
-                    && bind_needed
-                {
-                    let name = self.local_go[bind.local].clone();
-                    let value = if direct {
-                        payload.clone()
+                let value = if direct {
+                    holder.clone()
+                } else {
+                    format!("{holder}.Value")
+                };
+                if fresh && !direct {
+                    // Read the wrapped payload in place: `v.Value`.
+                    self.local_go[local] = value;
+                    self.declared.insert(local);
+                } else if !(fresh && direct) {
+                    let name = self.local_go[local].clone();
+                    let assign = self.store_op(local);
+                    if self.body.locals[local].optional {
+                        self.line(&format!("{name} {assign} &{value}"));
                     } else {
-                        format!("{payload}.Value")
-                    };
-                    if self.body.locals[bind.local].optional {
-                        self.line(&format!("{name} = &({value})"));
-                    } else {
-                        self.line(&format!("{name} = {value}"));
+                        self.line(&format!("{name} {assign} {value}"));
                     }
                 }
                 Ok(())
@@ -1743,6 +2231,36 @@ impl<'a> BodyGen<'a> {
             Stmt::Return(value) => {
                 if !self.is_decode {
                     return Err(emit("emit go: Return in encode".to_string()));
+                }
+                // Long struct literals go multi-line; anything else stays put.
+                if let Expr::Construct { ty, fields } = value {
+                    let text = self.ret_expr(value)?;
+                    if format!("return {text}, nil").len() <= 120 {
+                        self.line(&format!("return {text}, nil"));
+                        return Ok(());
+                    }
+                    let prog = self.data.prog;
+                    let names = match &prog.types[*ty].kind {
+                        crate::ir::typed::TypeKind::Record { fields } => {
+                            fields.iter().map(|f| pascal(&f.name)).collect::<Vec<_>>()
+                        }
+                        _ => {
+                            return Err(emit("emit go: Construct of a non-record".to_string()));
+                        }
+                    };
+                    let mut pairs = Vec::with_capacity(names.len());
+                    for (field_name, field_value) in names.iter().zip(fields.iter()) {
+                        pairs.push((field_name.clone(), self.expr(field_value)?));
+                    }
+                    let type_go = self.data.type_go[*ty].clone();
+                    self.line(&format!("return {type_go}{{"));
+                    self.indent += 1;
+                    for line in gofmt_key_values(&pairs) {
+                        self.line(&line);
+                    }
+                    self.indent -= 1;
+                    self.line("}, nil");
+                    return Ok(());
                 }
                 let text = self.ret_expr(value)?;
                 self.line(&format!("return {text}, nil"));
@@ -1918,20 +2436,26 @@ impl<'a> BodyGen<'a> {
                 els,
                 ty,
             } => {
+                // Go has no conditional expression: a temporary declared right
+                // here and set by an `if` (no `else` when the other value is
+                // the zero value the declaration already gives it).
                 let tmp_ty = self.data.go_ty(ty, false)?;
                 let check = self.expr(cond)?;
-                let tmp = self.temp();
-                self.hoisted.push((tmp.clone(), tmp_ty));
                 let yes = self.expr(then)?;
                 let no = self.expr(els)?;
+                let zero = zero_value(self.data, ty)?;
+                let tmp = self.temp();
+                self.line(&format!("var {tmp} {tmp_ty}"));
                 self.line(&format!("if {check} {{"));
                 self.indent += 1;
                 self.line(&format!("{tmp} = {yes}"));
                 self.indent -= 1;
-                self.line("} else {");
-                self.indent += 1;
-                self.line(&format!("{tmp} = {no}"));
-                self.indent -= 1;
+                if no != zero {
+                    self.line("} else {");
+                    self.indent += 1;
+                    self.line(&format!("{tmp} = {no}"));
+                    self.indent -= 1;
+                }
                 self.line("}");
                 Ok(tmp)
             }
@@ -1939,7 +2463,7 @@ impl<'a> BodyGen<'a> {
                 let want = self.data.go_ty(to, false)?;
                 let (from, from_opt) = self.data.prog.expr_ty(self.body, expr);
                 let text = self.expr_at(expr, depth)?;
-                let base = if from_opt { format!("*({text})") } else { text };
+                let base = if from_opt { deref(&text) } else { text };
                 let got = self.data.go_ty(&from, false)?;
                 if got == want {
                     return Ok(base);
@@ -1969,8 +2493,13 @@ impl<'a> BodyGen<'a> {
                 Func::SignExtend => {
                     self.flags.sign_extend = true;
                     let value = self.expr_at(&args[0], depth + 1)?;
-                    let bits = self.expr_at(&args[1], depth + 1)?;
-                    Ok(format!("signExtend({value}, int({bits}))"))
+                    // A literal width converts implicitly; anything else is
+                    // an `int64` expression that needs `int(...)`.
+                    let bits = match &args[1] {
+                        Expr::Int { value, .. } => value.to_string(),
+                        other => format!("int({})", self.expr_at(other, depth + 1)?),
+                    };
+                    Ok(format!("signExtend({value}, {bits})"))
                 }
                 Func::Utf16Units => {
                     self.flags.utf16_units = true;
@@ -2073,8 +2602,20 @@ impl<'a> BodyGen<'a> {
             ""
         };
         let symbol = op.symbol();
-        let left = self.operand_at(lhs, level, false, depth + diff_prec(lhs, level))?;
-        let right = self.operand_at(rhs, level, true, depth + 1)?;
+        let left = match lhs {
+            Expr::Int { value, ty } if hex_literal(op, *value) => {
+                int_go(*ty)?;
+                format!("0x{value:X}")
+            }
+            _ => self.operand_at(lhs, level, false, depth + diff_prec(lhs, level))?,
+        };
+        let right = match rhs {
+            Expr::Int { value, ty } if hex_literal(op, *value) => {
+                int_go(*ty)?;
+                format!("0x{value:X}")
+            }
+            _ => self.operand_at(rhs, level, true, depth + 1)?,
+        };
         Ok(format!("{left}{gap}{symbol}{gap}{right}"))
     }
 
@@ -2106,7 +2647,8 @@ impl<'a> BodyGen<'a> {
                 // must not collapse to `a - b - c`.
                 child_level < level || (is_right && child_level == level)
             }
-            Expr::Cond { .. } => true,
+            // A conditional prints as the name of its temporary.
+            Expr::Cond { .. } => false,
             _ => false,
         };
         if need {
@@ -2117,25 +2659,6 @@ impl<'a> BodyGen<'a> {
         } else {
             self.expr_at(child, pos_depth)
         }
-    }
-}
-
-/// Whether control never falls through `stmts`: the last statement returns
-/// or fails on every path, so no trailing return is needed (and `go vet`
-/// forbids the unreachable one).
-fn diverges(stmts: &[Stmt]) -> bool {
-    match stmts.last() {
-        Some(Stmt::Return(_) | Stmt::Fail(_)) => true,
-        Some(Stmt::If { then, els, .. }) => !els.is_empty() && diverges(then) && diverges(els),
-        Some(Stmt::Match { arms, other, .. }) => {
-            // Without `other` the printer generates a default that returns.
-            let other_diverges = match other {
-                Some(body) => diverges(body),
-                None => true,
-            };
-            other_diverges && arms.iter().all(|arm| diverges(&arm.body))
-        }
-        _ => false,
     }
 }
 
@@ -2163,7 +2686,7 @@ fn strip_article(text: &str) -> &str {
 
 fn doc_value(data: &Data<'_>, ty: &Ty) -> BpsResult<String> {
     match ty {
-        Ty::Int(t) => Ok(format!("an {}", int_go(*t)?)),
+        Ty::Int(t) => Ok(with_article(int_go(*t)?)),
         Ty::Bool => Ok("a bool".into()),
         Ty::F32 => Ok("a float32".into()),
         Ty::F64 => Ok("a float64".into()),
@@ -2173,6 +2696,17 @@ fn doc_value(data: &Data<'_>, ty: &Ty) -> BpsResult<String> {
             "a slice of {}",
             strip_article(&doc_value(data, inner)?)
         )),
-        Ty::Named(t) => Ok(format!("a {}", data.type_go[*t])),
+        Ty::Named(t) => Ok(with_article(&data.type_go[*t])),
     }
+}
+
+/// `word` after "a" or "an", by how it sounds: "an int32", "an Intent",
+/// "a uint8", "a UUID", "a Handshake".
+fn with_article(word: &str) -> String {
+    let lower = word.to_ascii_lowercase();
+    let you = ["uint", "uu", "uni", "use", "usu", "uti"]
+        .iter()
+        .any(|p| lower.starts_with(p));
+    let vowel = lower.starts_with(['a', 'e', 'i', 'o', 'u']) && !you;
+    format!("{} {word}", if vowel { "an" } else { "a" })
 }

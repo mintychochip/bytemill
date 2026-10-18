@@ -1,6 +1,7 @@
 # BPS code generation: idiomatic printers over a typed program
 
-**Status:** in progress.
+**Status:** implemented. All seven printers read the typed program; the per-language gates
+and the 26.3 and Hytale round trips run on the emitted trees.
 **Date:** 2026-10-15
 **Builds on:** `2026-10-15-bps-codegen-ir-design.md` (the IR, its interpreter, the printers).
 
@@ -126,13 +127,16 @@ Every printer is a rewrite on `Program`. Shared requirements:
 - Output formatted as the language's formatter would leave it (gofmt, rustfmt, zig fmt) or a
   consistent documented style where there is no canonical formatter.
 - Doc comments on public types and functions, derived from `Origin`.
+- One file per category: `Program::output_stem` groups declarations by the routes they
+  belong to (`{state}_{direction}`, `shared`, `encoding`), and the package's entry point
+  re-exports every module, so the public surface does not depend on the split.
 - Deterministic: the same schema emits the same bytes.
 
 Per language (the details live in each printer's module docs):
 
 | | Go | Python | C | C++ | TypeScript | Zig | Rust |
 |---|---|---|---|---|---|---|---|
-| output | `go.mod`, `runtime.go`, `packets.go` | `bpsgen.py` | `bpsgen.h`, `bpsgen.c` | `bpsgen.hpp`, `bpsgen.cpp` | `bpsgen.ts` | `bpsgen.zig` | crate |
+| output | `go.mod`, `runtime.go`, one `{stem}.go` | `bpsgen/` package: `runtime.py`, one `{stem}.py`, `__init__.py` | `bpsgen.h`, `runtime.c`, one `{stem}.c` | `bpsgen.hpp`, one `{stem}.cpp` | `bpsgen.ts` index, `runtime.ts`, one `{stem}.ts` | `bpsgen.zig` index, `runtime.zig`, one `{stem}.zig` | crate, `src/packets/{stem}.rs` |
 | record | struct | `@dataclass(slots=True)` | `typedef struct` | `struct` | `interface` | `struct` | `struct` |
 | sum | sealed interface + variant structs | variant dataclasses + union alias | enum tag + `union` | `std::variant` | discriminated union | `union(enum)` | `enum` |
 | optional | pointer | `T \| None` | `bool has_x` + value | `std::optional` | `x?: T` | `?T` | `Option` |
