@@ -72,7 +72,60 @@ import "minecraft_core.bps"    // string, uuid, position, nbt, slot
 
 ## Quick Start
 
-### Build the CLI
+### Install `bpsc`
+
+Tagged releases ship prebuilt binaries, so using Wirecraft does not require a Rust
+toolchain. Each release attaches stable-named archives plus `SHA256SUMS`:
+
+| Platform | Asset |
+|---|---|
+| Linux x86_64 (glibc) | `bpsc-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux x86_64 (static) | `bpsc-x86_64-unknown-linux-musl.tar.gz` |
+| Linux aarch64 (glibc) | `bpsc-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS aarch64 | `bpsc-aarch64-apple-darwin.tar.gz` |
+| macOS x86_64 | `bpsc-x86_64-apple-darwin.tar.gz` |
+| Windows x86_64 | `bpsc-x86_64-pc-windows-msvc.zip` |
+
+Linux (swap the asset name for another platform):
+
+```bash
+base=https://github.com/mintychochip/wirecraft/releases/latest/download
+curl -fsSLO "$base/bpsc-x86_64-unknown-linux-gnu.tar.gz"
+curl -fsSLO "$base/SHA256SUMS"
+grep bpsc-x86_64-unknown-linux-gnu.tar.gz SHA256SUMS | sha256sum -c -
+tar xzf bpsc-x86_64-unknown-linux-gnu.tar.gz
+sudo install -m 0755 bpsc /usr/local/bin/bpsc
+```
+
+macOS uses `shasum` instead of `sha256sum`:
+
+```bash
+base=https://github.com/mintychochip/wirecraft/releases/latest/download
+curl -fsSLO "$base/bpsc-aarch64-apple-darwin.tar.gz"
+curl -fsSLO "$base/SHA256SUMS"
+grep bpsc-aarch64-apple-darwin.tar.gz SHA256SUMS | shasum -a 256 -c -
+tar xzf bpsc-aarch64-apple-darwin.tar.gz
+sudo install -m 0755 bpsc /usr/local/bin/bpsc
+```
+
+Windows (PowerShell):
+
+```powershell
+$base = "https://github.com/mintychochip/wirecraft/releases/latest/download"
+Invoke-WebRequest "$base/bpsc-x86_64-pc-windows-msvc.zip" -OutFile bpsc.zip
+Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
+(Get-FileHash bpsc.zip -Algorithm SHA256).Hash  # must match the zip's line in SHA256SUMS
+Expand-Archive bpsc.zip -DestinationPath "$env:USERPROFILE\bin" -Force
+# add %USERPROFILE%\bin to PATH, then in a new terminal:
+bpsc check schemas\std\varint.bps
+```
+
+GitHub CLI users can fetch the same assets with
+`gh release download --repo mintychochip/wirecraft --pattern 'bpsc-*'`.
+
+### Build from source
+
+Requires Rust 1.85 or newer (the crate uses edition 2024):
 
 ```bash
 cargo build --release
@@ -176,6 +229,11 @@ scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings
 ```
 
 `scripts/bps_cargo.sh` wraps `cargo` under a systemd user scope (`MemoryMax=8G`, 4 jobs, 4 test threads) to cap memory usage during large protocol oracle suites.
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bpsc` for Linux
+(x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), and Windows (x86_64), smoke-tests each
+binary, writes `SHA256SUMS`, and attaches the archives to the GitHub Release. Manually
+dispatching the workflow builds the same artifacts without creating a release.
 
 ---
 
