@@ -1,18 +1,26 @@
 //! `emit python`: a stdlib-only `bpsgen` package printed from the typed program.
 //!
-//! Every codec becomes typed Python: records are `@dataclasses.dataclass`
-//! classes with `decode`/`encode` methods, sums are variant dataclasses plus
-//! a `TypeAlias` union decoded and encoded by module functions taking the tag,
-//! open enums are `enum.IntEnum` with unknown-preserving decode, and scalar
-//! or string encodings are `decode_*`/`encode_*` module functions. There is
-//! no environment, no dynamic value, no reflection, and no global state:
-//! locals of the typed program print as plain variables, annotated only
-//! where `mypy --strict` needs it (`None`/`[]` initializers, multi-arm joins).
+//! Every codec becomes typed Python: records are
+//! `@dataclasses.dataclass(slots=True, kw_only=True)` classes with
+//! `decode`/`encode` methods, sums are variant dataclasses plus a
+//! `TypeAlias` union decoded and encoded by module functions that `match`
+//! on the tag, open enums are `enum.IntEnum` whose `_missing_` fabricates an
+//! unknown member (name and value set, cached in `_value2member_map_` so
+//! repeated construction is stable), and scalar or string encodings are
+//! `decode_*`/`encode_*` module functions. Every module ends with an explicit
+//! `__all__`, and so does `__init__.py`, which re-exports them in a fixed
+//! order. There is no environment, no dynamic value, no reflection, and no
+//! global state: locals of the typed program print as plain variables,
+//! annotated only where `mypy --strict` needs it (`None`/`[]` initializers,
+//! multi-arm joins).
 //!
-//! Errors carry the offset where they surface. Each codec body wraps in
-//! `try/except BpsError`, which tags the codec path (`in_codec`) on the way
-//! out, so raises in the body are plain constructors (`raise X(...)`). The
-//! package passes `python3 -m compileall`. Categories follow
+//! Errors carry the offset as data: `BpsError.offset` is set by every
+//! constructor that knows a cursor position, and the same offset stays in the
+//! message text. Each codec body wraps in `try/except BpsError`, which tags
+//! the codec path (`in_codec`) on the way out, so raises in the body are
+//! plain constructors (`raise X(...)`). The package passes
+//! `python3 -m compileall`, `ruff format --check`, `ruff check`, and
+//! `mypy --strict`. Categories follow
 //! [`crate::ir::typed::Program::output_stem`]: `runtime.py`, `encoding.py`,
 //! `play_clientbound.py`, `shared.py`, and so on.
 
@@ -40,10 +48,15 @@ const KEYWORDS: &[&str] = &[
 const MAX_WIDTH: usize = 88;
 
 const RUNTIME: &str = r#"class BpsError(Exception):
-    """Base error for codec failures; ``codecs`` holds the inner-to-outer path."""
+    """Base error for codec failures.
 
-    def __init__(self, message: str) -> None:
+    ``offset`` is where the failure surfaced (``None`` when it has no
+    cursor), and ``codecs`` holds the inner-to-outer path.
+    """
+
+    def __init__(self, message: str, offset: int | None = None) -> None:
         super().__init__(message)
+        self.offset: int | None = offset
         self.codecs: list[str] = []
 
     def in_codec(self, codec: str) -> None:
@@ -60,35 +73,37 @@ class ShortBuffer(BpsError):
     """Not enough bytes left: needed ``need``, had ``have``, at ``offset``."""
 
     def __init__(self, offset: int, need: int, have: int) -> None:
-        super().__init__(f"short buffer at offset {offset}: need {need}, have {have}")
+        super().__init__(
+            f"short buffer at offset {offset}: need {need}, have {have}", offset
+        )
 
 
 class RequireFailed(BpsError):
     """A ``require`` did not hold: schema text in ``condition``."""
 
     def __init__(self, offset: int, condition: str) -> None:
-        super().__init__(f"require failed at offset {offset}: {condition}")
+        super().__init__(f"require failed at offset {offset}: {condition}", offset)
 
 
 class InvalidUtf8(BpsError):
     """Bytes at ``offset`` are not valid UTF-8."""
 
     def __init__(self, offset: int) -> None:
-        super().__init__(f"invalid UTF-8 at offset {offset}")
+        super().__init__(f"invalid UTF-8 at offset {offset}", offset)
 
 
 class NoMatchArm(BpsError):
     """A ``match`` had no arm for ``tag`` (decode) or no variant fit (encode)."""
 
     def __init__(self, offset: int, tag: int) -> None:
-        super().__init__(f"no match arm for tag {tag} at offset {offset}")
+        super().__init__(f"no match arm for tag {tag} at offset {offset}", offset)
 
 
 class MissingField(BpsError):
     """An absent optional field was needed: schema field ``field``."""
 
     def __init__(self, offset: int, field: str) -> None:
-        super().__init__(f"missing optional field at offset {offset}: {field}")
+        super().__init__(f"missing optional field at offset {offset}: {field}", offset)
 
 
 class WrongVariant(BpsError):
@@ -96,7 +111,7 @@ class WrongVariant(BpsError):
 
     def __init__(self, offset: int, expected: str, tag: int) -> None:
         super().__init__(
-            f"wrong sum variant at offset {offset}: tag {tag} is not {expected}"
+            f"wrong sum variant at offset {offset}: tag {tag} is not {expected}", offset
         )
 
 
@@ -104,14 +119,16 @@ class NegativeLength(BpsError):
     """A decoded length/count prefix was negative."""
 
     def __init__(self, offset: int, length: int) -> None:
-        super().__init__(f"negative length at offset {offset}: {length}")
+        super().__init__(f"negative length at offset {offset}: {length}", offset)
 
 
 class BytesTooLong(BpsError):
     """A ``bytes(n)`` value of ``length`` bytes does not fit in ``size``."""
 
     def __init__(self, offset: int, length: int, size: int) -> None:
-        super().__init__(f"bytes too long at offset {offset}: {length} > {size}")
+        super().__init__(
+            f"bytes too long at offset {offset}: {length} > {size}", offset
+        )
 
 
 class EncodeUntilEnd(BpsError):
@@ -233,13 +250,17 @@ def decode_utf8(data: bytes, offset: int) -> str:
         raise InvalidUtf8(offset) from exc
 "#;
 
+/// The `_missing_` body of every open enum: fabricate an unknown member and
+/// remember it, so `Enum(n)` is stable and `repr`/`str`/`int` all work.
 const MISSING: &str = r#"@classmethod
 def _missing_(cls, value: object) -> Self | None:
-    if isinstance(value, int):
-        unknown = int.__new__(cls, value)
-        unknown._name_ = f"UNKNOWN_{value}"
-        return unknown
-    return None
+    if not isinstance(value, int):
+        return None
+    unknown = int.__new__(cls, value)
+    unknown._name_ = f"UNKNOWN_{value}"
+    unknown._value_ = value
+    cls._value2member_map_[value] = unknown
+    return unknown
 "#;
 
 /// Emit the `bpsgen` package for `resolved` into `out_dir`.
@@ -288,6 +309,17 @@ pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     for name in &names {
         init.push_str(&format!("from bpsgen.{name} import *\n"));
     }
+    let mut public: Vec<String> = merged
+        .values()
+        .flat_map(|body| all_names(body))
+        .collect();
+    public.sort_by_key(|name| isort_key(name));
+    public.dedup();
+    init.push_str("\n__all__ = [\n");
+    for name in &public {
+        init.push_str(&format!("    \"{name}\",\n"));
+    }
+    init.push_str("]\n");
     fs::write(pkg.join("__init__.py"), init).map_err(|e| emit(e.to_string()))?;
     Ok(())
 }
@@ -353,14 +385,36 @@ fn py_preamble(stem: &str, body: &str, deps: &[String]) -> String {
 /// Names a category module actually defines. Star-imports then cannot leak
 /// `struct` or `enum`, or one category's helper, into `bpsgen`.
 fn py_all(body: &str) -> String {
+    let names = all_names(body);
+    if names.is_empty() {
+        return "\n".to_string();
+    }
+    let mut out = String::from("\n\n\n__all__ = [\n");
+    for name in names {
+        out.push_str(&format!("    \"{name}\",\n"));
+    }
+    out.push_str("]\n");
+    out
+}
+
+/// The public names of one module body, in ruff's RUF022 order: classes,
+/// functions, `TypeAlias` aliases, and module constants a star-import
+/// re-exports (`from bpsgen.x import *` lines are not definitions).
+fn all_names(body: &str) -> Vec<String> {
     let mut names = Vec::new();
     for line in body.lines() {
+        if line.starts_with("from ") || line.starts_with("import ") {
+            continue;
+        }
         let name = if let Some(rest) = line.strip_prefix("class ") {
             rest.split(['(', ':']).next()
         } else if let Some(rest) = line.strip_prefix("def ") {
             rest.split('(').next()
-        } else if !line.starts_with([' ', '\t', '#', '"']) {
-            line.split('=').next().map(str::trim).filter(|name| {
+        } else if line.starts_with([' ', '\t', '#', '"']) {
+            None
+        } else if let Some((lhs, _)) = line.split_once(" = ") {
+            // `Name: TypeAlias = ...` or `NAME = ...`.
+            lhs.split(':').next().map(str::trim).filter(|name| {
                 !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             })
         } else {
@@ -372,15 +426,7 @@ fn py_all(body: &str) -> String {
     }
     names.sort_by_key(|name| isort_key(name));
     names.dedup();
-    if names.is_empty() {
-        return "\n".to_string();
-    }
-    let mut out = String::from("\n\n\n__all__ = [\n");
-    for name in names {
-        out.push_str(&format!("    \"{name}\",\n"));
-    }
-    out.push_str("]\n");
-    out
+    names
 }
 
 /// The order ruff's RUF022 wants in `__all__`: SCREAMING_CASE constants,

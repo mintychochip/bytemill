@@ -111,6 +111,15 @@ fn zig_unit_vectors() {
         index(&dir)
     );
     assert!(dir.join("encoding.zig").is_file(), "missing encoding.zig");
+    // The runtime carries the failure's codec and frees the writer's buffer.
+    assert!(
+        generated.contains("err_codec: []const u8 = \"\""),
+        "Reader/Writer must carry err_codec"
+    );
+    assert!(
+        generated.contains("pub fn deinit(self: *Writer) void {"),
+        "Writer must expose deinit"
+    );
     fmt_check(&dir);
     let varint = program.codec_by_ir("varint").unwrap();
     let probe = program.packet_codec("probe").unwrap();
@@ -129,7 +138,7 @@ test "varint vectors" {{
     var rneg = bps.Reader{{ .data = &bneg }};
     try std.testing.expectEqual(@as(i32, -1), try bps.{dneg});
     var w = bps.Writer.init(a);
-    defer w.buf.deinit();
+    defer w.deinit();
     try bps.{varint_encode}(&w, 300);
     try bps.{varint_encode}(&w, -1);
     try std.testing.expectEqualSlices(u8, &[_]u8{{ 0xac, 0x02, 0xff, 0xff, 0xff, 0xff, 0x0f }}, w.buf.items);
@@ -158,7 +167,7 @@ test "probe floats and require" {{
     try std.testing.expectEqual(@as(f32, 1.0), packet.x);
     try std.testing.expectEqual(@as(f64, 3.141592653589793), packet.y);
     var w = bps.Writer.init(a);
-    defer w.buf.deinit();
+    defer w.deinit();
     try packet.{probe_tail}(&w);
     try std.testing.expectEqualSlices(u8, &bytes, w.buf.items);
     var wrong = [_]u8{{ 0x05, 0x3f, 0x80, 0x00, 0x00, 0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18 }};
@@ -210,7 +219,7 @@ test "packet {packets} {name}" {{
     var packet = try bps.{decode};{deinit}
     try std.testing.expectEqual(raw.len, reader.pos);
     var w = bps.Writer.init(a);
-    defer w.buf.deinit();
+    defer w.deinit();
     try packet.{tail}(&w);
     try std.testing.expectEqualSlices(u8, &raw, w.buf.items);
 }}
@@ -237,6 +246,29 @@ fn roundtrip_suite(schema: &str, dir_name: &str, minimum: usize) {
             "missing play_clientbound.zig"
         );
         assert!(dir.join("shared.zig").is_file(), "missing shared.zig");
+        // A schema keyword keeps Zig's own escape, never a trailing underscore.
+        let play = std::fs::read_to_string(dir.join("play_serverbound.zig")).unwrap();
+        assert!(
+            play.contains("@\"test\":"),
+            "keyword field must print as @\"test\"\n{play}"
+        );
+    }
+    // One file-scope alias per imported module: no codec body repeats a path.
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("zig")
+            || path.file_name().and_then(|n| n.to_str()) == Some("bpsgen.zig")
+        {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !text
+                .lines()
+                .any(|l| l.contains("@import(\"") && !l.trim_start().starts_with("const ")),
+            "{} repeats an inline @import",
+            path.display()
+        );
     }
     fmt_check(&dir);
     let mut src =

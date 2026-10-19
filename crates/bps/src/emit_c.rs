@@ -1,12 +1,20 @@
 //! `emit c`: C11 `bpsgen.h` plus one `{category}.c` per route category.
 //!
+//! The emitted tree is `clang-format`-canonical (LLVM style, 2-space indent,
+//! 80 columns): the writer runs its output through `clang-format -i` when the
+//! tool is installed, and a `clang-format --dry-run --Werror` pass over the
+//! result must find nothing to change. Missing the tool leaves the writer's
+//! output as it stands.
+//!
 //! Every codec of [`Program`] becomes a `bps_decode_<snake>` /
 //! `bps_encode_<snake>` pair over an explicit reader/writer; every record a
 //! `typedef struct`, every sum a tag enum (numbered from 1, so the zero
 //! state is invalid and freeing it is always safe) plus a struct with an
 //! anonymous union, every open enum a `typedef` of its base with constants.
 //! Optional fields and locals are `bool has_x` plus a value that is valid only when
-//! set; lists are a pointer plus a `size_t <x>_len`.
+//! set; lists are a pointer plus a `size_t <x>_len`, grown by doubling, and
+//! allocation sizes are spelled where the pointer is (`sizeof *p`), never from
+//! a repeated type name.
 //!
 //! There is no global state: every fallible call runs through `BPS_TRY` and
 //! jumps to a shared `fail:` label, which reports the codec (`const char
@@ -281,11 +289,25 @@ pub fn emit_c(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
     let printer = Gen::new(&program)?;
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("bpsgen.h"), printer.header()?).map_err(|e| emit(e.to_string()))?;
+    let header_path = out_dir.join("bpsgen.h");
+    fs::write(&header_path, printer.header()?).map_err(|e| emit(e.to_string()))?;
+    clang_format(&header_path);
     for (stem, body) in printer.sources()? {
-        fs::write(out_dir.join(format!("{stem}.c")), body).map_err(|e| emit(e.to_string()))?;
+        let path = out_dir.join(format!("{stem}.c"));
+        fs::write(&path, body).map_err(|e| emit(e.to_string()))?;
+        clang_format(&path);
     }
     Ok(())
+}
+
+/// Format in place when `clang-format` is installed. The printer stays inside
+/// 80 columns itself; this pass catches the lines it still misses. Missing
+/// the tool leaves the writer's output as is, matching the test gate.
+fn clang_format(path: &Path) {
+    let _ = std::process::Command::new("clang-format")
+        .args(["-i"])
+        .arg(path)
+        .status();
 }
 
 /// Shared precomputation: decode alloc needs and a dependency-safe type order.
@@ -1485,6 +1507,17 @@ fn name_map(program: &Program, codec: CodecIdx, decode: bool) -> NameMap {
         &program.codecs[codec].encode
     };
     let mut taken = HashSet::new();
+    // The parameters and the status variable are fixed names a codec body
+    // always binds (decode `r`/`a`/`out`, encode `w`/`a`/`value`, plus `s`):
+    // seed them so a schema local of the same name takes the `_2` suffix and
+    // never collides with them.
+    for fixed in if decode {
+        ["r", "a", "out", "s"]
+    } else {
+        ["w", "a", "value", "s"]
+    } {
+        taken.insert(fixed.to_string());
+    }
     let mut local = Vec::with_capacity(body.locals.len());
     for l in &body.locals {
         let base = escape(l.name.snake(), C_KEYWORDS);
@@ -2236,9 +2269,7 @@ impl<'p> FnEmit<'p> {
         let ncap = self.temp("ncap");
         let np = self.temp("np");
         self.line(&format!("size_t {ncap} = {cp} != 0 ? {cp} * 2 : 4;"));
-        self.line(&format!(
-            "{elem} *{np} = bps_malloc(a, {ncap} * sizeof({elem}));"
-        ));
+        self.line(&format!("{elem} *{np} = bps_malloc(a, {ncap} * sizeof *{np});"));
         self.line(&format!("if ({np} == NULL) {{"));
         self.ind += 1;
         self.fail_direct("BPS_ERR_NOMEM", "\"out of memory\"");
@@ -2246,7 +2277,7 @@ impl<'p> FnEmit<'p> {
         self.line("}");
         self.line(&format!("if ({ln} != 0) {{"));
         self.ind += 1;
-        self.line(&format!("memcpy({np}, {lc}, {ln} * sizeof({elem}));"));
+        self.line(&format!("memcpy({np}, {lc}, {ln} * sizeof *{np});"));
         self.ind -= 1;
         self.line("}");
         self.line(&format!("bps_free(a, {lc});"));

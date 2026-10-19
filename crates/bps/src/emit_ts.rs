@@ -9,7 +9,10 @@
 //! helpers and other modules' symbols its text names.
 //!
 //! Types: a record is an `interface` (fields camelCase in schema order,
-//! optional fields `name?: T`), a sum is a discriminated union over
+//! all `readonly` — the codec only ever constructs decoded values, it never
+//! writes a field after construction; optional fields `name?: T`, never
+//! `name: T | undefined`, so the interface reads the same whether or not
+//! `exactOptionalPropertyTypes` is on), a sum is a discriminated union over
 //! `kind: "tag0" | ...` (scalar and named-record payloads ride in
 //! `value: T`; inline-block arms spread flat and carry the discriminant in
 //! their own interface), an open enum is `type X = number` plus
@@ -495,9 +498,11 @@ fn runtime_symbols() -> Vec<(String, bool)> {
     out
 }
 
-/// Identifiers in `text`, skipping comments and string literals. Generated
-/// names are unique, so a named binding means a real reference; schema text
-/// inside strings and docs never adds one.
+/// Identifiers in `text`, skipping comments, string literals, and object
+/// literal property keys. Generated names are unique, so a named binding
+/// means a real reference; schema text inside strings and docs never adds
+/// one, and an open enum's `const X = { Member: 1 }` keys are not
+/// references to a type named `Member`.
 fn identifiers(text: &str) -> HashSet<String> {
     let bytes = text.as_bytes();
     let mut out = HashSet::new();
@@ -537,12 +542,31 @@ fn identifiers(text: &str) -> HashSet<String> {
                 {
                     i += 1;
                 }
-                out.insert(text[start..i].to_string());
+                if !is_property_key(text, start, i) {
+                    out.insert(text[start..i].to_string());
+                }
             }
             _ => i += 1,
         }
     }
     out
+}
+
+/// Whether the identifier `text[start..end]` is an object literal or type
+/// member key: the previous non-space character opens a member (`{` or `,`)
+/// and the next non-space character is `:` (or `?:`). A ternary's true arm
+/// follows `?`, never `{`/`,`, so it is unaffected.
+fn is_property_key(text: &str, start: usize, end: usize) -> bool {
+    let before = text[..start].trim_end().chars().next_back();
+    if !matches!(before, Some('{') | Some(',')) {
+        return false;
+    }
+    let mut rest = text[end..].chars();
+    let mut next = rest.next();
+    if next == Some('?') {
+        next = rest.next();
+    }
+    next == Some(':')
 }
 
 /// The import block of one module: the runtime helpers and the symbols of
@@ -774,13 +798,13 @@ impl<'a> Printer<'a> {
                 crate::ir::typed::TypeKind::Sum { variants } => variants[variant].name.snake(),
                 _ => "other".to_string(),
             };
-            out.push_str(&format!("  kind: \"{kind}\";\n"));
+            out.push_str(&format!("  readonly kind: \"{kind}\";\n"));
         }
         for f in 0..self.program.fields(ty).len() {
             let decl = &self.program.fields(ty)[f];
             let opt = if decl.optional { "?" } else { "" };
             out.push_str(&format!(
-                "  {}{}: {};\n",
+                "  readonly {}{}: {};\n",
                 field_ident(self.program, ty, f),
                 opt,
                 ts_ty(self.program, &decl.ty)
@@ -835,7 +859,8 @@ impl<'a> Printer<'a> {
 
     /// A variant interface: `{ kind: "tagN"; value: T }` for scalar and
     /// named-record payloads, the arm record's fields for inline blocks,
-    /// `{ kind: "other"; tag: number; value?: T }` for `_`.
+    /// `{ kind: "other"; tag: number; value: T }` for `_` (the payload is
+    /// always decoded, so the field is required).
     fn variant_interface(
         &self,
         ty: TypeIdx,
@@ -845,14 +870,20 @@ impl<'a> Printer<'a> {
         let name = self.variant_name(ty, variant);
         let mut out = format!("export interface {name} {{\n");
         if decl.tags.is_empty() {
-            out.push_str("  kind: \"other\";\n  tag: number;\n");
+            out.push_str("  readonly kind: \"other\";\n  readonly tag: number;\n");
             if let Some(payload) = &decl.payload {
-                out.push_str(&format!("  value?: {};\n", ts_ty(self.program, payload)));
+                // Decode always constructs the payload, so the field is
+                // required: encode reads it without a `!` assertion and with
+                // no `missingField` branch to write.
+                out.push_str(&format!(
+                    "  readonly value: {};\n",
+                    ts_ty(self.program, payload)
+                ));
             }
             out.push_str("}\n");
             return out;
         }
-        out.push_str(&format!("  kind: \"{}\";\n", decl.name.snake()));
+        out.push_str(&format!("  readonly kind: \"{}\";\n", decl.name.snake()));
         match &decl.payload {
             None => {}
             Some(Ty::Named(t)) if self.is_block_arm(*t) => {
@@ -860,7 +891,7 @@ impl<'a> Printer<'a> {
                     let field = &self.program.fields(*t)[f];
                     let opt = if field.optional { "?" } else { "" };
                     out.push_str(&format!(
-                        "  {}{}: {};\n",
+                        "  readonly {}{}: {};\n",
                         field_ident(self.program, *t, f),
                         opt,
                         ts_ty(self.program, &field.ty)
@@ -868,7 +899,10 @@ impl<'a> Printer<'a> {
                 }
             }
             Some(payload) => {
-                out.push_str(&format!("  value: {};\n", ts_ty(self.program, payload)));
+                out.push_str(&format!(
+                    "  readonly value: {};\n",
+                    ts_ty(self.program, payload)
+                ));
             }
         }
         out.push_str("}\n");
@@ -3329,9 +3363,10 @@ impl<'a> FnGen<'a> {
         }
         if let Some(dst) = dst {
             let head = self.decl_head(body, dst);
-            let src = if decl.tags.is_empty() {
-                format!("{s}.value!")
-            } else if self.is_flat_payload(ty, variant) {
+            // A flat block arm carries the discriminant itself; every other
+            // arm (including the catch-all, whose payload field is required)
+            // reads `value`.
+            let src = if self.is_flat_payload(ty, variant) {
                 s.clone()
             } else {
                 format!("{s}.value")

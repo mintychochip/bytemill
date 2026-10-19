@@ -1,8 +1,18 @@
 //! `emit zig`: a `bpsgen.zig` index over one module per route category
 //! (`runtime.zig`, `encoding.zig`, `play_clientbound.zig`, `shared.zig`, ...),
 //! each of typed structs, unions, enums, and codecs. `bpsgen.zig` re-exports
-//! every public declaration, so the public surface is unchanged; a module
-//! references another's declarations as `@import("x.zig").Foo`.
+//! every public declaration, so the public surface is unchanged. A module that
+//! reaches into another imports it once at file scope (`const encoding =
+//! @import("encoding.zig");`) and calls `encoding.decodeString(...)`, never an
+//! inline `@import("encoding.zig").decodeString(...)`; every module stem of the
+//! program is therefore reserved for locals, so a local can never shadow an
+//! alias.
+//!
+//! Names follow Zig's own conventions: types `PascalCase`, functions
+//! `camelCase`, fields, locals, and enum members `snake_case`. A reserved word
+//! escapes the way the language does (`@"test"`); a primitive type or value
+//! name (`type`, `u8`) takes a trailing `_` instead, because `zig fmt` strips
+//! the quotes of a quoted primitive in field position.
 //!
 //! The printer reads the typed program (`bps::ir::typed`), never the IR or
 //! the AST. Every encoding, packet, frame, and enum becomes either free
@@ -143,8 +153,10 @@ fn owns_ty(owns: &[bool], ty: &Ty) -> bool {
 // Names
 // ---------------------------------------------------------------------------
 
-/// Zig keywords plus the primitive type names: identifiers escaping with a
-/// trailing `_`. Real 26.3 hits are fields `type` and `test`.
+/// Zig keywords plus the primitive type names. Reserved words escape as
+/// `@"<word>"`, the language's own convention; primitive type names cannot be
+/// escaped that way because `zig fmt` strips the quotes in field position, so
+/// they take a trailing `_`. Real 26.3 hits are fields `type` and `test`.
 const KEYWORDS: &[&str] = &[
     "addrspace",
     "align",
@@ -234,25 +246,131 @@ const KEYWORDS: &[&str] = &[
     "self",
 ];
 
+/// Primitive type and value names. These are the only entries of [`KEYWORDS`]
+/// that cannot be quoted: `zig fmt` rewrites `@"u8"` to `u8` in field
+/// position, which then shadows the primitive and fails to compile, so they
+/// escape with a trailing `_`.
+const PRIMITIVES: &[&str] = &[
+    "bool",
+    "c_char",
+    "c_int",
+    "c_long",
+    "c_longdouble",
+    "c_longlong",
+    "c_short",
+    "c_uint",
+    "c_ulong",
+    "c_ulonglong",
+    "c_ushort",
+    "comptime_float",
+    "comptime_int",
+    "f16",
+    "f32",
+    "f64",
+    "f128",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "void",
+    "type",
+    "anyerror",
+    "noreturn",
+    "null",
+    "undefined",
+    "true",
+    "false",
+    "self",
+];
+
 /// Extra names reserved for locals and parameters: the function signatures
 /// already bind `reader`, `writer`, and `allocator`.
 const LOCAL_RESERVED: &[&str] = &["reader", "writer", "allocator", "bps_rt"];
 
-fn ident(name: &crate::ir::typed::Name, extra: &[&str]) -> String {
-    let snake = name.snake();
-    if KEYWORDS.contains(&snake.as_str()) || extra.contains(&snake.as_str()) {
+/// Escape one identifier. `reserved` marks names bound elsewhere in the
+/// emitted function (signature params, module imports), which cannot be
+/// quoted and so take the trailing `_`.
+fn escaped(snake: &str, reserved: bool) -> String {
+    if reserved || PRIMITIVES.contains(&snake) {
         format!("{snake}_")
+    } else if KEYWORDS.contains(&snake) {
+        format!("@\"{snake}\"")
+    } else {
+        snake.to_string()
+    }
+}
+
+/// A field, variant, or enum-member name: usable bare or quoted, never
+/// shadowing, since a container member may share a name with a module import.
+fn field_name(name: &crate::ir::typed::Name) -> String {
+    let snake = name.snake();
+    if PRIMITIVES.contains(&snake.as_str()) {
+        format!("{snake}_")
+    } else if KEYWORDS.contains(&snake.as_str()) {
+        format!("@\"{snake}\"")
     } else {
         snake
     }
 }
 
-fn field_name(name: &crate::ir::typed::Name) -> String {
-    ident(name, &[])
+/// A local or parameter name: [`escaped`] with every module stem of the
+/// program reserved, so a local can never shadow a file-scope
+/// `const <stem> = @import("<stem>.zig");` alias (see [`hoist_imports`]).
+/// Reserving all stems is what makes that rewrite safe without a second
+/// generation pass.
+fn local_name(name: &crate::ir::typed::Name, stems: &BTreeSet<String>) -> String {
+    let snake = name.snake();
+    escaped(
+        &snake,
+        LOCAL_RESERVED.contains(&snake.as_str()) || stems.contains(&snake),
+    )
 }
 
-fn local_name(name: &crate::ir::typed::Name) -> String {
-    ident(name, LOCAL_RESERVED)
+/// Replace `@import("x.zig").Name` with `x.Name` throughout a module body and
+/// collect the imported stems, so the caller can emit one file-scope alias
+/// each. `self_stem` is never imported.
+fn hoist_imports(body: &str, self_stem: &str, aliases: &mut BTreeSet<String>) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    while let Some(at) = rest.find("@import(\"") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + "@import(\"".len()..];
+        let Some(close) = after.find("\")") else {
+            out.push_str(&rest[at..]);
+            return out;
+        };
+        let stem = &after[..close];
+        let tail = &after[close + 2..];
+        if let Some(stem) = stem.strip_suffix(".zig")
+            && stem != self_stem
+            && !stem.is_empty()
+            && stem
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            aliases.insert(stem.to_string());
+            out.push_str(stem);
+            out.push('.');
+            rest = tail.strip_prefix('.').unwrap_or(tail);
+        } else {
+            out.push_str(&rest[at..after.len() + "@import(\"".len() + close + 2 - after.len()]);
+            rest = tail;
+            // Keep the original text when it is not a hoistable import.
+            out.truncate(out.len() - (close + 2) - "@import(\"".len() - (after.len() - after.len()));
+            out.push_str(&format!("@import(\"{stem}.zig\")"));
+            out.push('.');
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +384,17 @@ pub const Error = error{ Short, RequireFailed, InvalidUtf8, NoMatchArm, MissingF
 pub const Reader = struct {
     data: []const u8,
     pos: usize = 0,
+    /// The codec that detected the failure and its detail; `pos` is the
+    /// offset. Set by the innermost failing codec's `errdefer`, so the first
+    /// (deepest) failure wins and nested failures propagate untouched.
+    err_codec: []const u8 = "",
+    err_detail: []const u8 = "",
+    pub fn fail(self: *Reader, codec: []const u8, detail: []const u8) void {
+        if (self.err_codec.len == 0) {
+            self.err_codec = codec;
+            self.err_detail = detail;
+        }
+    }
     pub fn remaining(self: *const Reader) usize {
         return self.data.len - self.pos;
     }
@@ -301,8 +430,22 @@ pub const Reader = struct {
 };
 pub const Writer = struct {
     buf: std.ArrayList(u8),
+    /// Set by the innermost failing codec's `errdefer`; see `Reader`.
+    err_codec: []const u8 = "",
+    err_detail: []const u8 = "",
     pub fn init(allocator: std.mem.Allocator) Writer {
         return .{ .buf = std.ArrayList(u8).init(allocator) };
+    }
+    pub fn fail(self: *Writer, codec: []const u8, detail: []const u8) void {
+        if (self.err_codec.len == 0) {
+            self.err_codec = codec;
+            self.err_detail = detail;
+        }
+    }
+    /// Release the buffer without taking ownership; `toOwnedSlice` does this
+    /// implicitly, and errors need it.
+    pub fn deinit(self: *Writer) void {
+        self.buf.deinit();
     }
     pub fn toOwnedSlice(self: *Writer) Error![]u8 {
         return self.buf.toOwnedSlice() catch return error.OutOfMemory;
@@ -397,6 +540,8 @@ struct Printer<'a> {
     /// Pointer-marked locals per codec body: `(codec, is_decode)`.
     ptr: HashMap<(CodecIdx, bool), HashSet<LocalId>>,
     needs_strlen: bool,
+    /// Every file stem the program emits, so no local shadows a module alias.
+    stems: BTreeSet<String>,
 }
 
 impl<'a> Printer<'a> {
@@ -407,6 +552,17 @@ impl<'a> Printer<'a> {
             .codecs
             .iter()
             .any(|c| body_uses_strlen(&c.decode.stmts) || body_uses_strlen(&c.encode.stmts));
+        let stems: BTreeSet<String> = prog
+            .types
+            .iter()
+            .map(|t| prog.output_stem(&t.origin).to_string())
+            .chain(
+                prog.codecs
+                    .iter()
+                    .map(|c| prog.output_stem(&c.origin).to_string()),
+            )
+            .chain(["runtime".to_string(), "std".to_string()])
+            .collect();
         let mut printer = Self {
             prog,
             boxed_field,
@@ -414,6 +570,7 @@ impl<'a> Printer<'a> {
             owns,
             ptr: HashMap::new(),
             needs_strlen,
+            stems,
         };
         for c in 0..prog.codecs.len() {
             printer
@@ -451,12 +608,20 @@ impl<'a> Printer<'a> {
         let index = self.index(&runtime);
         let mut files = BTreeMap::new();
         for (stem, body) in bodies {
+            // One `const <stem> = @import("<stem>.zig");` per module this
+            // module reaches into, so call sites read `encoding.decodeString`
+            // instead of repeating the path. Never import self.
+            let mut aliases: BTreeSet<String> = BTreeSet::new();
+            let body = hoist_imports(&body, &stem, &mut aliases);
             let mut src = String::new();
             if body.contains("std.") {
                 src.push_str("const std = @import(\"std\");\n");
             }
             if body.contains("bps_rt.") {
                 src.push_str("const bps_rt = @import(\"runtime.zig\");\n");
+            }
+            for alias in &aliases {
+                src.push_str(&format!("const {alias} = @import(\"{alias}.zig\");\n"));
             }
             if !src.is_empty() {
                 src.push('\n');
@@ -828,7 +993,7 @@ impl Printer<'_> {
             let p = &body.locals[*pid];
             param(
                 &mut sig,
-                &format!("{}: {}", local_name(&p.name), self.param_ty(p, here)?),
+                &format!("{}: {}", local_name(&p.name, &self.stems), self.param_ty(p, here)?),
             );
         }
         let ret = if decode {
@@ -844,6 +1009,21 @@ impl Printer<'_> {
         fgen.stmts(&body.stmts)?;
         let pad = if recv.is_some() { "    " } else { "" };
         let mut out = format!("{pad}{sig}) bps_rt.Error!{ret} {{\n");
+        // Report this codec at the deepest failure: `errdefer` runs inner to
+        // outer, and `fail` keeps the first codec seen.
+        let diag = match recv {
+            Some(t) => format!("{t}.{fn_name}"),
+            None => fn_name.to_string(),
+        };
+        let cursor = if decode { "reader" } else { "writer" };
+        if decode {
+            fgen.uses_reader = true;
+        } else {
+            fgen.uses_writer = true;
+        }
+        out.push_str(&format!(
+            "{pad}    errdefer |err| {cursor}.fail(\"{diag}\", @errorName(err));\n"
+        ));
         // `_ = x;` for signature names the body never reads.
         if decode {
             if !fgen.uses_reader {
@@ -866,7 +1046,7 @@ impl Printer<'_> {
             if body.locals[*pid].uses == 0 {
                 out.push_str(&format!(
                     "{pad}    _ = {};\n",
-                    local_name(&body.locals[*pid].name)
+                    local_name(&body.locals[*pid].name, &self.stems)
                 ));
             }
         }
@@ -880,7 +1060,7 @@ impl Printer<'_> {
         if self.prog.codecs[c].ty.is_some() {
             return "self".into();
         }
-        local_name(&body.locals[v].name)
+        local_name(&body.locals[v].name, &self.stems)
     }
 
     fn decode_method(&self, c: CodecIdx, recv: &str, here: &str) -> BpsResult<String> {
@@ -1302,7 +1482,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     ) -> Self {
         let mut taken = HashSet::new();
         for l in &body.locals {
-            taken.insert(local_name(&l.name));
+            taken.insert(local_name(&l.name, &printer.stems));
         }
         let mut covered = HashSet::new();
         for (id, l) in body.locals.iter().enumerate() {
@@ -1389,7 +1569,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     /// A local's Zig name; an aliased `Utf8` result takes its donor's.
     fn name(&self, id: LocalId) -> String {
         let id = self.info.alias.get(&id).copied().unwrap_or(id);
-        local_name(&self.body.locals[id].name)
+        local_name(&self.body.locals[id].name, &self.printer.stems)
     }
 
     /// `errdefer` freeing `name` (called right after its binding). A
@@ -1647,7 +1827,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     fn declare(&mut self, local: LocalId, zero: bool) -> BpsResult<()> {
         let l = &self.body.locals[local];
-        let name = local_name(&l.name);
+        let name = local_name(&l.name, &self.printer.stems);
         if l.optional {
             let ty = self.local_ty(local)?;
             self.ln(&format!("var {name}: {ty} = null;"));

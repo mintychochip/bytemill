@@ -123,6 +123,25 @@ fn cpp_varint_roundtrip() {
     let dir = temp("varint");
     bps::emit_cpp::emit_cpp(&resolved, &dir).unwrap();
     clang_format_gate(&dir);
+    // The unit's shape: decoders are [[nodiscard]], errors share a base, the
+    // writer borrows byte buffers, and the integer helpers are constexpr.
+    let header = std::fs::read_to_string(dir.join("bpsgen.hpp")).unwrap();
+    assert!(
+        header.contains("[[nodiscard]]"),
+        "decoders must be [[nodiscard]]"
+    );
+    assert!(
+        header.contains("class CodecError : public std::runtime_error"),
+        "both error types share a base"
+    );
+    assert!(
+        header.contains("std::span<const std::uint8_t>"),
+        "byte buffers are borrowed as a span"
+    );
+    assert!(
+        header.contains("constexpr std::int64_t add_wrap("),
+        "integer helpers are constexpr"
+    );
     let probe = program.packet_codec("probe").expect("probe codec");
     assert!(program.codecs[probe].params.is_empty());
     let decode = bps::emit_cpp::decode_fn(&program, probe);
@@ -176,7 +195,7 @@ int main() {{
     Reader r(nullptr, 0);
     bool threw = false;
     try {{
-      decode_varint(r);
+      (void)decode_varint(r);
     }} catch (const DecodeError &e) {{
       threw = true;
       check(e.offset == 0, "short offset");
@@ -189,7 +208,7 @@ int main() {{
     Reader r(bad, sizeof(bad));
     bool threw = false;
     try {{
-      decode_varint(r);
+      (void)decode_varint(r);
     }} catch (const DecodeError &e) {{
       threw = true;
       check(std::string(e.what()).find("require failed") != std::string::npos, "require text");
@@ -246,7 +265,7 @@ int main() {
     Reader r(bad, sizeof(bad));
     bool threw = false;
     try {
-      decode_string(r, 32767);
+      (void)decode_string(r, 32767);
     } catch (const DecodeError &e) {
       threw = true;
       check(std::string(e.what()).find("invalid UTF-8") != std::string::npos, "utf8 text");
@@ -258,7 +277,7 @@ int main() {
     Reader r(raw, sizeof(raw));
     bool threw = false;
     try {
-      decode_string(r, 1);
+      (void)decode_string(r, 1);
     } catch (const DecodeError &e) {
       threw = true;
       check(std::string(e.what()).find("require failed") != std::string::npos, "max text");

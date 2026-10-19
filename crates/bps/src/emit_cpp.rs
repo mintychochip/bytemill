@@ -159,7 +159,14 @@ const KEYWORDS: &[&str] = &[
 
 /// Identifiers the runtime defines at namespace scope. A generated top-level
 /// type with one of these names is a printer error, never a silent rename.
-const RUNTIME_TOP: &[&str] = &["Reader", "Writer", "DecodeError", "EncodeError", "Box"];
+const RUNTIME_TOP: &[&str] = &[
+    "Reader",
+    "Writer",
+    "CodecError",
+    "DecodeError",
+    "EncodeError",
+    "Box",
+];
 
 /// `clang-format` (LLVM style) column limit.
 const MAX_COL: usize = 80;
@@ -669,30 +676,36 @@ const RUNTIME_BASE: &str = r#"#pragma once
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
 
 namespace bps {
-class DecodeError : public std::runtime_error {
+class CodecError : public std::runtime_error {
+public:
+  explicit CodecError(const std::string &what) : std::runtime_error(what) {}
+};
+class DecodeError : public CodecError {
 public:
   DecodeError(const std::string &codec, std::size_t offset,
               const std::string &what)
-      : std::runtime_error("decode " + codec + " at offset " +
-                           std::to_string(offset) + ": " + what),
+      : CodecError("decode " + codec + " at offset " + std::to_string(offset) +
+                   ": " + what),
         codec(codec), offset(offset) {}
   std::string codec;
   std::size_t offset;
 };
-class EncodeError : public std::runtime_error {
+class EncodeError : public CodecError {
 public:
   EncodeError(const std::string &codec, const std::string &what)
-      : std::runtime_error("encode " + codec + ": " + what), codec(codec) {}
+      : CodecError("encode " + codec + ": " + what), codec(codec) {}
   std::string codec;
 };
-inline bool is_utf8(const std::uint8_t *s, std::size_t n) {
+inline bool is_utf8(const std::uint8_t *s, std::size_t n) noexcept {
   std::size_t i = 0;
   while (i < n) {
     std::uint8_t c = s[i];
@@ -738,8 +751,8 @@ inline bool is_utf8(const std::uint8_t *s, std::size_t n) {
 class Reader {
 public:
   Reader(const std::uint8_t *data, std::size_t len) : data_(data), len_(len) {}
-  std::size_t pos() const { return pos_; }
-  std::size_t remaining() const { return len_ - pos_; }
+  std::size_t pos() const noexcept { return pos_; }
+  std::size_t remaining() const noexcept { return len_ - pos_; }
   std::uint8_t u8(const char *codec) {
     if (pos_ >= len_) {
       throw DecodeError(codec, pos_, "short buffer: need 1 byte");
@@ -804,10 +817,10 @@ class Writer {
 public:
   std::vector<std::uint8_t> buf;
   void u8(std::uint8_t v) { buf.push_back(v); }
-  void bytes(const std::vector<std::uint8_t> &b) {
+  void bytes(std::span<const std::uint8_t> b) {
     buf.insert(buf.end(), b.begin(), b.end());
   }
-  void bytes_sized(const std::vector<std::uint8_t> &b, std::int64_t n,
+  void bytes_sized(std::span<const std::uint8_t> b, std::int64_t n,
                    const char *codec) {
     if (n < 0 || b.size() > static_cast<std::size_t>(n)) {
       throw EncodeError(codec, "bytes too long");
@@ -831,23 +844,23 @@ public:
     }
   }
 };
-inline std::int64_t add_wrap(std::int64_t a, std::int64_t b) {
+constexpr std::int64_t add_wrap(std::int64_t a, std::int64_t b) noexcept {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) +
                                    static_cast<std::uint64_t>(b));
 }
-inline std::int64_t sub_wrap(std::int64_t a, std::int64_t b) {
+constexpr std::int64_t sub_wrap(std::int64_t a, std::int64_t b) noexcept {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) -
                                    static_cast<std::uint64_t>(b));
 }
-inline std::int64_t mul_wrap(std::int64_t a, std::int64_t b) {
+constexpr std::int64_t mul_wrap(std::int64_t a, std::int64_t b) noexcept {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) *
                                    static_cast<std::uint64_t>(b));
 }
-inline std::int64_t shl_wrap(std::int64_t a, std::int64_t b) {
+constexpr std::int64_t shl_wrap(std::int64_t a, std::int64_t b) noexcept {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a)
                                    << static_cast<unsigned>(b));
 }
-inline std::int64_t div_floor(std::int64_t a, std::int64_t b) {
+constexpr std::int64_t div_floor(std::int64_t a, std::int64_t b) noexcept {
   if (b == 0) {
     return 0;
   }
@@ -861,7 +874,7 @@ inline std::int64_t div_floor(std::int64_t a, std::int64_t b) {
   }
   return q;
 }
-inline std::int64_t mod_sign(std::int64_t a, std::int64_t b) {
+constexpr std::int64_t mod_sign(std::int64_t a, std::int64_t b) noexcept {
   if (b == 0) {
     return 0;
   }
@@ -874,7 +887,7 @@ inline std::int64_t mod_sign(std::int64_t a, std::int64_t b) {
   }
   return r;
 }
-inline std::int64_t sign_extend(std::int64_t v, std::int64_t bits) {
+constexpr std::int64_t sign_extend(std::int64_t v, std::int64_t bits) noexcept {
   if (bits <= 0 || bits >= 64) {
     return v;
   }
@@ -887,7 +900,7 @@ inline std::int64_t sign_extend(std::int64_t v, std::int64_t bits) {
   }
   return static_cast<std::int64_t>(u);
 }
-inline std::int64_t utf16_units(const std::string &s) {
+inline std::int64_t utf16_units(std::string_view s) {
   std::int64_t n = 0;
   std::size_t i = 0;
   while (i < s.size()) {
@@ -918,10 +931,10 @@ inline std::int64_t utf16_units(const std::string &s) {
   }
   return n;
 }
-inline std::int64_t utf8_len(const std::string &s) {
+inline std::int64_t utf8_len(std::string_view s) noexcept {
   return static_cast<std::int64_t>(s.size());
 }
-inline std::int64_t str_len(const std::string &s) {
+inline std::int64_t str_len(std::string_view s) noexcept {
   std::int64_t n = 0;
   for (char c : s) {
     if ((static_cast<std::uint8_t>(c) & 0xC0) != 0x80) {
@@ -936,7 +949,7 @@ inline std::int64_t bytes_len(const std::vector<std::uint8_t> &b) {
 template <typename T> inline std::int64_t list_len(const std::vector<T> &v) {
   return static_cast<std::int64_t>(v.size());
 }
-inline std::vector<std::uint8_t> str_bytes(const std::string &s) {
+inline std::vector<std::uint8_t> str_bytes(std::string_view s) {
   return std::vector<std::uint8_t>(s.begin(), s.end());
 }
 template <typename T> struct Box {
@@ -1918,7 +1931,7 @@ fn sig_string(
     let body = if decode { &c.decode } else { &c.encode };
     if decode {
         let head = format!(
-            "{} {}",
+            "[[nodiscard]] {} {}",
             cpp_ty(program, &c.value),
             decode_fn(program, codec)
         );
@@ -1970,15 +1983,25 @@ fn sig_string(
 }
 
 fn param_decl(program: &Program, ty: &Ty, optional: bool, name: Option<&str>) -> String {
-    let t = opt_cpp(program, ty, optional);
+    let t = param_t(program, ty, optional);
     let by_value = !optional
         && (matches!(ty, Ty::Int(_) | Ty::Bool | Ty::F32 | Ty::F64) || is_enum_ty(program, ty));
-    match (by_value, name) {
-        (true, Some(n)) => format!("{t} {n}"),
-        (true, None) => t,
-        (false, Some(n)) => format!("const {t} &{n}"),
-        (false, None) => format!("const {t} &"),
+    let borrowed = matches!(ty, Ty::Str) && !optional;
+    match (by_value, borrowed, name) {
+        (true, _, Some(n)) => format!("{t} {n}"),
+        (true, _, None) => t,
+        (_, true, Some(n)) => format!("std::string_view {n}"),
+        (_, true, None) => "std::string_view".to_string(),
+        (_, _, Some(n)) => format!("const {t} &{n}"),
+        (_, _, None) => format!("const {t} &"),
     }
+}
+
+/// A parameter's C++ spelling: a `std::string` parameter is borrowed as a
+/// `std::string_view` (the codecs only read it), everything else keeps its
+/// value spelling (`std::optional<T>` when the parameter is optional).
+fn param_t(program: &Program, ty: &Ty, optional: bool) -> String {
+    opt_cpp(program, ty, optional)
 }
 
 fn is_enum_ty(program: &Program, ty: &Ty) -> bool {

@@ -35,6 +35,11 @@
 //! * `Reader` borrows, `Writer` owns, decoded values own (`to_vec`,
 //!   `to_owned`). Parameters are passed by value (every schema parameter,
 //!   capture, and tag in the shipped schemas is `Copy`).
+//! * Encode never copies: an optional field is bound through
+//!   `self.field.as_ref().ok_or(..)?` and a sum payload as the reference the
+//!   match already has (`v`, or `&**v` when boxed), so a body that only
+//!   borrows a value does not clone it. `.clone()` stays exactly where the
+//!   body moves the value into an owned place.
 //! * Integer arithmetic runs in `i64` two's-complement like the interpreter:
 //!   `wraps` additions, subtractions, multiplications, and shifts use
 //!   `bps_add`/`bps_sub`/`bps_mul` or `wrapping_*`; `/` floors (`bps_div`)
@@ -1691,6 +1696,120 @@ fn binds_declare(stmts: &[Stmt], local: LocalId) -> bool {
     found
 }
 
+/// Every use of a local in a body, with `owned` true where the emitted shape
+/// needs the local's value (a move, or a read that does not accept a
+/// reference). Only the positions that are reference-transparent -- the
+/// source of a further `Unwrap`, the scrutinee of an `ExpectVariant`, the
+/// receiver of a method call, a `&`-argument, a field or method base -- pass
+/// `false`, so a binding declared as a reference stays usable exactly there.
+fn walk_uses(stmts: &[Stmt], f: &mut impl FnMut(LocalId, bool)) {
+    for s in stmts {
+        match s {
+            Stmt::Declare { .. } | Stmt::Fail(_) => {}
+            Stmt::Let { value, .. } | Stmt::Return(value) => use_expr(value, true, f),
+            Stmt::Read { op, .. } => {
+                if let ReadOp::Bytes(n) = op {
+                    use_expr(n, true, f);
+                }
+            }
+            Stmt::Decode { args, .. } => {
+                for a in args {
+                    use_expr(a, true, f);
+                }
+            }
+            Stmt::Utf8 { src, .. } => use_expr(src, false, f),
+            Stmt::Write { op, value } => {
+                if let crate::ir::typed::WriteOp::Bytes(n) = op {
+                    use_expr(n, true, f);
+                }
+                use_expr(value, false, f);
+            }
+            Stmt::Encode { args, value, .. } => {
+                use_expr(value, false, f);
+                for a in args {
+                    use_expr(a, true, f);
+                }
+            }
+            Stmt::Require { cond, .. } => use_expr(cond, true, f),
+            // The unwrapped place is only ever read through `.as_ref()`.
+            Stmt::Unwrap { src, .. } => use_expr(src, false, f),
+            Stmt::Match {
+                scrutinee, arms, other, ..
+            } => {
+                use_expr(scrutinee, true, f);
+                for a in arms {
+                    walk_uses(&a.body, f);
+                }
+                if let Some(o) = other {
+                    walk_uses(o, f);
+                }
+            }
+            Stmt::Repeat { mode, body, .. } => {
+                match mode {
+                    RepeatMode::Count(n) | RepeatMode::Until(n) => use_expr(n, true, f),
+                    RepeatMode::UntilEnd => {}
+                }
+                walk_uses(body, f);
+            }
+            Stmt::ForEach { list, body, .. } => {
+                use_expr(list, false, f);
+                walk_uses(body, f);
+            }
+            Stmt::ExpectVariant { sum, .. } => use_expr(sum, false, f),
+            Stmt::If {
+                cond, then, els, ..
+            } => {
+                use_expr(cond, true, f);
+                walk_uses(then, f);
+                walk_uses(els, f);
+            }
+        }
+    }
+}
+
+/// Local uses inside one expression; `owned` is the enclosing need, carried
+/// down through the reference-transparent forms and forced to `true` by
+/// everything whose value is consumed.
+fn use_expr(e: &Expr, owned: bool, f: &mut impl FnMut(LocalId, bool)) {
+    match e {
+        Expr::Local(id) => f(*id, owned),
+        // A place expression reads through any number of references.
+        Expr::Field { base, .. } => use_expr(base, owned, f),
+        // `(x).is_some()` and `(x).as_bytes()` borrow their operand.
+        Expr::Present(x) | Expr::StrBytes(x) => use_expr(x, false, f),
+        // `(x).clone().unwrap()` moves out of the source.
+        Expr::Get(x) | Expr::Not(x) => use_expr(x, true, f),
+        Expr::Cast { expr, .. } => use_expr(expr, true, f),
+        Expr::Binary { lhs, rhs, .. } => {
+            use_expr(lhs, true, f);
+            use_expr(rhs, true, f);
+        }
+        Expr::Cond {
+            cond, then, els, ..
+        } => {
+            use_expr(cond, true, f);
+            use_expr(then, true, f);
+            use_expr(els, true, f);
+        }
+        Expr::Call { args, .. } => {
+            for a in args {
+                use_expr(a, true, f);
+            }
+        }
+        Expr::Construct { fields, .. } => {
+            for a in fields {
+                use_expr(a, true, f);
+            }
+        }
+        Expr::Variant { payload, .. } => {
+            if let Some(p) = payload {
+                use_expr(p, true, f);
+            }
+        }
+        Expr::Int { .. } | Expr::Bool(_) | Expr::Str(_) | Expr::Remaining => {}
+    }
+}
+
 /// Every statement in a body, nested ones included.
 fn walk_stmts(stmts: &[Stmt], f: &mut impl FnMut(&Stmt)) {
     for s in stmts {
@@ -2381,6 +2500,22 @@ impl<'a> Gen<'a> {
         }
     }
 
+    /// Whether a non-`Copy` bind can be declared as a reference: the body
+    /// still has it declared, and every use of it is a borrow (a method
+    /// receiver, a `&`-argument, a further `.as_ref()`, or a place read).
+    fn borrowed_binding(&self, ctx: &Ctx<'_>, local: LocalId) -> bool {
+        if !binds_declare(&ctx.body.stmts, local) {
+            return false;
+        }
+        let mut owned = false;
+        walk_uses(&ctx.body.stmts, &mut |id, need| {
+            if id == local && need {
+                owned = true;
+            }
+        });
+        !owned
+    }
+
     /// Whether an expression's value is `Copy`.
     fn copy_of(&self, ctx: &Ctx<'_>, e: &Expr) -> bool {
         let (ty, _) = self.prog.expr_ty(ctx.body, e);
@@ -2570,6 +2705,11 @@ impl<'a> Gen<'a> {
 
     /// `Unwrap`: bind an optional's value or fail with the missing field.
     /// The destination is left un-ascribed so boxed payloads infer.
+    ///
+    /// A non-`Copy` source is bound by reference (`.as_ref()`) whenever the
+    /// rest of the body only ever borrows the destination's value: the
+    /// source is usually a field of borrowed `self` on encode, which cannot
+    /// be moved at all. A source the body still moves keeps its clone.
     fn emit_unwrap(
         &self,
         cx: &mut Cx<'_, '_, '_, '_>,
@@ -2581,9 +2721,9 @@ impl<'a> Gen<'a> {
         let (ty, opt) = self.prog.expr_ty(cx.ctx.body, src);
         debug_assert!(opt, "rust-typed: unwrap of a non-optional");
         let copy = self.copy_ty_in(&ty);
-        // Non-`Copy` sources clone: the source may be a field of borrowed
-        // `self` on encode, or a local the rest of the body still reads.
-        if !copy {
+        if !copy && self.borrowed_binding(cx.ctx, dst.local) {
+            src_str = format!("{src_str}.as_ref()");
+        } else if !copy {
             src_str = format!("{src_str}.clone()");
         }
         let rhs = format!("{src_str}.ok_or(Error::MissingField {{ field: {field:?} }})?");
@@ -2927,13 +3067,23 @@ impl<'a> Gen<'a> {
                         }
                         _ => panic!("rust-typed: payload of a non-sum"),
                     };
-                    // The scrutinee may be borrowed (`&self` on encode), so
+                    // The scrutinee is borrowed (`&self` on encode), so
                     // match a reference: `v` is `&Payload` (`&Box<Payload>`
-                    // when boxed) in every case.
+                    // when boxed) in every case. `Copy` payloads copy out of
+                    // it, a boxed one derefs, and a payload the body only
+                    // borrows binds as the reference itself.
+                    let by_ref = d.declare
+                        && dst.as_ref().is_some_and(|d| self.borrowed_binding(cx.ctx, d.local));
                     let binding = if boxed {
-                        "(**v).clone()".to_string()
+                        if by_ref {
+                            "&**v".to_string()
+                        } else {
+                            "(**v).clone()".to_string()
+                        }
                     } else if payload_ty.as_ref().is_some_and(|t| self.copy_ty_in(t)) {
                         "*v".to_string()
+                    } else if by_ref {
+                        "v".to_string()
                     } else {
                         "(*v).clone()".to_string()
                     };
@@ -4249,7 +4399,20 @@ impl<'a> Gen<'a> {
         if ctx.mode == Mode::Encode && Some(*id) == ctx.body.value {
             return true;
         }
-        ctx.for_item.contains(id)
+        ctx.for_item.contains(id) || self.bound_by_ref(ctx, *id)
+    }
+
+    /// Whether `local` is a non-`Copy` destination the printer bound as a
+    /// reference: an `Unwrap` through `.as_ref()`, or an `ExpectVariant`
+    /// payload it bound as `v`. Uses must not take another `&`.
+    fn bound_by_ref(&self, ctx: &Ctx<'_>, local: LocalId) -> bool {
+        let mut hit = false;
+        walk_stmts(&ctx.body.stmts, &mut |s| match s {
+            Stmt::Unwrap { dst, .. } => hit |= dst.local == local,
+            Stmt::ExpectVariant { dst: Some(d), .. } => hit |= d.local == local,
+            _ => {}
+        });
+        hit && self.borrowed_binding(ctx, local)
     }
 
     /// Whether a `for` item is used where ownership is needed, forcing

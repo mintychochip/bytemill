@@ -1,7 +1,8 @@
 # BPS code generation: idiomatic printers over a typed program
 
 **Status:** implemented. All seven printers read the typed program; the per-language gates
-and the 26.3 and Hytale round trips run on the emitted trees.
+and the 26.3 and Hytale round trips run on the emitted trees. The per-language idiom review
+(steps 3-4 of section 7) landed 2026-10-19; the verification record is section 8.
 **Date:** 2026-10-15
 **Builds on:** `2026-10-15-bps-codegen-ir-design.md` (the IR, its interpreter, the printers).
 
@@ -120,7 +121,10 @@ inspection. In short:
 Every printer is a rewrite on `Program`. Shared requirements:
 
 - No runtime environment, no dynamic value type, no reflection, no global mutable state.
-- The language's naming conventions; keyword escaping with a trailing `_`.
+- The language's naming conventions; keyword escaping in that language's own form. Five
+  languages take a trailing `_`; Zig uses its quoted escape (`@"test"`) for reserved words,
+  a trailing `_` only where quoting is impossible (a primitive name, which `zig fmt` would
+  unquote in field position) or the name would shadow a file-scope import alias.
 - Typed records, sums as the language's tagged union, enums as named integers with constants
   (open: decode keeps unknown values), optionals and lists in the language's native form.
 - Errors in the language's idiom, carrying the failing codec and, with a cursor, the offset.
@@ -142,7 +146,7 @@ Per language (the details live in each printer's module docs):
 | optional | pointer | `T \| None` | `bool has_x` + value | `std::optional` | `x?: T` | `?T` | `Option` |
 | list | slice | `list` | pointer + length | `std::vector` | array | slice | `Vec` |
 | error | `error` values | exception classes | status enum return | exceptions | `Error` subclass | error set | `Result` + error enum |
-| gate | `gofmt -l`, `go vet` | `py_compile`; ruff, mypy `--strict` | `cc -std=c11 -Wall -Wextra -Wpedantic -Werror` | `g++ -std=c++20 -Wall -Wextra -Wpedantic -Werror` | `node`; `tsc --strict` | `zig fmt --check` | `rustfmt --check`, clippy |
+| gate | `gofmt -l`, `go vet`, `go test` | `py_compile`; ruff format/check, mypy `--strict` | `cc -std=c11 -Wall -Wextra -Wpedantic -Werror`; `clang-format --dry-run --Werror` | `g++ -std=c++20 -Wall -Wextra -Wpedantic -Werror`; `clang-format --dry-run --Werror` | `node`; `tsc --strict --erasableSyntaxOnly`; prettier | `zig fmt --check`, `zig test` | `rustfmt --check`, clippy `-D warnings` on the emitted crate |
 
 ## 6. Tests
 
@@ -161,5 +165,59 @@ Per language (the details live in each printer's module docs):
 1. Lowerer changes (section 3), the typed program, and the Go printer, together: Go is the
    first consumer and its round trip is the program's semantic gate.
 2. The other six printers in parallel on the stable program.
-3. Per-language review of the emitted `build/26_3` trees; fixes.
-4. Regenerate `build/26_3`, README and spec updates.
+3. Per-language review of the emitted `build/26_3` trees; fixes. **Done 2026-10-19.**
+4. Regenerate `build/26_3`, README and spec updates. **Done 2026-10-19.**
+
+## 8. Per-language idiom review (2026-10-19)
+
+Baseline: every tree passed `cc`/`g++`/`node`/`cargo test` and gofmt/ruff/mypy/tsc/prettier/
+zig fmt/rustfmt/clippy **except** `clang-format` on the emitted C. The review fixed, per
+printer (each change is pinned by an assertion or a runtime check in that printer's test):
+
+- **Go**: `// Package bpsgen` package doc; doc comments on every exported declaration (a
+  `go/ast` doc linter over the tree reports none missing); counted decode loops preallocate
+  (`make([]T, 0, int(count))`); plural initialisms print `IDs`/`UUIDs`/`EntityIDs`, not
+  `Ids`/`Uuids`.
+- **Python**: an unknown open-enum tag produced a pseudo-member without `_value_`, so
+  `repr(Intent(7))` raised `AttributeError`; the member now carries `_value_` and is cached in
+  `_value2member_map_`. `BpsError` gained `offset` as data (it was only in the message), and
+  `__all__` now includes the alias unions in every module and the package.
+- **C**: the emitted tree was not `clang-format`-canonical; the printer formats in place (as
+  the C++ printer does) and the test runs the `--dry-run --Werror` gate. A schema field named
+  after a codec's fixed local (`s`, `r`, `a`, `out`, `w`, `value`) used to make `cc` fail with
+  "conflicting types"; the body now reserves those names and renames the field's local.
+- **C++**: `[[nodiscard]]` on every decoder, a shared `CodecError` base behind
+  `DecodeError`/`EncodeError`, `constexpr`/`noexcept` integer helpers, and borrowed-view
+  parameters (`std::span<const std::uint8_t>`, `std::string_view`).
+- **TypeScript**: record and union-arm fields are `readonly` (the codec never writes one); the
+  catch-all arm's payload is required, which removed the emitted `value!` non-null assertion;
+  the import scanner no longer mistakes an open enum's `const` member keys for type
+  references (two phantom `import type`s and their `noUnusedLocals` errors are gone).
+- **Zig**: failures carry the failing codec (`Reader`/`Writer` `err_codec`/`err_detail`, set by
+  the innermost codec's `errdefer`, with `pos` the offset); `Writer` has `deinit`; a module
+  imports a dependency once at file scope (`const encoding = @import("encoding.zig");`) instead
+  of repeating `@import(...)` at more than 2 000 call sites, with every program stem reserved
+  for locals
+  so an alias can never be shadowed; reserved words use `@"test"`.
+- **Rust**: 126 `.clone()` calls on encode paths (about 175 including sum payloads) were
+  avoidable — optional fields bind through `.as_ref()` and sum payloads use the match's own
+  reference, chosen by a use-scan that keeps a clone only where the body moves the value. The
+  26.3 tree now emits **zero** clones; decode already had none. `encode` remains borrow-only,
+  decoders return `Result`, and the crate stays rustfmt/clippy clean.
+
+Verification record (all run on the final tree):
+
+| Check | Result |
+|---|---|
+| `scripts/bps_cargo.sh test --no-fail-fast` | 365 passed, 0 failed, exit 0 |
+| `scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings` | clean |
+| Go: `gofmt -l`, `go vet`, `go test`, round trips (26.3, 1.20.1, Hytale) | clean |
+| Python: `compileall`, ruff format/check, `mypy --strict` (13 files), round trips | clean |
+| C: `cc -Werror`, `clang-format --dry-run --Werror`, round trips | clean |
+| C++: `g++ -Werror`, `clang-format --dry-run --Werror`, round trips | clean |
+| TypeScript: `tsc --strict --erasableSyntaxOnly`, prettier, node round trips | clean |
+| Zig: `zig fmt --check`, `zig test` (26.3 + Hytale) | clean |
+| Rust: `cargo fmt --check`, `cargo clippy -D warnings`, round trips | clean |
+| Two emits of the same schema are byte-identical, all seven | clean |
+| Unknown open-enum tag (`07`) decodes and re-encodes in all seven | clean |
+| Gated optional absent on the value encodes as no bytes, all seven | clean |

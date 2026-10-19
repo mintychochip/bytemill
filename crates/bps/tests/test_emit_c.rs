@@ -39,6 +39,47 @@ fn emit(resolved: &bps::ResolvedSchema, dir: &std::path::Path) {
     bps::emit_c::emit_c(resolved, dir).unwrap();
 }
 
+fn has_tool(tool: &str) -> bool {
+    std::process::Command::new(tool)
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// The emitted tree must already be `clang-format`-canonical (LLVM style,
+/// 2-space indent, 80 columns): the printer formats in place, so a dry run
+/// over its own output must find nothing left to change.
+fn clang_format_gate(dir: &std::path::Path) {
+    if !has_tool("clang-format") {
+        eprintln!("skipping clang-format gate: not installed");
+        return;
+    }
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            matches!(p.extension().and_then(|e| e.to_str()), Some("h" | "c"))
+                && p.file_name().and_then(|n| n.to_str()) != Some("check.c")
+        })
+        .collect();
+    files.sort();
+    for file in files {
+        let out = std::process::Command::new("clang-format")
+            .args(["--dry-run", "--Werror"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "clang-format failed for {}\n{}\n{}",
+            file.display(),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
 /// Compile `check.c` against `bpsgen.c` with the strict gate, run it, and
 /// return its stdout. `extra` adds flags such as `-O2`.
 fn compile_and_run(dir: &std::path::Path, extra: &[&str]) -> String {
@@ -105,6 +146,7 @@ fn c_varint_values() {
     let program = program_of(&resolved);
     let dir = emit_dir("varint");
     emit(&resolved, &dir);
+    clang_format_gate(&dir);
     let ci = program.codec_by_ir("varint").expect("varint codec");
     let dec = bps::emit_c::decode_fn(&program, ci);
     let enc = bps::emit_c::encode_fn(&program, ci);
@@ -164,6 +206,7 @@ packet probe_req {
     );
     let dir = emit_dir("probe");
     emit(&resolved, &dir);
+    clang_format_gate(&dir);
     let ci = program
         .packet_codec("probe_floats")
         .expect("probe_floats codec");
@@ -326,6 +369,7 @@ fn c_26_3_packets_roundtrip() {
     let program = program_of(&resolved);
     let dir = emit_dir("all");
     emit(&resolved, &dir);
+    clang_format_gate(&dir);
     let (body, n) = packet_harness(&resolved, &program);
     std::fs::write(dir.join("check.c"), body).unwrap();
     let out = compile_and_run(&dir, &[]);
@@ -342,9 +386,49 @@ fn c_hytale_packets_roundtrip() {
     let program = program_of(&resolved);
     let dir = emit_dir("hytale");
     emit(&resolved, &dir);
+    clang_format_gate(&dir);
     let (body, n) = packet_harness(&resolved, &program);
     std::fs::write(dir.join("check.c"), body).unwrap();
     let out = compile_and_run(&dir, &["-O2"]);
     assert!(out.contains(&format!("packets ok {n}")), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A schema field named after a codec's fixed local (`s` for the status,
+/// `r`/`a`/`out` on decode, `w`/`a`/`value` on encode) must not collide with
+/// it: the body renames the local, and the strict compile gate proves it.
+#[test]
+fn c_field_names_never_collide_with_codec_locals() {
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "packet clash { s: varint\n r: varint\n a: varint\n out: varint\n w: varint\n value: varint }\n";
+    let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
+    let dir = emit_dir("clash");
+    emit(&resolved, &dir);
+    clang_format_gate(&dir);
+    std::fs::write(
+        dir.join("check.c"),
+        r#"#include "bpsgen.h"
+#include <stdio.h>
+#include <string.h>
+int main(void) {
+    uint8_t raw[] = {1, 2, 3, 4, 5, 6};
+    bps_reader r = {raw, sizeof raw, 0, NULL, NULL};
+    bps_clash v;
+    if (bps_decode_clash(&r, &v) != BPS_OK) { printf("decode\n"); return 1; }
+    if (v.s != 1 || v.r != 2 || v.a != 3 || v.out != 4 || v.w != 5 || v.value != 6) {
+        printf("fields\n"); return 1;
+    }
+    uint8_t buf[16];
+    bps_writer w = {buf, 0, sizeof buf, NULL, NULL};
+    if (bps_encode_clash(&w, NULL, &v) != BPS_OK) { printf("encode\n"); return 1; }
+    if (w.len != 6 || memcmp(w.data, raw, 6) != 0) { printf("bytes\n"); return 1; }
+    printf("clash ok\n");
+    return 0;
+}
+"#,
+    )
+    .unwrap();
+    let out = compile_and_run(&dir, &[]);
+    assert!(out.contains("clash ok"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }

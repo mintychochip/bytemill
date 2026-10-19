@@ -44,7 +44,7 @@ fn run_check(dir: &std::path::Path) {
 #[test]
 fn python_varint_values() {
     let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
-        + "packet probe { n: varint }\npacket probe_guarded { n: varint require n == 300 }\n";
+        + "enum intent : varint { status = 1 login = 2 }\npacket probe { n: varint }\npacket probe_guarded { n: varint require n == 300 }\npacket routed { i: intent }\n";
     let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
     let program = bps::ir::typed::typed(&resolved).unwrap();
     let dir = scratch("values");
@@ -121,6 +121,30 @@ w = bpsgen.Writer()
 # the typed program checks requires on decode only: encode writes as-is
 bpsgen.ProbeGuarded(n=0).encode(w)
 eq(w.get_bytes(), bytes([0x00]), "unguarded encode bytes")
+# a failure carries the offset as data, not only inside the message
+try:
+    bpsgen.Probe.decode(bpsgen.Reader(b""))
+    raise AssertionError("expected ShortBuffer")
+except bpsgen.ShortBuffer as exc:
+    eq(exc.offset, 0, "exc.offset")
+# an open enum keeps an unknown value as a real member
+unknown = bpsgen.Intent(7)
+eq(int(unknown), 7, "unknown enum int")
+eq(unknown.name, "UNKNOWN_7", "unknown enum name")
+assert repr(unknown), "unknown enum repr"
+eq(bpsgen.Intent(1), bpsgen.Intent.STATUS, "known enum member")
+r = bpsgen.Reader(bytes([0x07]))
+eq(int(bpsgen.decode_intent(r)), 7, "decode unknown enum")
+w = bpsgen.Writer()
+bpsgen.encode_intent(w, unknown)
+eq(w.get_bytes(), bytes([0x07]), "encode unknown enum")
+# the package surface is explicit: every public name is in __all__
+missing = [
+    name
+    for name in ("Reader", "Writer", "BpsError", "Intent", "Probe", "Routed")
+    if name not in bpsgen.__all__
+]
+assert not missing, f"__all__ is missing {missing}"
 print("values ok")
 "#,
     )

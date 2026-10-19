@@ -172,6 +172,33 @@ fn gate_emitted(dir: &Path, target: &Path, leg: &str, min_packets: usize, count:
     assert_gate(&test, &format!("{leg}: cargo test"));
 }
 
+/// No emitted function clones: an encode body binds an optional field with
+/// `as_ref()` and a sum payload as the match's own reference, so `.clone()`
+/// only survives where the body genuinely moves the value (none in the
+/// shipped schemas). The printer's `//!` module doc states that rule.
+fn assert_no_clones(dir: &Path) {
+    let mut stack = vec![dir.join("src")];
+    let mut hits = Vec::new();
+    while let Some(p) = stack.pop() {
+        for e in std::fs::read_dir(&p).unwrap().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if path.extension().is_some_and(|x| x == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (i, l) in text.lines().enumerate() {
+                    if l.contains(".clone()") {
+                        hits.push(format!("{}:{}: {}", path.display(), i + 1, l.trim()));
+                    }
+                }
+            }
+        }
+    }
+    assert!(hits.is_empty(), "emitted code clones:\n{}", hits.join("\n"));
+}
+
 #[test]
 fn rust_typed_unit_vectors() {
     let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
@@ -223,6 +250,7 @@ fn rust_typed_26_3_packets_roundtrip() {
     let dir = fresh_dir("26-3");
     let target = fresh_target("26-3");
     bps::emit_rust_typed::emit_rust_typed(&resolved, &dir).unwrap();
+    assert_no_clones(&dir);
     let (body, n) = roundtrip_body(&resolved, &program);
     std::fs::create_dir_all(dir.join("tests")).unwrap();
     std::fs::write(dir.join("tests/roundtrip.rs"), body).unwrap();
@@ -237,6 +265,7 @@ fn rust_typed_hytale_packets_roundtrip() {
     let dir = fresh_dir("hytale");
     let target = fresh_target("hytale");
     bps::emit_rust_typed::emit_rust_typed(&resolved, &dir).unwrap();
+    assert_no_clones(&dir);
     let (body, n) = roundtrip_body(&resolved, &program);
     std::fs::create_dir_all(dir.join("tests")).unwrap();
     std::fs::write(dir.join("tests/roundtrip.rs"), body).unwrap();

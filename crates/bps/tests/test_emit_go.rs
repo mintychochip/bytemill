@@ -27,6 +27,23 @@ fn run(dir: &Path, tool: &str, args: &[&str]) -> std::process::Output {
         .unwrap_or_else(|e| panic!("{tool} not installed: {e}"))
 }
 
+/// Every `.go` file of an emitted package, concatenated, so assertions see the
+/// whole tree.
+fn generated(dir: &Path) -> String {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("go"))
+        .collect();
+    files.sort();
+    let mut out = String::new();
+    for file in files {
+        out.push_str(&std::fs::read_to_string(&file).unwrap());
+        out.push('\n');
+    }
+    out
+}
+
 /// The guide's local gates: gofmt-canonical output and a clean `go vet`.
 fn assert_go_gates(dir: &Path) {
     let out = run(dir, "gofmt", &["-l", "."]);
@@ -59,11 +76,18 @@ fn scratch(tag: &str) -> PathBuf {
 #[test]
 fn go_unit_codecs() {
     let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
-        + "packet probe { n: varint }\npacket floats { a: f32be, b: f64be }\npacket gated { v: varint\n require v == 777 }\n";
+        + "packet probe { n: varint }\npacket floats { a: f32be, b: f64be }\npacket gated { v: varint\n require v == 777 }\npacket holder { n: varint\n ids: varint[] count = n }\n";
     let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
     let dir = scratch("unit");
     bps::emit_go::emit_go(&resolved, &dir).unwrap();
     assert_go_gates(&dir);
+    let text = generated(&dir);
+    assert!(text.contains("// Package bpsgen"), "missing package doc");
+    assert!(text.contains("IDs []int32"), "initialism plural:\n{text}");
+    assert!(
+        text.contains("make([]int32, 0, int(n))"),
+        "counted list must be preallocated:\n{text}"
+    );
     std::fs::write(
         dir.join("unit_test.go"),
         r#"package bpsgen

@@ -267,6 +267,45 @@ fn ts_26_3_packets_roundtrip() {
     roundtrip_schema("schemas/minecraft_26_3_wiki.bps", "all", 100);
 }
 
+/// Interface and import idioms a reviewer would rewrite:
+/// records are `readonly` (the codec never mutates a decoded value), the
+/// catch-all arm's payload is required so encode skips its `!` assertion,
+/// and an open enum's `const` member keys never drag in a type-only import.
+#[test]
+fn ts_type_and_import_idioms() {
+    let resolved =
+        bps::analyze(&bps::load_schema(&[repo("schemas/minecraft_26_3_wiki.bps")]).unwrap()).unwrap();
+    let dir = scratch("idioms");
+    bps::emit_ts::emit_typescript(&resolved, &dir).unwrap();
+    let src = generated(&dir);
+    let enc = std::fs::read_to_string(dir.join("encoding.ts")).unwrap();
+    // Record/union fields are immutable.
+    assert!(
+        src.contains("export interface ParticleData {\n  readonly particleType: number;"),
+        "record fields must be readonly"
+    );
+    assert!(
+        src.contains("  readonly kind: \"other\";\n  readonly tag: number;"),
+        "catch-all arm discriminant must be readonly"
+    );
+    // The catch-all payload is always decoded, so encode reads it directly.
+    assert!(
+        enc.contains("readonly value: NbtNothing;"),
+        "catch-all arm payload must be required"
+    );
+    assert!(
+        !src.contains(".value!"),
+        "emitted code must never use a non-null assertion"
+    );
+    // `Intent = { Status, Login, Transfer }`: `Login`/`Transfer` are member
+    // keys, not references to the types of those names.
+    assert!(
+        !enc.contains("import type { Login }") && !enc.contains("Login } from"),
+        "enum member keys must not create type imports"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn ts_hytale_packets_roundtrip() {
     roundtrip_schema("schemas/hytale/2026_02_17.bps", "hytale", 1);

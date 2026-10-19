@@ -177,6 +177,16 @@ the bytes; each printer is checked by a round trip in its own compiler (`go test
 `cc`, `g++`, `node --experimental-strip-types`, `zig test`, `cargo test`) over every 26.3
 packet the interpreter can synthesize, plus the Hytale root.
 
+Each tree is also held to its language's own form and linters: `gofmt`/`go vet` (Go),
+`clang-format --dry-run --Werror` (C and C++, which the printer keeps stable itself),
+`zig fmt` (Zig), `rustfmt`/`clippy -D warnings` on the emitted crate (Rust), `prettier` and
+`tsc --strict --erasableSyntaxOnly` (TypeScript), and `ruff format`/`ruff check`/`mypy
+--strict` (Python). Names, escapes, error carriers, and container shapes are the language's
+own (Go initialisms and `*T` optionals, Python `slots` dataclasses and `IntEnum`, C
+`bps_`-prefixed structs and status returns, C++ `std::optional`/`std::variant`/`span`,
+TypeScript `readonly` interfaces and `bigint`, Zig `?T` and `@"keyword"` escapes, Rust
+`Option`/`Vec` and borrow-only encode), and an open enum keeps unknown values in all seven.
+
 Every tree is one file per route category (`{state}_{direction}`, `shared`, `encoding`), and
 the package entry point re-exports them all, so the public surface does not depend on the
 split: `bpsgen.ts` + `runtime.ts` + `{stem}.ts`, `bpsgen.zig` + `runtime.zig` + `{stem}.zig`,
