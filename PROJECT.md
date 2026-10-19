@@ -14,10 +14,11 @@ current-tree evidence (code, test, workflow, or committed report). Design ration
 
 | Area | State |
 |---|---|
-| Schema language | `.bps` parser, resolver, analyzer, interpreter (`ir::exec`), typed program (`ir::typed`) |
-| Typed printers | Rust (typed), Go, Python, Java, C#, C, C++, TypeScript, Zig — all lower `ir::typed::Program` |
+| Schema language | `.bps` parser, resolver, analyzer, interpreter (`ir::exec`), typed program (`ir::typed`), phase inspector (`ir::stages`, `bml stages`) |
+| Typed printers | Rust (typed), Go, Python, Java, C#, C, C++, TypeScript, Zig — all lower `ir::typed::Program`; shared matrix in `compat::TARGETS` (`bml targets`) |
 | Language versions | C++98–26, Go 1.16–1.24, Python 3.8–3.14, C89–C23, Rust 2015–2024, TS ES2015–ESNext, Zig 0.11–0.14, Java 8–21, C# 8–12 via `--std`/`<target>:<version>` |
 | Protocol coverage | 39 version roots / 51 releases (1.13 → 26.3), hand-written 26.3, Hytale connection packets |
+| Frame compression | Minecraft-style zlib envelope via `bml decode/encode --compression zlib[:threshold]`, shared with `game_probe`; schemas stay logical; Hytale zstd is not modeled |
 | Binaries | `.github/workflows/release.yml` publishes `bml` for Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), Windows x86_64, with `SHA256SUMS` |
 | Generated inputs | `data/minecraft-data/pc/` is fetched (`scripts/fetch_minecraft_data.py`); `targets/rstom/shapes/` is extracted (`scripts/extract_rstom_shapes.sh`); both are git-ignored, as are `build/` and `target/` |
 | Gates run locally | full `cargo test` suite green, `clippy -D warnings` clean, per-printer compile/roundtrip tests |

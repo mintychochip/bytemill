@@ -110,7 +110,9 @@ ROOT=schemas/minecraft_26_3_wiki.bps
 
 bml check $ROOT     # Parse, resolve, and type-check
 bml routes $ROOT    # Print stateful packet routing table (261 routes)
-bml dump-json $ROOT # Output AST / IR as JSON
+bml stages $ROOT    # Syntax, semantics, lowered IR, and typed IR as JSON
+bml targets         # Compatibility matrix: typed printers and accepted standards
+bml dump-json $ROOT # Output the parsed AST as JSON
 ```
 
 ### CLI Decode / Encode
@@ -130,6 +132,28 @@ echo 'ac0202' | bml decode schemas/minecraft_26_3_play.bps --packet animate --he
 bml encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
 # ac0202
 ```
+
+Minecraft's compression layer is a frame envelope, not a schema construct. `--compression zlib`
+unwraps `packet_length, data_length, data` before decoding; `--compression zlib:<threshold>` adds
+it on encode (packet data shorter than the threshold use `data_length = 0`; `zlib` alone
+means threshold 0):
+
+```bash
+# Decode a compressed play frame (state/direction required).
+bml decode $ROOT --state play --direction clientbound --compression zlib --hex
+
+# Encode a compressed handshake frame.
+bml encode $ROOT --packet handshake --state handshaking --direction serverbound \
+  --compression zlib:0 '{"protocol_version":777,"server_address":"localhost","server_port":25565,"intent":1}'
+# 1910789c63e864e3... (packet_length, data_length, zlib(id + payload))
+```
+
+With `--compression`, `decode` expects the full wire frame including the outer `packet_length`
+(`packet_length, data_length, data`); `encode` emits that same shape. Only Minecraft-style frames
+are accepted (`length: varint`, `id: varint`, `payload: rest`); other families such as Hytale's
+`i32le` frame error out rather than silently reusing the varint envelope. Decode ignores the
+threshold; the `data_length` field says whether a frame is raw or zlib. Hytale's zstd envelope is
+not implemented.
 
 ---
 
@@ -159,6 +183,9 @@ bml emit csharp:10 schemas/std/varint.bps --out ./bml_cs
 | `cpp` | C++20 | C++98, 03, 11, 14, 17, 20, 23, 26 | `bpsgen.hpp` + `.cpp` | `std::variant`, `std::optional`, `std::span` (polyfills on <17) | `g++ -std=c++20 -Werror`, `clang-format` |
 | `typescript` | ES2022 | ES2015, ES2018, ES2020, ES2022, ESNext | ES modules (`.ts`) | `readonly` interfaces, discriminated unions, `Uint8Array` | `tsc --strict --erasableSyntaxOnly`, `prettier` |
 | `zig` | 0.14 | 0.11, 0.12, 0.13, 0.14 | `bpsgen.zig` package | `union(enum)`, `?T`, `errdefer` unwinding, `@"keyword"` | `zig fmt --check`, `zig test` |
+
+`bml targets` prints the target and standard matrix as JSON; `crates/bytemill/src/compat.rs` is the
+source it reads, and `tests/test_compat.rs` pins every version against `EmitOptions::for_target`.
 Every printer lowers schemas to a shared typed intermediate representation (`ir::typed::Program`) and outputs native types without dynamic reflection or string-keyed dictionaries. Generated codecs are verified byte-for-byte against the BPS reference interpreter (`ir::exec`).
 
 ---

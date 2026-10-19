@@ -114,7 +114,7 @@ impl Program {
             .join(", ")
     }
 
-    fn ty_name(&self, ty: &Ty) -> String {
+    pub fn ty_name(&self, ty: &Ty) -> String {
         match ty {
             Ty::Int(t) => format!("{t:?}").to_ascii_lowercase(),
             Ty::Bool => "bool".into(),

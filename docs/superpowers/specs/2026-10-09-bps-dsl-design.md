@@ -31,8 +31,9 @@ v1 deliverables:
 - Session-level stream decoding that auto-tracks connection state (phase 2; `bml decode` takes
   explicit `--state/--direction`).
 - Version overlays/diffing (`@26.2`) — one schema file per version in v1.
-- Crypto/compression codecs. The schema describes the logical stream on one side of encryption
-  and outside the zlib-compressed envelope; framing options record where those boundaries sit.
+- Crypto/compression codecs in the DSL. The schema describes the logical stream on one side of
+  encryption and outside the zlib-compressed envelope. The CLI can unwrap or add a Minecraft
+  zlib frame envelope with `--compression zlib[:threshold]`; that codec is not part of a schema.
 - Registry content databases (Burger-generated registries). Registry IDs are opaque integers in
   v1.
 - Codecs for *other* file formats (world files, region files) unless a packet references them.

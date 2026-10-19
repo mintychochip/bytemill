@@ -1,0 +1,14 @@
+[package]
+name = "bytemill-wasm"
+version = "0.1.1"
+description = "WebAssembly bridge for the Bytemill BPS compiler"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+bytemill = { path = "../bytemill" }

@@ -137,11 +137,22 @@ pub struct Route {
     pub packet: TypeId,
     pub frame: String,
 }
+
+/// A protocol frame: the type it installs and the procedures that read and
+/// write it. `name` is the schema's frame name; `type_id` is the IR key
+/// (`frame_<name>`), which is also the procedure name in both directions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frame {
+    pub name: String,
+    pub type_id: TypeId,
+    pub decode: String,
+    pub encode: String,
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct IrSchema {
     pub types: OrderedMap<TypeDef>,
     pub decode: OrderedMap<Proc>,
     pub encode: OrderedMap<Proc>,
     pub routes: Vec<Route>,
-    pub frames: OrderedMap<Proc>,
+    pub frames: Vec<Frame>,
 }

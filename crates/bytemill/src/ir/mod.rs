@@ -5,6 +5,7 @@
 mod exec;
 mod lower;
 mod schema;
+pub mod stages;
 pub mod typed;
 mod width;
 
@@ -12,5 +13,8 @@ pub use typed::typed;
 
 pub use exec::{exec_decode, exec_decode_frame, exec_encode, exec_encode_frame};
 pub use lower::lower;
-pub use schema::{Field, IrArm, IrSchema, Proc, Route, Stmt, Ty, TypeDef, TypeId, Variant, WireOp};
+pub use schema::{
+    Field, Frame, IrArm, IrSchema, Proc, Route, Stmt, Ty, TypeDef, TypeId, Variant, WireOp,
+};
+pub use stages::{Stages, stages, stages_json};
 pub use width::{Storage, storage_of};

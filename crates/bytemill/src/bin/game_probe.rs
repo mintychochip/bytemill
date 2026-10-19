@@ -21,7 +21,6 @@ use bytemill::ordmap::OrderedMap;
 use bytemill::protodef::versions::{VersionEntry, parse_manifest};
 use bytemill::value::{Env, Value};
 use bytemill::{ResolvedSchema, analyze, load_schema};
-use flate2::read::ZlibDecoder;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -613,13 +612,13 @@ fn read_decoded(
     compression: Option<i128>,
 ) -> Result<Value, String> {
     let raw = read_frame(sock)?;
-    let plain = if let Some(threshold) = compression {
-        inflate_frame(&raw, threshold)?
+    let framed = if compression.is_some() {
+        bytemill::compress::inflate_frame_payload(&raw).map_err(|e| e.to_string())?
     } else {
-        raw
+        let mut logical = write_varint(raw.len() as i128);
+        logical.extend(raw);
+        logical
     };
-    let mut framed = write_varint(plain.len() as i128);
-    framed.extend(plain);
     let (id, decoded) = decode_frame_payload(resolved, state, direction, &framed).map_err(|e| e.to_string())?;
     let mut out = OrderedMap::new();
     out.insert("id", Value::Int(id));
@@ -641,21 +640,6 @@ fn read_frame(sock: &mut TcpStream) -> Result<Vec<u8>, String> {
     let mut buf = vec![0u8; n];
     sock.read_exact(&mut buf).map_err(|e| format!("read frame: {e}"))?;
     Ok(buf)
-}
-
-/// A compressed frame is `data_length: varint` then either raw bytes (`data_length == 0`) or
-/// a zlib blob of `data_length` bytes.
-fn inflate_frame(frame: &[u8], _threshold: i128) -> Result<Vec<u8>, String> {
-    let mut i = 0;
-    let (data_len, next) = read_varint_buf(frame, i)?;
-    i = next;
-    if data_len == 0 {
-        return Ok(frame[i..].to_vec());
-    }
-    let mut dec = ZlibDecoder::new(&frame[i..]);
-    let mut out = Vec::new();
-    dec.read_to_end(&mut out).map_err(|e| format!("inflate: {e}"))?;
-    Ok(out)
 }
 
 fn read_varint(sock: &mut TcpStream) -> Result<i128, String> {
@@ -1295,7 +1279,7 @@ fn take_body(bytes: &[u8], i: usize, compressed: bool) -> Result<(Vec<u8>, usize
     }
     let frame = &bytes[next..next + n];
     if compressed {
-        let plain = inflate_frame(frame, 0)?;
+        let plain = bytemill::compress::inflate_data(frame).map_err(|e| e.to_string())?;
         return Ok((plain, next + n, true));
     }
     Ok((frame.to_vec(), next + n, false))

@@ -8,6 +8,8 @@
 pub mod analyze;
 pub mod ast;
 pub mod cli;
+pub mod compat;
+pub mod compress;
 pub mod emit_c;
 pub mod emit_cpp;
 pub mod emit_csharp;

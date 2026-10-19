@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/bytemill"]
+members = ["crates/bytemill", "crates/bytemill-wasm"]
 resolver = "2"
 # `build/` holds emitted example trees (`bml emit ... --out build/26_3/<lang>`); the
 # rust-typed crate there is buildable in place, so keep it out of this workspace.
@@ -13,3 +13,12 @@ all = { level = "deny", priority = -1 }
 
 [profile.release]
 debug = true
+
+# The browser bridge is size-sensitive; keep it separate from the CLI profile.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

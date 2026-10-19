@@ -20,7 +20,7 @@ In scope:
 
 - Replacing `emit rust` (JSON decoders), `emit rstom`, or `emit rstom-tree`. Those stay on the AST. The typed Rust target is a new subcommand so it does not collide with `emit rust`.
 - A second lowering in the Python package. Python stays the reference interpreter and becomes one printer.
-- Session state machines, compression, encryption, registry name tables.
+- Session state machines, compression inside the IR or printers, encryption, registry name tables. (The CLI carries the Minecraft zlib envelope outside the schema; see `compress.rs`.)
 - Hand-written per-language varint, string, or NBT implementations. Those encodings lower from their schema bodies. The five compiler primitives are the only wire builtins: `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`.
 - Editing generated output by hand. A later run with the same schema is byte-identical.
 
@@ -34,6 +34,10 @@ In scope:
 ```
 
 `analyze` does not change. Backends never see the AST. A backend is wrong when its bytes disagree with the IR interpreter. The IR interpreter is wrong when it disagrees with `interp` on the same logical value.
+
+For tooling, `ir::stages` (and `bml stages`) runs the same passes and returns each phase as
+data: syntax declarations, the semantic symbol tables and checked routes, the lowered IR, and
+the typed program. It is a view over the pipeline, not a fourth backend or an extra pass.
 
 ## 4. IR
 

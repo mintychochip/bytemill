@@ -25,7 +25,7 @@ pub fn lower(resolved: &ResolvedSchema) -> BpsResult<IrSchema> {
         decode: OrderedMap::new(),
         encode: OrderedMap::new(),
         routes: Vec::new(),
-        frames: OrderedMap::new(),
+        frames: Vec::new(),
     };
     install_builtins(&mut ir);
     for enc in resolved.encodings.values() {
@@ -1020,13 +1020,14 @@ fn lower_frames(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
             return Err(emit(format!("protocol {}: no frame", proto.name)));
         }
         for frame in &proto.frames {
-            install_record(
-                &format!("frame_{}", frame.name),
-                &[],
-                &frame.items,
-                resolved,
-                ir,
-            )?;
+            let type_id = TypeId(format!("frame_{}", frame.name));
+            install_record(&type_id.0, &[], &frame.items, resolved, ir)?;
+            ir.frames.push(super::schema::Frame {
+                name: frame.name.clone(),
+                type_id: type_id.clone(),
+                decode: type_id.0.clone(),
+                encode: type_id.0,
+            });
         }
     }
     for (route, packet) in &resolved.routes {

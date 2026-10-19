@@ -6,6 +6,7 @@
 //! `import-protodef` or `wire-check`; those are Rust-only.
 
 use crate::analyze::analyze;
+use crate::compress::CompressionSpec;
 use crate::emit_json::schema_to_json;
 use crate::emit_rstom::emit_rstom;
 use crate::emit_rust::emit_rust;
@@ -97,6 +98,7 @@ struct Args {
     eligible: bool,
     json_value: Option<String>,
     std: Option<String>,
+    compression: Option<String>,
 }
 
 /// Pull a flag's value out of `argv`, leaving the positionals.
@@ -298,18 +300,27 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
     let mut shapes_cmd: Option<String> = None;
 
     match cmd.as_str() {
-        "check" | "dump-json" | "routes" => {
+        "check" | "dump-json" | "routes" | "stages" => {
             a.schemas = argv;
+        }
+        "targets" => {
+            if let Some(extra) = argv.first() {
+                return Err(format!("targets: unrecognized argument {extra}"));
+            }
         }
         "decode" => {
             a.packet = take_flag(&mut argv, &["--packet"])?;
             a.state = take_flag(&mut argv, &["--state"])?;
             a.direction = take_flag(&mut argv, &["--direction"])?;
+            a.compression = take_flag(&mut argv, &["--compression"])?;
             a.hex = take_switch(&mut argv, "--hex");
             a.schemas = argv;
         }
         "encode" => {
             a.packet = take_flag(&mut argv, &["--packet"])?;
+            a.state = take_flag(&mut argv, &["--state"])?;
+            a.direction = take_flag(&mut argv, &["--direction"])?;
+            a.compression = take_flag(&mut argv, &["--compression"])?;
             if a.packet.is_none() {
                 return Err("encode: the following arguments are required: --packet".to_string());
             }
@@ -447,10 +458,38 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
             }
             Ok(0)
         }
+        "stages" => {
+            let schema = load_schema(&a.schemas.iter().map(PathBuf::from).collect::<Vec<_>>())?;
+            let report = crate::ir::stages(&schema)?;
+            println!("{}", dumps_sorted(&crate::ir::stages_json(&report)));
+            Ok(0)
+        }
+        "targets" => {
+            println!("{}", dumps_sorted(&crate::compat::targets_json()));
+            Ok(0)
+        }
         "decode" => {
             let resolved = load_and_analyze(&a.schemas)?;
             let raw = read_stdin()?;
-            let data = hex_bytes(&raw)?;
+            let mut data = hex_bytes(&raw)?;
+            if let Some(spec) = &a.compression {
+                if a.packet.is_some() {
+                    return Err(crate::errors::decode(
+                        "--compression applies to frames; use --state and --direction, not --packet",
+                    ));
+                }
+                CompressionSpec::parse(spec).map_err(crate::errors::decode)?;
+                let (state, direction) = match (&a.state, &a.direction) {
+                    (Some(state), Some(direction)) => (state, direction),
+                    _ => {
+                        return Err(crate::errors::decode(
+                            "--compression needs --state and --direction to decode a frame",
+                        ));
+                    }
+                };
+                crate::compress::ensure_minecraft_frame(&resolved, state, direction)?;
+                data = crate::compress::unwrap_minecraft_frame(&data)?;
+            }
             let out = if let Some(packet) = &a.packet {
                 decode_packet(&resolved, packet, &data, false)?
             } else if let (Some(state), Some(direction)) = (&a.state, &a.direction) {
@@ -477,7 +516,40 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                     "encode needs a JSON object",
                 ));
             };
-            let out = encode_packet(&resolved, a.packet.as_deref().unwrap_or(""), &m)?;
+            let out = if let Some(spec) = &a.compression {
+                let spec = CompressionSpec::parse(spec).map_err(crate::errors::encode)?;
+                let (state, direction) = match (&a.state, &a.direction) {
+                    (Some(state), Some(direction)) => (state, direction),
+                    _ => {
+                        return Err(crate::errors::encode(
+                            "--compression needs --state and --direction to encode a frame",
+                        ));
+                    }
+                };
+                crate::compress::ensure_minecraft_frame(&resolved, state, direction)?;
+                let packet = a.packet.as_deref().unwrap_or("");
+                let ir = crate::ir::lower(&resolved)?;
+                let prefixed = format!("packet:{packet}");
+                let key = ir
+                    .routes
+                    .iter()
+                    .find(|route| {
+                        route.state == *state
+                            && route.direction == *direction
+                            && (route.packet.0 == packet || route.packet.0 == prefixed)
+                    })
+                    .map(|route| route.packet.0.clone())
+                    .ok_or_else(|| {
+                        BpsError::new(
+                            crate::errors::ErrorKind::Encode,
+                            format!("no route for {packet} in {state}.{direction}"),
+                        )
+                    })?;
+                let frame = crate::ir::exec_encode_frame(&ir, state, direction, &key, &m)?;
+                crate::compress::wrap_minecraft_frame(&frame, spec)?
+            } else {
+                encode_packet(&resolved, a.packet.as_deref().unwrap_or(""), &m)?
+            };
             println!("{}", hex_lower(&out));
             Ok(0)
         }
