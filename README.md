@@ -74,91 +74,33 @@ import "minecraft_core.bps"    // string, uuid, position, nbt, slot
 
 ### Install `bpsc`
 
-Tagged releases ship prebuilt binaries, so using Wirecraft does not require a Rust
-toolchain.
-
-#### One-line install
+Every tagged release ships prebuilt binaries; the installer detects the platform, downloads
+the matching archive, verifies `SHA256SUMS`, and installs to `~/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/install.sh | bash
 ```
 
-The script detects Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), downloads the
-matching archive and `SHA256SUMS`, verifies the checksum, and installs `bpsc` to
-`~/.local/bin` (override with `--dir`, or set `BPS_INSTALL_DIR`). Re-run it to upgrade, or
-use `update.sh`, which compares the installed `bpsc.version` with the latest release and
-does nothing when they match:
+Upgrade later with `update.sh` (a no-op when already current):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/update.sh | bash
 ```
 
-```bash
-# pin a release or choose another directory
-curl -fsSL .../install.sh | bash -s -- --version v1.2.3 --dir /usr/local/bin
-```
+Use `--dir <path>` to install elsewhere or `--version vX.Y.Z` to pin a release, e.g.
+`... | bash -s -- --version v1.2.3 --dir /usr/local/bin`. The scripts need `curl` (or
+`wget`), `tar`, and `sha256sum`/`shasum`.
 
-On Linux x86_64 the installer prefers the static musl build; pass `--libc gnu` for the
-glibc-linked one. The scripts need `curl` (or `wget`), `tar`, and `sha256sum`/`shasum`.
-Windows uses the zip below.
-
-#### Manual download
-
-Each release attaches stable-named archives plus `SHA256SUMS`:
-
-| Platform | Asset |
-|---|---|
-| Linux x86_64 (glibc) | `bpsc-x86_64-unknown-linux-gnu.tar.gz` |
-| Linux x86_64 (static) | `bpsc-x86_64-unknown-linux-musl.tar.gz` |
-| Linux aarch64 (glibc) | `bpsc-aarch64-unknown-linux-gnu.tar.gz` |
-| macOS aarch64 | `bpsc-aarch64-apple-darwin.tar.gz` |
-| macOS x86_64 | `bpsc-x86_64-apple-darwin.tar.gz` |
-| Windows x86_64 | `bpsc-x86_64-pc-windows-msvc.zip` |
-
-Linux (swap the asset name for another platform):
-
-```bash
-base=https://github.com/mintychochip/wirecraft/releases/latest/download
-curl -fsSLO "$base/bpsc-x86_64-unknown-linux-gnu.tar.gz"
-curl -fsSLO "$base/SHA256SUMS"
-grep bpsc-x86_64-unknown-linux-gnu.tar.gz SHA256SUMS | sha256sum -c -
-tar xzf bpsc-x86_64-unknown-linux-gnu.tar.gz
-sudo install -m 0755 bpsc /usr/local/bin/bpsc
-```
-
-macOS uses `shasum` instead of `sha256sum`:
-
-```bash
-base=https://github.com/mintychochip/wirecraft/releases/latest/download
-curl -fsSLO "$base/bpsc-aarch64-apple-darwin.tar.gz"
-curl -fsSLO "$base/SHA256SUMS"
-grep bpsc-aarch64-apple-darwin.tar.gz SHA256SUMS | shasum -a 256 -c -
-tar xzf bpsc-aarch64-apple-darwin.tar.gz
-sudo install -m 0755 bpsc /usr/local/bin/bpsc
-```
-
-Windows (PowerShell):
-
-```powershell
-$base = "https://github.com/mintychochip/wirecraft/releases/latest/download"
-Invoke-WebRequest "$base/bpsc-x86_64-pc-windows-msvc.zip" -OutFile bpsc.zip
-Invoke-WebRequest "$base/SHA256SUMS" -OutFile SHA256SUMS
-(Get-FileHash bpsc.zip -Algorithm SHA256).Hash  # must match the zip's line in SHA256SUMS
-Expand-Archive bpsc.zip -DestinationPath "$env:USERPROFILE\bin" -Force
-# add %USERPROFILE%\bin to PATH, then in a new terminal:
-bpsc check schemas\std\varint.bps
-```
-
-GitHub CLI users can fetch the same assets with
-`gh release download --repo mintychochip/wirecraft --pattern 'bpsc-*'`.
+Windows is not covered by the shell scripts: download `bpsc-x86_64-pc-windows-msvc.zip`
+from Releases. That page also has the archives and `SHA256SUMS` for manual installs, and
+`gh release download --repo mintychochip/wirecraft` fetches them too.
 
 ### Build from source
 
-Requires Rust 1.85 or newer (the crate uses edition 2024):
+Requires Rust 1.85 or newer (edition 2024):
 
 ```bash
-cargo build --release
-# binary produced at target/release/bpsc
+cargo build --release   # target/release/bpsc
 ```
 
 ### Check and Inspect Schemas
@@ -259,10 +201,10 @@ scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings
 
 `scripts/bps_cargo.sh` wraps `cargo` under a systemd user scope (`MemoryMax=8G`, 4 jobs, 4 test threads) to cap memory usage during large protocol oracle suites.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bpsc` for Linux
-(x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), and Windows (x86_64), smoke-tests each
-binary, writes `SHA256SUMS`, and attaches the archives to the GitHub Release. Manually
-dispatching the workflow builds the same artifacts without creating a release.
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bpsc` for every
+supported platform, smoke-tests each binary, writes `SHA256SUMS`, and attaches the archives
+to the GitHub Release. Manually dispatching the workflow builds the same artifacts without
+creating a release.
 
 ---
 
