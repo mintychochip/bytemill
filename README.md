@@ -239,6 +239,7 @@ dispatching the workflow builds the same artifacts without creating a release.
 
 ## Documentation
 
+- `PROJECT.md` — project status and the remaining goal queue
 - `docs/DSL_STRUCTURE.md` — DSL syntax, operators, and framing rules
 - `docs/AUTHORING_GUIDE.md` — Schema authoring and shared standard types
 - `docs/TRANSCRIPTION_CHEATSHEET.md` — Wiki packet definitions to BPS transcription guide
