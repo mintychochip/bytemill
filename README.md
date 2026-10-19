@@ -75,7 +75,35 @@ import "minecraft_core.bps"    // string, uuid, position, nbt, slot
 ### Install `bpsc`
 
 Tagged releases ship prebuilt binaries, so using Wirecraft does not require a Rust
-toolchain. Each release attaches stable-named archives plus `SHA256SUMS`:
+toolchain.
+
+#### One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/install.sh | bash
+```
+
+The script detects Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), downloads the
+matching archive and `SHA256SUMS`, verifies the checksum, and installs `bpsc` to
+`~/.local/bin` (override with `--dir`, or set `BPS_INSTALL_DIR`). Re-run it to upgrade, or
+use `update.sh`, which compares the installed `bpsc.version` with the latest release and
+does nothing when they match:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/update.sh | bash
+```
+
+```bash
+# pin a release or choose another directory
+curl -fsSL .../install.sh | bash -s -- --version v1.2.3 --dir /usr/local/bin
+```
+
+The scripts need `curl` (or `wget`), `tar`, and `sha256sum`/`shasum`. Windows uses the zip
+below.
+
+#### Manual download
+
+Each release attaches stable-named archives plus `SHA256SUMS`:
 
 | Platform | Asset |
 |---|---|
