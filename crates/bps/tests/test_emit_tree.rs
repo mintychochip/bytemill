@@ -208,7 +208,7 @@ fn golden_keep_alive() {
     let shape = keep_alive_shape();
     let body = packet_body(&unit, &resolved).unwrap();
     let got = rustfmt(&tree_packet(&unit, &shape, &body).unwrap());
-    let golden = common::repo_root().join("tests/fixtures/rstom_tree/client_keep_alive_packet.rs");
+    let golden = common::repo_root().join("crates/bps/tests/fixtures/rstom_tree/client_keep_alive_packet.rs");
     let want = rustfmt(&std::fs::read_to_string(&golden).unwrap());
     assert_eq!(got, want);
 }

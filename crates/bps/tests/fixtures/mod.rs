@@ -87,7 +87,7 @@ pub fn keep_alive_table_json() -> String {
 
 fn struct_docs_from_golden() -> Vec<String> {
     let path = crate::common::repo_root()
-        .join("tests/fixtures/rstom_tree/client_keep_alive_packet.rs");
+        .join("crates/bps/tests/fixtures/rstom_tree/client_keep_alive_packet.rs");
     let text = std::fs::read_to_string(&path).unwrap();
     let mut docs = Vec::new();
     for line in text.lines() {

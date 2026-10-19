@@ -1,0 +1,4 @@
+# GitHub Linguist overrides
+scripts/** linguist-vendored
+tools/** linguist-vendored
+data/** linguist-vendored
