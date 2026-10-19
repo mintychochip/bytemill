@@ -2,7 +2,7 @@
 
 A schema language (BPS) and compiler for binary wire formats that Protobuf cannot express: variable-length integers, bit-packed fields, tagged unions, conditional layouts, and stateful packet routing.
 
-Wirecraft compiles schemas to idiomatic, zero-allocation decoders and encoders across seven languages: **Rust, Go, Python, C, C++, TypeScript, and Zig**.
+Wirecraft compiles schemas to idiomatic, zero-allocation decoders and encoders across nine languages: **Rust, Go, Python, Java, C#, C, C++, TypeScript, and Zig**.
 
 ---
 
@@ -66,7 +66,7 @@ import "minecraft_core.bps"    // string, uuid, position, nbt, slot
 
 - **Game Network Protocols & Emulators**: Multiplayer protocols (e.g., Minecraft, Hytale) rely on variable-length integers (`varint`), bitfields, dynamic length prefixes, compression framing, and stateful direction tables that Protobuf cannot express. BPS specifies the entire packet hierarchy in one schema and emits typed codecs for clients, proxies, and servers.
 - **Embedded, IoT, & Network Telemetry**: Binary telemetry streams, CAN bus frames, and network appliances use bit-packed fields, non-standard integer widths (12-bit signed coordinates, 3-byte ints), and explicit endianness. Wirecraft maps these directly to native C, C++, Rust, or Zig structs without heap allocation or parsing overhead.
-- **High-Throughput Polyglot Services**: When gRPC / Protobuf serialization overhead or dynamic reflection is a bottleneck, Wirecraft produces zero-copy, zero-reflection decoders in seven languages (Go, Rust, C++, C, Python, TypeScript, Zig) from a single protocol definition, keeping cross-language services byte-compatible.
+- **High-Throughput Polyglot Services**: When gRPC / Protobuf serialization overhead or dynamic reflection is a bottleneck, Wirecraft produces zero-copy, zero-reflection decoders in nine languages (Go, Rust, C++, C, Python, Java, C#, TypeScript, Zig) from a single protocol definition, keeping cross-language services byte-compatible.
 - **Protocol Reverse Engineering & Auditing**: Capture packet streams, formalize the wire format in a readable `.bps` specification, and immediately generate decoders and validation test suites across multiple languages, eliminating transcription bugs between reverse-engineered specs and working code.
 ---
 
@@ -114,19 +114,27 @@ bpsc encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300,
 Emit typed, deterministic decoders and encoders for any target:
 
 ```bash
-bpsc emit <target> <schema.bps> --out <out_dir>
+bpsc emit <target> <schema.bps> --out <out_dir> [--std <standard>]
+# or specify standard directly on the target:
+bpsc emit cpp:98 schemas/std/varint.bps --out ./bps_cpp
+bpsc emit go:1.18 schemas/std/varint.bps --out ./bps_go
+bpsc emit python:3.8 schemas/std/varint.bps --out ./bps_py
+bpsc emit c:89 schemas/std/varint.bps --out ./bps_c
+bpsc emit java:17 schemas/std/varint.bps --out ./bps_java
+bpsc emit csharp:10 schemas/std/varint.bps --out ./bps_cs
 ```
 
-| Target | Language | Output Layout | Idiomatic Types | Formatter & Lint Gate |
-|---|---|---|---|---|
-| `rust-typed` | Rust (2024) | Standalone crate (`src/packets/`) | Zero-clone borrow encode, `Option<T>`, `Result<T, Error>` | `cargo test`, `rustfmt`, `clippy -D warnings` |
-| `go` | Go (1.23) | `bpsgen` package (`*.go`) | Structs, sealed interfaces for sums, preallocated slices | `go test`, `gofmt -l`, `go vet` |
-| `python` | Python (3.11+) | `bpsgen/` package | `@dataclass(slots=True)`, `IntEnum`, union aliases, `__all__` | `compileall`, `ruff format/check`, `mypy --strict` |
-| `c` | C11 | `bpsgen.h` + per-category `.c` | Structs + anonymous unions, `bps_status`, explicit allocators | `cc -Wall -Werror`, `clang-format` |
-| `cpp` | C++20 | `bpsgen.hpp` + `.cpp` | `std::variant`, `std::optional`, `std::span`, `[[nodiscard]]` | `g++ -std=c++20 -Werror`, `clang-format` |
-| `typescript` | TypeScript | ES modules (`.ts`) | `readonly` interfaces, discriminated unions, `Uint8Array` | `tsc --strict --erasableSyntaxOnly`, `prettier` |
-| `zig` | Zig (0.14) | `bpsgen.zig` package | `union(enum)`, `?T`, `errdefer` unwinding, `@"keyword"` | `zig fmt --check`, `zig test` |
-
+| Target | Default Standard | Supported Versions | Output Layout | Idiomatic Types | Formatter & Lint Gate |
+|---|---|---|---|---|---|
+| `rust-typed` | 2024 | 2015, 2018, 2021, 2024 | Standalone crate (`src/packets/`) | Zero-clone borrow encode, `Option<T>`, `Result<T, Error>` | `cargo test`, `rustfmt`, `clippy -D warnings` |
+| `go` | 1.23 | 1.16 → 1.24 | `bpsgen` package (`*.go`) | Structs, sealed interfaces for sums, preallocated slices | `go test`, `gofmt -l`, `go vet` |
+| `python` | 3.11 | 3.8 → 3.14 | `bpsgen/` package | `@dataclass(slots=True)` (3.10+), `IntEnum`, union aliases | `compileall`, `ruff format/check`, `mypy --strict` |
+| `java` | 21 | 8, 11, 17, 21 | `bpsgen/` package | Records + sealed interfaces (17+), classes (8/11), `Optional` | `java`/`javac` compile + roundtrip |
+| `csharp` | 12 | 8, 9, 10, 11, 12 | `BpsGen/` package | `record struct` (10+), `record`/classes for recursive types, `List<T>` | `dotnet build` + roundtrip |
+| `c` | C11 | C89, C90, C99, C11, C17, C23 | `bpsgen.h` + per-category `.c` | Structs + unions, `bps_status`, explicit allocators | `cc -Wall -Werror`, `clang-format` |
+| `cpp` | C++20 | C++98, 03, 11, 14, 17, 20, 23, 26 | `bpsgen.hpp` + `.cpp` | `std::variant`, `std::optional`, `std::span` (polyfills on <17) | `g++ -std=c++20 -Werror`, `clang-format` |
+| `typescript` | ES2022 | ES2015, ES2018, ES2020, ES2022, ESNext | ES modules (`.ts`) | `readonly` interfaces, discriminated unions, `Uint8Array` | `tsc --strict --erasableSyntaxOnly`, `prettier` |
+| `zig` | 0.14 | 0.11, 0.12, 0.13, 0.14 | `bpsgen.zig` package | `union(enum)`, `?T`, `errdefer` unwinding, `@"keyword"` | `zig fmt --check`, `zig test` |
 Every printer lowers schemas to a shared typed intermediate representation (`ir::typed::Program`) and outputs native types without dynamic reflection or string-keyed dictionaries. Generated codecs are verified byte-for-byte against the BPS reference interpreter (`ir::exec`).
 
 ---

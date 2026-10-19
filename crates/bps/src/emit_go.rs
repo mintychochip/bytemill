@@ -6,9 +6,9 @@
 //!
 //! # Files
 //!
-//! `go.mod` (`module bpsgen`, `go 1.23`), `runtime.go` (reader, writer, errors,
-//! helpers), and one `{category}.go` per route category (types and codecs, in
-//! program order). A packet routed only as `play`/`clientbound` is
+//! `go.mod` (`module bpsgen` plus the requested `go` directive), `runtime.go`
+//! (reader, writer, errors, helpers), and one `{category}.go` per route
+//! category (types and codecs, in program order). A packet routed only as
 //! `play_clientbound.go`; a packet routed in several state/direction pairs is
 //! `shared.go`; encodings, enums, frames, and unrouted packets are
 //! `encoding.go`. Package `bpsgen`.
@@ -38,7 +38,8 @@
 //! never traps); signed division and modulo use floor helpers when the
 //! dividend may be negative; a `Cond` becomes a temporary declared in place
 //! and set by an `if`. Locals are declared where first stored (`x, err :=`)
-//! unless used outside that block; loops are `for range n` and
+//! unless used outside that block; counted loops are `for range n` on Go >= 1.22
+//! and `for i := 0; i < int(n); i++` before it; list loops are
 //! `for _, item := range list`.
 //!
 //! Output is deterministic and gofmt-canonical (`gofmt -l` clean, `go vet`
@@ -57,18 +58,141 @@ use crate::ir::typed::{
 
 /// `emit go`: write `go.mod`, `runtime.go`, and one file per [`Program::output_stem`].
 pub fn emit_go(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+    emit_go_with_version(resolved, out_dir, crate::GoVersion::default())
+}
+
+pub fn emit_go_with_version(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    ver: crate::GoVersion,
+) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
-    let mut printer = Printer::new(&program)?;
-    let files = printer.packets_files()?;
-    let runtime = printer.runtime_go();
+    let mut printer = Printer::new(&program, ver)?;
+    let mut files = printer.packets_files()?;
+    let mut runtime = printer.runtime_go();
+    if !ver.supports_any() {
+        runtime = downgrade_any(&runtime);
+        for body in files.values_mut() {
+            *body = downgrade_any(body);
+        }
+    }
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
-    fs::write(out_dir.join("go.mod"), "module bpsgen\n\ngo 1.23\n")
-        .map_err(|e| emit(e.to_string()))?;
+    fs::write(
+        out_dir.join("go.mod"),
+        format!("module bpsgen\n\ngo {}\n", ver.mod_str()),
+    )
+    .map_err(|e| emit(e.to_string()))?;
     fs::write(out_dir.join("runtime.go"), runtime).map_err(|e| emit(e.to_string()))?;
     for (stem, body) in files {
         fs::write(out_dir.join(format!("{stem}.go")), body).map_err(|e| emit(e.to_string()))?;
     }
     Ok(())
+}
+
+/// Rewrite the `any` predeclared identifier as `interface{}` for Go < 1.18.
+/// Comments, string literals, raw strings, and rune literals pass through
+/// untouched; only code tokens spelling exactly `any` are rewritten.
+fn downgrade_any(src: &str) -> String {
+    #[derive(PartialEq)]
+    enum State {
+        Code,
+        LineComment,
+        BlockComment,
+        Interpreted,
+        Raw,
+        Rune,
+    }
+    fn is_ident(byte: u8) -> bool {
+        byte.is_ascii_alphanumeric() || byte == b'_'
+    }
+    let bytes = src.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(src.len());
+    let mut i = 0;
+    let mut state = State::Code;
+    while i < bytes.len() {
+        let c = bytes[i];
+        match state {
+            State::Code => {
+                if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    out.extend_from_slice(b"//");
+                    i += 2;
+                    state = State::LineComment;
+                } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    out.extend_from_slice(b"/*");
+                    i += 2;
+                    state = State::BlockComment;
+                } else if c == b'"' {
+                    out.push(c);
+                    i += 1;
+                    state = State::Interpreted;
+                } else if c == b'`' {
+                    out.push(c);
+                    i += 1;
+                    state = State::Raw;
+                } else if c == b'\'' {
+                    out.push(c);
+                    i += 1;
+                    state = State::Rune;
+                } else if c == b'a'
+                    && bytes.get(i + 1) == Some(&b'n')
+                    && bytes.get(i + 2) == Some(&b'y')
+                    && (i == 0 || !is_ident(bytes[i - 1]))
+                    && (i + 3 >= bytes.len() || !is_ident(bytes[i + 3]))
+                {
+                    out.extend_from_slice(b"interface{}");
+                    i += 3;
+                } else {
+                    out.push(c);
+                    i += 1;
+                }
+            }
+            State::LineComment => {
+                out.push(c);
+                i += 1;
+                if c == b'\n' {
+                    state = State::Code;
+                }
+            }
+            State::BlockComment => {
+                out.push(c);
+                i += 1;
+                if c == b'*' && bytes.get(i) == Some(&b'/') {
+                    out.push(b'/');
+                    i += 1;
+                    state = State::Code;
+                }
+            }
+            State::Interpreted => {
+                out.push(c);
+                i += 1;
+                if c == b'\\' && i < bytes.len() {
+                    out.push(bytes[i]);
+                    i += 1;
+                } else if c == b'"' {
+                    state = State::Code;
+                }
+            }
+            State::Raw => {
+                out.push(c);
+                i += 1;
+                if c == b'`' {
+                    state = State::Code;
+                }
+            }
+            State::Rune => {
+                out.push(c);
+                i += 1;
+                if c == b'\\' && i < bytes.len() {
+                    out.push(bytes[i]);
+                    i += 1;
+                } else if c == b'\'' {
+                    state = State::Code;
+                }
+            }
+        }
+    }
+    // Byte-preserving: the input was valid UTF-8 and every edit is ASCII.
+    String::from_utf8(out).expect("emit go: downgrade_any broke UTF-8")
 }
 
 /// The emitted decode function for `codec`, e.g. `DecodeHandshake`.
@@ -392,13 +516,15 @@ impl<'a> Data<'a> {
 struct Printer<'a> {
     data: Data<'a>,
     flags: Flags,
+    ver: crate::GoVersion,
 }
 
 impl<'a> Printer<'a> {
-    fn new(prog: &'a Program) -> BpsResult<Printer<'a>> {
+    fn new(prog: &'a Program, ver: crate::GoVersion) -> BpsResult<Printer<'a>> {
         Ok(Printer {
             data: Data::new(prog)?,
             flags: Flags::default(),
+            ver,
         })
     }
 }
@@ -1057,6 +1183,7 @@ struct BodyGen<'a> {
     /// `var` to the block, so names declared inside are gone after it.
     scopes: Vec<(bool, BTreeSet<usize>, BTreeSet<String>)>,
     flags: Flags,
+    ver: crate::GoVersion,
     out: String,
     indent: usize,
 }
@@ -1068,6 +1195,7 @@ impl<'a> BodyGen<'a> {
         codec_snake: &str,
         is_decode: bool,
         ret_zero: &str,
+        ver: crate::GoVersion,
     ) -> BodyGen<'a> {
         let mut taken = BTreeSet::new();
         let local_go = body
@@ -1094,6 +1222,7 @@ impl<'a> BodyGen<'a> {
             declared: BTreeSet::new(),
             err_declared: false,
             flags: Flags::default(),
+            ver,
             out: String::new(),
             indent: 1,
         };
@@ -1291,7 +1420,7 @@ impl Printer<'_> {
 
         // Decode.
         let (dsig, dout) = {
-            let mut bg = BodyGen::new(&self.data, &decode_body, &snake, true, &ret_zero);
+            let mut bg = BodyGen::new(&self.data, &decode_body, &snake, true, &ret_zero, self.ver);
             let mut sig = format!("// Decode{go_name} decodes {value_doc}.");
             sig.push_str(&format!("\nfunc {decode_name}({} *Reader", bg.cursor));
             for (param, local) in params.iter().zip(decode_body.params.iter()) {
@@ -1331,7 +1460,7 @@ impl Printer<'_> {
         };
         // Encode.
         let (esig, eout) = {
-            let mut bg = BodyGen::new(&self.data, &encode_body, &snake, false, "");
+            let mut bg = BodyGen::new(&self.data, &encode_body, &snake, false, "", self.ver);
             let Some(value_id) = encode_body.value else {
                 return Err(emit(format!("emit go: {snake} has no encode value")));
             };
@@ -2116,8 +2245,17 @@ impl<'a> BodyGen<'a> {
                             self.close();
                         }
                         let list_assign = self.store_op(*list);
-                        self.line(&format!("{list_go} {list_assign} make({list_go_ty}, 0, int({total}))"));
-                        self.open(&format!("for range {total}"));
+                        self.line(&format!(
+                            "{list_go} {list_assign} make({list_go_ty}, 0, int({total}))"
+                        ));
+                        if self.ver.supports_range_int() {
+                            self.open(&format!("for range {total}"));
+                        } else {
+                            // Ranging over an integer needs Go 1.22; older
+                            // toolchains reject `for range total`.
+                            let iv = self.pick("i");
+                            self.open(&format!("for {iv} := 0; {iv} < int({total}); {iv}++"));
+                        }
                     }
                     RepeatMode::Until(term) => {
                         // A byte literal compares directly; anything else is

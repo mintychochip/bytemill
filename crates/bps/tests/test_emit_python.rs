@@ -212,3 +212,146 @@ fn python_26_3_packets_roundtrip() {
 fn python_hytale_packets_roundtrip() {
     packets_roundtrip("schemas/hytale/2026_02_17.bps", "hytale", 1);
 }
+
+/// Version-gated emission: one schema exercising dataclasses, an open enum,
+/// a sum union, `match` tag dispatch, and an optional field.
+fn version_schema() -> bps::ResolvedSchema {
+    let source = std::fs::read_to_string(repo("schemas/std/integers.bps")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "enum intent : varint { status = 1 login = 2 }\npacket probe { kind: u8 v: match kind { 0 => u8 1 | 2 => { a: u8, b: u8 } _ => boolean } mode: u8 if mode == 0 { extra: u8 } }\npacket routed { i: intent }\n";
+    bps::analyze(&bps::parse(&source).unwrap()).unwrap()
+}
+
+fn py_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.join("bpsgen")];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "py") {
+                out.push(path);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn all_py(dir: &std::path::Path) -> String {
+    let files = py_files(dir);
+    assert!(!files.is_empty(), "no .py emitted in {}", dir.display());
+    let mut all = String::new();
+    for f in &files {
+        all.push_str(&std::fs::read_to_string(f).unwrap());
+        all.push('\n');
+    }
+    all
+}
+
+/// The emitted `if`/`elif`/`else` fallback must decode exactly what the
+/// `match` version decodes: every tag arm, the default arm, and the
+/// optional field both absent and present.
+const VERSION_SMOKE: &str = r#"import bpsgen
+
+
+def roundtrip(raw):
+    value = bpsgen.Probe.decode(bpsgen.Reader(bytes(raw)))
+    w = bpsgen.Writer()
+    value.encode(w)
+    assert w.get_bytes() == bytes(raw), (w.get_bytes(), bytes(raw))
+    return value
+
+
+# case 0: scalar payload, no optional field
+v = roundtrip([0, 5, 1])
+assert (v.kind, v.mode) == (0, 1), vars(v)
+assert v.extra is None, vars(v)
+# case 1 | 2: record payload
+v = roundtrip([1, 9, 8, 1])
+assert (v.v.a, v.v.b) == (9, 8), vars(v)
+# default arm: boolean payload round-trips
+roundtrip([7, 1, 1])
+# optional field present
+v = roundtrip([0, 5, 0, 7])
+assert v.extra == 7, vars(v)
+# the open enum still fabricates unknown members
+assert bpsgen.Intent(7).name == "UNKNOWN_7"
+print("version smoke ok")
+"#;
+
+#[test]
+fn python_version_py38() {
+    let resolved = version_schema();
+    let dir = scratch("py38");
+    bps::emit_python::emit_python_with_version(&resolved, &dir, bps::PythonVersion::Py38).unwrap();
+    py_compile(&dir);
+    let all = all_py(&dir);
+    // No 3.10+ syntax: every `match` became `if`/`elif`/`else`.
+    for line in all.lines() {
+        let trimmed = line.trim_start();
+        assert!(
+            !trimmed.starts_with("match "),
+            "py38 line uses match: {line}"
+        );
+        assert!(!trimmed.starts_with("case "), "py38 line uses case: {line}");
+    }
+    assert!(!all.contains("| None"), "py38 uses `| None`");
+    assert!(!all.contains("slots=True"), "py38 uses slots");
+    assert!(
+        !all.contains("from typing import Self"),
+        "py38 imports Self"
+    );
+    assert!(all.contains("@dataclasses.dataclass\n"), "py38 dataclass");
+    assert!(all.contains("Optional["), "py38 Optional");
+    assert!(all.contains("Union["), "py38 Union");
+    assert!(all.contains("elif "), "py38 elif chain");
+    assert!(all.contains("isinstance("), "py38 isinstance");
+    std::fs::write(dir.join("check.py"), VERSION_SMOKE).unwrap();
+    run_check(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn python_version_py311() {
+    let resolved = version_schema();
+    let dir = scratch("py311");
+    bps::emit_python::emit_python_with_version(&resolved, &dir, bps::PythonVersion::Py311).unwrap();
+    py_compile(&dir);
+    let all = all_py(&dir);
+    assert!(
+        all.lines().any(|l| l.trim_start().starts_with("match ")),
+        "py311 match"
+    );
+    assert!(
+        all.lines().any(|l| l.trim_start().starts_with("case ")),
+        "py311 case"
+    );
+    assert!(
+        all.contains("slots=True, kw_only=True"),
+        "py311 dataclass args"
+    );
+    assert!(all.contains("| None"), "py311 optional pipe");
+    assert!(all.contains(" | "), "py311 union pipe");
+    assert!(all.contains("from typing import Self"), "py311 Self import");
+    std::fs::write(dir.join("check.py"), VERSION_SMOKE).unwrap();
+    run_check(&dir);
+    // The default emitter targets Python 3.11: byte-for-byte identical.
+    let default_dir = scratch("py311-default");
+    bps::emit_python::emit_python(&resolved, &default_dir).unwrap();
+    let emitted = py_files(&dir);
+    let baseline = py_files(&default_dir);
+    assert_eq!(emitted.len(), baseline.len(), "file count drift");
+    for (new, old) in emitted.iter().zip(baseline.iter()) {
+        assert_eq!(new.file_name(), old.file_name(), "file name drift");
+        assert_eq!(
+            std::fs::read(new).unwrap(),
+            std::fs::read(old).unwrap(),
+            "drift in {}",
+            new.display()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&default_dir);
+}

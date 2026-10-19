@@ -432,3 +432,178 @@ int main(void) {
     assert!(out.contains("clash ok"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn emit_with(resolved: &bps::ResolvedSchema, dir: &std::path::Path, std: bps::CStandard) {
+    bps::emit_c::emit_c_with_standard(resolved, dir, std).unwrap();
+}
+
+/// Compile `check.c` against the emitted sources with an explicit `-std`
+/// flag. C89 omits `-Wpedantic` (the exact-width typedefs spell `long
+/// long`); newer standards add it.
+fn compile_and_run_std(dir: &std::path::Path, flag: &str, extra: &[&str]) -> String {
+    let mut sources: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("c")
+                && p.file_name().and_then(|n| n.to_str()) != Some("check.c")
+        })
+        .collect();
+    sources.sort();
+    let mut cmd = std::process::Command::new("cc");
+    cmd.arg(flag).args(["-Wall", "-Wextra", "-Werror"]);
+    if flag != "-std=c89" {
+        cmd.arg("-Wpedantic");
+    }
+    cmd.args(extra)
+        .arg("-o")
+        .arg(dir.join("check"))
+        .arg(dir.join("check.c"));
+    cmd.args(&sources);
+    let compile = cmd.output().unwrap();
+    assert!(
+        compile.status.success(),
+        "cc {flag} failed\n{}\n{}",
+        String::from_utf8_lossy(&compile.stdout),
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let run = std::process::Command::new(dir.join("check"))
+        .output()
+        .unwrap();
+    assert!(
+        run.status.success(),
+        "c check ({flag}) failed\n{}\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    String::from_utf8_lossy(&run.stdout).into_owned()
+}
+
+/// Probe packets exercising records, counted and terminated lists, an
+/// owning (string) list, optionals, and sums: the constructs whose C89
+/// spelling differs (hoisted temporaries, the named `value` union member,
+/// `bool` presence flags).
+fn std_probe_schema() -> (bps::ResolvedSchema, Program) {
+    probe_program(
+        r#"
+packet probe_seq {
+    n: u8
+    items: u8[] count = n
+}
+packet probe_opt {
+    flag: boolean
+    extra: u8 if flag
+}
+packet probe_tag {
+    tag: u8
+    value: match tag { 1 => u8  _ => u16be }
+}
+packet probe_until {
+    entries: u8[] until 0
+}
+encoding label = {
+    code: u8
+}
+packet probe_labels {
+    n: u8
+    labels: label[] count = n
+}
+"#,
+    )
+}
+
+/// One decode -> encode -> compare block for a packet codec over `raw`.
+/// The harness is C89-clean: block-scope declarations precede statements,
+/// initializers are positional, and comments are `/* */`.
+fn packet_roundtrip_block(program: &Program, name: &str, raw: &[u8]) -> String {
+    let ci = program
+        .packet_codec(name)
+        .unwrap_or_else(|| panic!("no codec {name}"));
+    let Ty::Named(t) = &program.codecs[ci].value else {
+        panic!("packet {name} is a record")
+    };
+    let tn = bps::emit_c::type_name(program, *t);
+    let dec = bps::emit_c::decode_fn(program, ci);
+    let enc = bps::emit_c::encode_fn(program, ci);
+    let free = bps::emit_c::free_fn(program, *t);
+    let dcall = if bps::emit_c::decode_takes_alloc(program, ci) {
+        format!("{dec}(&r, &al, &v)")
+    } else {
+        format!("{dec}(&r, &v)")
+    };
+    let bytes = raw
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "    {{ static const uint8_t raw[] = {{{bytes}}};\n      bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}};\n      bps_writer w = {{NULL, 0, 0, NULL, NULL}};\n      {tn} v;\n      memset(&v, 0, sizeof v);\n      if ({dcall} != BPS_OK) {{ printf(\"decode {name}\\n\"); return 1; }}\n      if ({enc}(&w, &al, &v) != BPS_OK) {{ printf(\"encode {name}\\n\"); return 1; }}\n      if (w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{ printf(\"bytes {name}\\n\"); return 1; }}\n      {free}(&al, &v);\n      bps_free(&al, w.data); }}\n"
+    )
+}
+
+/// One decode -> encode -> compare block for the `varint` codec.
+fn varint_roundtrip_block(program: &Program, raw: &[u8], value: i64) -> String {
+    let ci = program.codec_by_ir("varint").expect("varint codec");
+    let dec = bps::emit_c::decode_fn(program, ci);
+    let enc = bps::emit_c::encode_fn(program, ci);
+    let vt = scalar_ty(&program.codecs[ci].value);
+    let bytes = raw
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "    {{ static const uint8_t raw[] = {{{bytes}}};\n      bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}};\n      bps_writer w = {{NULL, 0, 0, NULL, NULL}};\n      {vt} v = 0;\n      if ({dec}(&r, &v) != BPS_OK || v != {value}) {{ printf(\"decode varint\\n\"); return 1; }}\n      if ({enc}(&w, &al, {value}) != BPS_OK) {{ printf(\"encode varint\\n\"); return 1; }}\n      if (w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{ printf(\"bytes varint\\n\"); return 1; }}\n      bps_free(&al, w.data); }}\n"
+    )
+}
+
+/// Emit the probe schema with `std`, then decode -> encode -> compare every
+/// probe packet plus a varint value through the compiled check.
+fn std_roundtrip(std: bps::CStandard, flag: &str, tag: &str) {
+    let (resolved, program) = std_probe_schema();
+    let dir = emit_dir(tag);
+    emit_with(&resolved, &dir, std);
+    let mut body = String::from(
+        "#include \"bpsgen.h\"\n#include <stdio.h>\n#include <string.h>\nint main(void) {\n    bps_alloc al = {NULL, NULL, NULL};\n",
+    );
+    body.push_str(&varint_roundtrip_block(&program, &[0xac, 0x02], 300));
+    body.push_str(&packet_roundtrip_block(&program, "probe_seq", &[2, 7, 9]));
+    body.push_str(&packet_roundtrip_block(&program, "probe_opt", &[1, 5]));
+    body.push_str(&packet_roundtrip_block(&program, "probe_opt", &[0]));
+    body.push_str(&packet_roundtrip_block(&program, "probe_tag", &[1, 5]));
+    body.push_str(&packet_roundtrip_block(&program, "probe_tag", &[2, 0, 6]));
+    body.push_str(&packet_roundtrip_block(&program, "probe_until", &[5, 6, 0]));
+    body.push_str(&packet_roundtrip_block(
+        &program,
+        "probe_labels",
+        &[2, 0x41, 0x42],
+    ));
+    body.push_str("    printf(\"std ok\\n\");\n    return 0;\n}\n");
+    std::fs::write(dir.join("check.c"), body).unwrap();
+    let out = compile_and_run_std(&dir, flag, &[]);
+    assert!(out.contains("std ok"), "{out}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn c_c89_probe_varint_roundtrip() {
+    std_roundtrip(bps::CStandard::C89, "-std=c89", "probe89");
+}
+
+#[test]
+fn c_c11_probe_varint_roundtrip() {
+    std_roundtrip(bps::CStandard::C11, "-std=c11", "probe11");
+}
+
+#[test]
+fn c_standards_compile_matrix() {
+    let cases = [
+        (bps::CStandard::C89, "-std=c89", "matrix89"),
+        (bps::CStandard::C99, "-std=c99", "matrix99"),
+        (bps::CStandard::C11, "-std=c11", "matrix11"),
+        (bps::CStandard::C23, "-std=c23", "matrix23"),
+    ];
+    for (std, flag, tag) in cases {
+        std_roundtrip(std, flag, tag);
+    }
+}

@@ -271,3 +271,25 @@ fn rust_typed_hytale_packets_roundtrip() {
     std::fs::write(dir.join("tests/roundtrip.rs"), body).unwrap();
     gate_emitted(&dir, &target, "hytale", 1, n);
 }
+
+/// `emit_rust_typed_with_edition` writes the requested edition into
+/// `Cargo.toml`. Text-only: no cargo gates run here.
+#[test]
+fn rust_typed_edition_option() {
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "packet probe {\n    n: varint\n}\n";
+    let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
+    for (tag, edition) in [
+        ("2021", bps::RustEdition::Edition2021),
+        ("2024", bps::RustEdition::Edition2024),
+    ] {
+        let dir = fresh_dir(&format!("edition-{tag}"));
+        bps::emit_rust_typed::emit_rust_typed_with_edition(&resolved, &dir, edition).unwrap();
+        let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+        assert!(
+            manifest.contains(&format!("edition = \"{tag}\"")),
+            "Cargo.toml must request edition {tag}:\n{manifest}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

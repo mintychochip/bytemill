@@ -138,15 +138,33 @@ Every printer is a rewrite on `Program`. Shared requirements:
 
 Per language (the details live in each printer's module docs):
 
-| | Go | Python | C | C++ | TypeScript | Zig | Rust |
-|---|---|---|---|---|---|---|---|
-| output | `go.mod`, `runtime.go`, one `{stem}.go` | `bpsgen/` package: `runtime.py`, one `{stem}.py`, `__init__.py` | `bpsgen.h`, `runtime.c`, one `{stem}.c` | `bpsgen.hpp`, one `{stem}.cpp` | `bpsgen.ts` index, `runtime.ts`, one `{stem}.ts` | `bpsgen.zig` index, `runtime.zig`, one `{stem}.zig` | crate, `src/packets/{stem}.rs` |
-| record | struct | `@dataclass(slots=True)` | `typedef struct` | `struct` | `interface` | `struct` | `struct` |
-| sum | sealed interface + variant structs | variant dataclasses + union alias | enum tag + `union` | `std::variant` | discriminated union | `union(enum)` | `enum` |
-| optional | pointer | `T \| None` | `bool has_x` + value | `std::optional` | `x?: T` | `?T` | `Option` |
-| list | slice | `list` | pointer + length | `std::vector` | array | slice | `Vec` |
-| error | `error` values | exception classes | status enum return | exceptions | `Error` subclass | error set | `Result` + error enum |
-| gate | `gofmt -l`, `go vet`, `go test` | `py_compile`; ruff format/check, mypy `--strict` | `cc -std=c11 -Wall -Wextra -Wpedantic -Werror`; `clang-format --dry-run --Werror` | `g++ -std=c++20 -Wall -Wextra -Wpedantic -Werror`; `clang-format --dry-run --Werror` | `node`; `tsc --strict --erasableSyntaxOnly`; prettier | `zig fmt --check`, `zig test` | `rustfmt --check`, clippy `-D warnings` on the emitted crate |
+| | Go | Python | Java | C# | C | C++ | TypeScript | Zig | Rust |
+|---|---|---|---|---|---|---|---|---|---|
+| versions | 1.16 → 1.24 (default 1.23) | 3.8 → 3.14 (default 3.11) | 8, 11, 17, 21 (default 21) | 8, 9, 10, 11, 12 (default 12) | C89, C90, C99, C11, C17, C23 (default C11) | C++98, 03, 11, 14, 17, 20, 23, 26 (default C++20) | ES2015 → ESNext (default ES2022) | 0.11 → 0.14 (default 0.14) | 2015, 2018, 2021, 2024 (default 2024) |
+| output | `go.mod`, `runtime.go`, one `{stem}.go` | `bpsgen/` package: `runtime.py`, one `{stem}.py`, `__init__.py` | `bpsgen/` package: `Reader.java`, `Writer.java`, `BpsError.java`, one `{Stem}.java` | `BpsGen/` package: `Runtime.cs`, one `{stem}.cs` | `bpsgen.h`, `runtime.c`, one `{stem}.c` | `bpsgen.hpp`, one `{stem}.cpp` | `bpsgen.ts` index, `runtime.ts`, one `{stem}.ts` | `bpsgen.zig` index, `runtime.zig`, one `{stem}.zig` | crate, `src/packets/{stem}.rs` |
+| record | struct | `@dataclass(slots=True)` | `record` (17+) | `record struct` (10+), reference `record`/class in value cycles | `typedef struct` | `struct` | `interface` | `struct` | `struct` |
+| sum | sealed interface + variant structs | variant dataclasses + union alias | sealed interface + variant records (17+); interface + final classes (8/11) | interface + variant records | enum tag + `union` | `std::variant` (polyfilled <17) | discriminated union | `union(enum)` | `enum` |
+| optional | pointer | `T \| None` (or `Optional[T]` <3.10) | `Optional<T>` | `T?` (value types); `null` for reference types | `bool has_x` + value | `std::optional` (polyfilled <17) | `x?: T` | `?T` | `Option` |
+| list | slice | `list` (or `List[T]` <3.10) | `List<T>` | `List<T>` | pointer + length | `std::vector` | array | slice | `Vec` |
+| error | `error` values | exception classes | `BpsError` exception | `BpsError : Exception` | status enum return | exceptions | `Error` subclass | error set | `Result` + error enum |
+| gate | `gofmt -l`, `go vet`, `go test` | `py_compile`; ruff format/check, mypy `--strict` | `java`/`javac` compile + roundtrip | `dotnet build` (net8.0, LangVersion 8 and 12) | `cc -std=c11 -Wall -Wextra -Wpedantic -Werror`; `clang-format --dry-run --Werror` | `g++ -std=c++20 -Wall -Wextra -Wpedantic -Werror`; `clang-format --dry-run --Werror` | `node`; `tsc --strict --erasableSyntaxOnly`; prettier | `zig fmt --check`, `zig test` | `rustfmt --check`, clippy `-D warnings` on the emitted crate |
+
+Java and C# were added 2026-10-19. Both lower to the same typed program; the non-obvious
+decisions:
+
+- **Java** wraps each output stem in a `public final class {Stem}` and nests its types there
+  (Java requires the public top-level class to match the file name). Java 17+ uses `record`
+  and `sealed interface ... permits`; Java 8/11 emits final classes with a constructor,
+  getters, `equals`/`hashCode`/`toString`, and a plain interface for sums. Signed division
+  and modulo use `Math.floorDiv`/`Math.floorMod`; every numeric conversion is an explicit
+  cast (Java re-associates a widened operand at the narrow type, e.g. `int << 56`).
+- **C#** emits `readonly record struct` on C# 10+ and `struct` on C# 8/9, except records that
+  can reach themselves through value-layout edges (direct or `T?` record fields): those are
+  reference types (`record`/`sealed class`), because `Nullable<T>` over a struct would be an
+  infinite layout (CS0523). `?` is only spelled for value types; reference optionals are
+  `null`, and every file carries `#nullable disable`. Shift counts are cast to `int` (C#
+  requires `int`, the IR counts are `i64`), and record `Decode` calls are
+  `global::BpsGen.{Type}.Decode` so a property sharing the type name cannot shadow it.
 
 ## 6. Tests
 
@@ -218,6 +236,8 @@ Verification record (all run on the final tree):
 | TypeScript: `tsc --strict --erasableSyntaxOnly`, prettier, node round trips | clean |
 | Zig: `zig fmt --check`, `zig test` (26.3 + Hytale) | clean |
 | Rust: `cargo fmt --check`, `cargo clippy -D warnings`, round trips | clean |
-| Two emits of the same schema are byte-identical, all seven | clean |
-| Unknown open-enum tag (`07`) decodes and re-encodes in all seven | clean |
-| Gated optional absent on the value encodes as no bytes, all seven | clean |
+| Java: `javac` (JDK 8) on the Java 8 26.3 tree; `java` round trips (26.3, Hytale, probe) | clean |
+| C#: `dotnet build` (net8.0, LangVersion 12 and 8); 26.3 runtime round trip | clean |
+| Two emits of the same schema are byte-identical, all nine | clean |
+| Unknown open-enum tag (`07`) decodes and re-encodes, seven original printers | clean |
+| Gated optional absent on the value encodes as no bytes, seven original printers | clean |

@@ -7,14 +7,14 @@
 
 use crate::analyze::analyze;
 use crate::emit_json::schema_to_json;
-use crate::emit_rust::emit_rust;
 use crate::emit_rstom::emit_rstom;
+use crate::emit_rust::emit_rust;
 use crate::emit_tree::emit_tree;
-use crate::errors::{emit, BpsError, BpsResult};
+use crate::errors::{BpsError, BpsResult, emit};
 use crate::interp::{decode_frame_payload, decode_packet, encode_packet};
-use crate::json::{dumps_sorted, loads, Value};
+use crate::json::{Value, dumps_sorted, loads};
 use crate::load::load_schema;
-use crate::minestom::{build_units, ClassTable};
+use crate::minestom::{ClassTable, build_units};
 use crate::shapes::{
     bps_field_pairs, extract_shape, hand_packet_path, mismatch, module_path, packet_report,
     shape_to_json,
@@ -36,7 +36,9 @@ fn load_and_analyze(paths: &[String]) -> BpsResult<crate::ast::ResolvedSchema> {
 }
 
 fn default_packets_json_hint(target: &str, anchor: &Path) -> String {
-    let resolved = anchor.canonicalize().unwrap_or_else(|_| anchor.to_path_buf());
+    let resolved = anchor
+        .canonicalize()
+        .unwrap_or_else(|_| anchor.to_path_buf());
     if target == "rstom-tree" {
         return format!("<workspace>/{PACKETS_GEN_SCHEMA}");
     }
@@ -51,7 +53,9 @@ fn class_table(given: Option<&str>, anchor: &Path, target: &str) -> BpsResult<Cl
     let path = match given {
         Some(p) => PathBuf::from(p),
         None => {
-            let resolved = anchor.canonicalize().unwrap_or_else(|_| anchor.to_path_buf());
+            let resolved = anchor
+                .canonicalize()
+                .unwrap_or_else(|_| anchor.to_path_buf());
             let beside = resolved.join(PACKETS_GEN_SCHEMA);
             if beside.is_file() {
                 beside
@@ -92,6 +96,7 @@ struct Args {
     classes: Vec<String>,
     eligible: bool,
     json_value: Option<String>,
+    std: Option<String>,
 }
 
 /// Pull a flag's value out of `argv`, leaving the positionals.
@@ -143,11 +148,13 @@ fn take_switch(argv: &mut Vec<String>, name: &str) -> bool {
 /// `bpsc import-versions` and `bpsc import-protodef`: minecraft-data's ProtoDef descriptions
 /// as BPS schemas (see `crate::protodef`). Rust-only; the Python CLI has no importer.
 fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
-    use crate::protodef::{import, import_versions, FileSpec, Protocol};
+    use crate::protodef::{FileSpec, Protocol, import, import_versions};
     let root = Path::new(PROTOC_ROOT);
     if cmd == "import-versions" {
-        let manifest = take_flag(&mut argv, &["--manifest"])?
-            .map_or_else(|| root.join("schemas/versions/manifest.json"), PathBuf::from);
+        let manifest = take_flag(&mut argv, &["--manifest"])?.map_or_else(
+            || root.join("schemas/versions/manifest.json"),
+            PathBuf::from,
+        );
         let data = take_flag(&mut argv, &["--data"])?
             .map_or_else(|| root.join("data/minecraft-data"), PathBuf::from);
         let out = take_flag(&mut argv, &["--out"])?
@@ -211,7 +218,14 @@ fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
             let patch_text = std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?;
             reasons = proto.apply_patches(&patch_text)?;
         }
-        let spec = FileSpec { protocol, release: &release, also: &also, source: path, patches: &reasons, note: None };
+        let spec = FileSpec {
+            protocol,
+            release: &release,
+            also: &also,
+            source: path,
+            patches: &reasons,
+            note: None,
+        };
         import(&proto, &spec)
     });
     match result {
@@ -240,7 +254,9 @@ fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
         None => {
             use std::io::Read;
             let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf).map_err(|e| format!("stdin: {e}"))?;
+            std::io::stdin()
+                .read_to_string(&mut buf)
+                .map_err(|e| format!("stdin: {e}"))?;
             buf
         }
     };
@@ -258,7 +274,11 @@ fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
     for f in report.failures.iter().take(50) {
         eprintln!("line {}: {}: {}", f.line, f.packet, f.reason);
     }
-    println!("checked {}, failed {}", report.checked, report.failures.len());
+    println!(
+        "checked {}, failed {}",
+        report.checked,
+        report.failures.len()
+    );
     Ok(if report.failures.is_empty() { 0 } else { 3 })
 }
 
@@ -304,16 +324,36 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
             if argv.is_empty() {
                 return Err("emit: the following arguments are required: target".to_string());
             }
-            a.target = Some(argv.remove(0));
+            let raw_target = argv.remove(0);
+            let (target_name, target_std) = if let Some((t, s)) = raw_target.split_once(':') {
+                (t.to_string(), Some(s.to_string()))
+            } else {
+                (raw_target, None)
+            };
+            a.target = Some(target_name);
             if !matches!(
                 a.target.as_deref(),
-                Some("rust") | Some("rust-typed") | Some("rstom") | Some("rstom-tree") | Some("go") | Some("python") | Some("c") | Some("typescript") | Some("cpp") | Some("zig")
+                Some("rust")
+                    | Some("rust-typed")
+                    | Some("rstom")
+                    | Some("rstom-tree")
+                    | Some("go")
+                    | Some("python")
+                    | Some("c")
+                    | Some("typescript")
+                    | Some("cpp")
+                    | Some("zig")
+                    | Some("java")
+                    | Some("csharp")
+                    | Some("cs")
             ) {
                 return Err(format!(
-                    "emit: argument target: invalid choice: {:?} (choose from 'rust', 'rust-typed', 'rstom', 'rstom-tree', 'go', 'python', 'c', 'typescript', 'cpp', 'zig')",
-                    a.target.unwrap()
+                    "emit: argument target: invalid choice: {:?} (choose from 'rust', 'rust-typed', 'rstom', 'rstom-tree', 'go', 'python', 'c', 'typescript', 'cpp', 'zig', 'java', 'csharp')",
+                    a.target.unwrap(),
                 ));
             }
+            a.std =
+                take_flag(&mut argv, &["--std", "--target-version", "--edition"])?.or(target_std);
             a.out = take_flag(&mut argv, &["--out"])?;
             a.rstom = take_flag(&mut argv, &["--rstom"])?;
             a.shapes = take_flag(&mut argv, &["--shapes"])?;
@@ -337,12 +377,14 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                     }
                     if a.rstom.is_none() {
                         return Err(
-                            "shapes extract: the following arguments are required: --rstom".to_string()
+                            "shapes extract: the following arguments are required: --rstom"
+                                .to_string(),
                         );
                     }
                     if a.out.is_none() {
                         return Err(
-                            "shapes extract: the following arguments are required: --out".to_string()
+                            "shapes extract: the following arguments are required: --out"
+                                .to_string(),
                         );
                     }
                     a.schemas = argv;
@@ -352,7 +394,8 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                     a.packets_json = take_flag(&mut argv, &["--packets-json"])?;
                     if a.rstom.is_none() {
                         return Err(
-                            "shapes report: the following arguments are required: --rstom".to_string()
+                            "shapes report: the following arguments are required: --rstom"
+                                .to_string(),
                         );
                     }
                     a.schemas = argv;
@@ -397,7 +440,10 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
         "routes" => {
             let resolved = load_and_analyze(&a.schemas)?;
             for (route, pkt) in &resolved.routes {
-                println!("{}.{} 0x{:02x} -> {}", route.state, route.direction, route.packet_id, pkt.name);
+                println!(
+                    "{}.{} 0x{:02x} -> {}",
+                    route.state, route.direction, route.packet_id, pkt.name
+                );
             }
             Ok(0)
         }
@@ -469,22 +515,31 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                 return Err(emit(format!("emit {target} needs --out <directory>")));
             };
             let out_dir = PathBuf::from(out);
+            let opts = crate::target_version::EmitOptions::for_target(target, a.std.as_deref())?;
             if target == "rust" {
                 emit_rust(&resolved, &out_dir)?;
             } else if target == "rust-typed" {
-                crate::emit_rust_typed::emit_rust_typed(&resolved, &out_dir)?;
+                crate::emit_rust_typed::emit_rust_typed_with_edition(
+                    &resolved,
+                    &out_dir,
+                    opts.rust_edition,
+                )?;
             } else if target == "go" {
-                crate::emit_go::emit_go(&resolved, &out_dir)?;
+                crate::emit_go::emit_go_with_version(&resolved, &out_dir, opts.go_ver)?;
             } else if target == "python" {
-                crate::emit_python::emit_python(&resolved, &out_dir)?;
+                crate::emit_python::emit_python_with_version(&resolved, &out_dir, opts.py_ver)?;
             } else if target == "c" {
-                crate::emit_c::emit_c(&resolved, &out_dir)?;
+                crate::emit_c::emit_c_with_standard(&resolved, &out_dir, opts.c_std)?;
             } else if target == "typescript" {
-                crate::emit_ts::emit_typescript(&resolved, &out_dir)?;
+                crate::emit_ts::emit_typescript_with_target(&resolved, &out_dir, opts.ts_target)?;
             } else if target == "cpp" {
-                crate::emit_cpp::emit_cpp(&resolved, &out_dir)?;
+                crate::emit_cpp::emit_cpp_with_standard(&resolved, &out_dir, opts.cpp_std)?;
             } else if target == "zig" {
-                crate::emit_zig::emit_zig(&resolved, &out_dir)?;
+                crate::emit_zig::emit_zig_with_version(&resolved, &out_dir, opts.zig_ver)?;
+            } else if target == "java" {
+                crate::emit_java::emit_java_with_version(&resolved, &out_dir, opts.java_ver)?;
+            } else if target == "csharp" || target == "cs" {
+                crate::emit_csharp::emit_csharp_with_version(&resolved, &out_dir, opts.csharp_ver)?;
             } else {
                 let classes = class_table(a.packets_json.as_deref(), &out_dir, "rstom")?;
                 emit_rstom(&resolved, &out_dir, &classes, "../rstom")?;
@@ -507,8 +562,11 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                 }
                 Some("extract") => {
                     let out = PathBuf::from(a.out.as_deref().unwrap_or(""));
-                    let filter: Option<Vec<String>> =
-                        if a.classes.is_empty() { None } else { Some(a.classes.clone()) };
+                    let filter: Option<Vec<String>> = if a.classes.is_empty() {
+                        None
+                    } else {
+                        Some(a.classes.clone())
+                    };
                     for unit in &units {
                         if let Some(f) = &filter
                             && !f.contains(&unit.cls.name)
@@ -523,7 +581,8 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                         let text = crate::text::read_text(&path).map_err(|e| {
                             BpsError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
                         })?;
-                        let Ok(shape) = extract_shape(&text, &unit.cls.name, &mod_path, Some(&path))
+                        let Ok(shape) =
+                            extract_shape(&text, &unit.cls.name, &mod_path, Some(&path))
                         else {
                             continue;
                         };

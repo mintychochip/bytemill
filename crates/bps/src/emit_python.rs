@@ -265,8 +265,16 @@ def _missing_(cls, value: object) -> Self | None:
 
 /// Emit the `bpsgen` package for `resolved` into `out_dir`.
 pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+    emit_python_with_version(resolved, out_dir, crate::PythonVersion::default())
+}
+
+pub fn emit_python_with_version(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    ver: crate::PythonVersion,
+) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
-    let parts = emit_program(&program)?;
+    let parts = emit_program(&program, ver)?;
     let pkg = out_dir.join("bpsgen");
     fs::create_dir_all(&pkg).map_err(|e| emit(e.to_string()))?;
     let deps = stem_deps(&program);
@@ -298,7 +306,7 @@ pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
         let dep_names: Vec<String> = dep_names.into_iter().collect();
         let src = format!(
             "{}{}{}",
-            py_preamble(stem, body, &dep_names),
+            py_preamble(stem, body, &dep_names, ver),
             body.trim_end_matches('\n'),
             py_all(body)
         );
@@ -309,10 +317,7 @@ pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     for name in &names {
         init.push_str(&format!("from bpsgen.{name} import *\n"));
     }
-    let mut public: Vec<String> = merged
-        .values()
-        .flat_map(|body| all_names(body))
-        .collect();
+    let mut public: Vec<String> = merged.values().flat_map(|body| all_names(body)).collect();
     public.sort_by_key(|name| isort_key(name));
     public.dedup();
     init.push_str("\n__all__ = [\n");
@@ -343,7 +348,7 @@ fn module_doc(stem: &str) -> String {
 /// Docstring, then imports in ruff's isort order (`__future__`, the standard
 /// library, then this package), then the two blank lines before the first
 /// definition.
-fn py_preamble(stem: &str, body: &str, deps: &[String]) -> String {
+fn py_preamble(stem: &str, body: &str, deps: &[String], ver: crate::PythonVersion) -> String {
     let mut out = format!(
         "\"\"\"{}\"\"\"\n\nfrom __future__ import annotations\n\n",
         module_doc(stem)
@@ -358,10 +363,20 @@ fn py_preamble(stem: &str, body: &str, deps: &[String]) -> String {
     if body.contains("struct.") {
         stdlib.push("import struct".to_string());
     }
-    let typing: Vec<&str> = ["Self", "TypeAlias"]
-        .into_iter()
-        .filter(|name| body.contains(name))
-        .collect();
+    let mut typing: Vec<&str> = if ver.supports_typing_self() {
+        ["Self", "TypeAlias"]
+            .into_iter()
+            .filter(|name| body.contains(name))
+            .collect()
+    } else {
+        // Python < 3.11 has no `typing.Self`: the printer names classes
+        // directly instead, and legacy annotations spell out their helpers.
+        ["Optional", "Union", "List", "Dict", "TypeAlias"]
+            .into_iter()
+            .filter(|name| body.contains(name))
+            .collect()
+    };
+    typing.sort();
     if !typing.is_empty() {
         stdlib.push(format!("from typing import {}", typing.join(", ")));
     }
@@ -762,8 +777,8 @@ pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
     }
 }
 
-fn emit_program(prog: &Program) -> BpsResult<BTreeMap<String, String>> {
-    let mut e = Emitter::new(prog);
+fn emit_program(prog: &Program, ver: crate::PythonVersion) -> BpsResult<BTreeMap<String, String>> {
+    let mut e = Emitter::new(prog, ver);
     e.set_raw("runtime");
     e.runtime();
     e.records_and_enums();
@@ -775,6 +790,7 @@ fn emit_program(prog: &Program) -> BpsResult<BTreeMap<String, String>> {
 
 struct Emitter<'a> {
     prog: &'a Program,
+    ver: crate::PythonVersion,
     parts: BTreeMap<String, String>,
     stem: String,
     buf: String,
@@ -782,9 +798,10 @@ struct Emitter<'a> {
 }
 
 impl<'a> Emitter<'a> {
-    fn new(prog: &'a Program) -> Self {
+    fn new(prog: &'a Program, ver: crate::PythonVersion) -> Self {
         Emitter {
             prog,
+            ver,
             parts: BTreeMap::new(),
             stem: "runtime".to_string(),
             buf: String::new(),
@@ -853,12 +870,40 @@ impl<'a> Emitter<'a> {
         self.pad().len() + s.len() <= MAX_WIDTH
     }
 
+    /// `@dataclasses.dataclass(...)`: `slots` and `kw_only` need 3.10+.
+    fn dataclass_decorator(&self) -> &'static str {
+        if self.ver.supports_dataclass_slots() && self.ver.supports_dataclass_kw_only() {
+            "@dataclasses.dataclass(slots=True, kw_only=True)"
+        } else {
+            "@dataclasses.dataclass"
+        }
+    }
+
+    /// `list[inner]` spelling: builtin generics stay for 3.10+,
+    /// `typing.List` before that.
+    fn list_ann(&self, inner: &str) -> String {
+        if self.ver.supports_union_pipe() {
+            format!("list[{inner}]")
+        } else {
+            format!("List[{inner}]")
+        }
+    }
+
     // ---------------------------------------------------------------
     // Top level
     // ---------------------------------------------------------------
 
     fn runtime(&mut self) {
-        for line in RUNTIME.lines() {
+        // The `TypeAlias` unions evaluate at runtime, so legacy output spells
+        // them (and the runtime's own annotations) with `typing` helpers.
+        let src = if self.ver.supports_union_pipe() {
+            RUNTIME.to_string()
+        } else {
+            RUNTIME
+                .replace("int | None", "Optional[int]")
+                .replace("list[str]", "List[str]")
+        };
+        for line in src.lines() {
             self.line(line.trim_end());
         }
         self.blank();
@@ -925,13 +970,15 @@ impl<'a> Emitter<'a> {
     }
 
     fn record(&mut self, idx: TypeIdx) {
+        let ver = self.ver;
         let cls = self.prog.types[idx].name.pascal();
         let doc = self.type_doc(idx);
         let fields = match &self.prog.types[idx].kind {
             TypeKind::Record { fields } => fields.clone(),
             _ => return,
         };
-        self.line("@dataclasses.dataclass(slots=True, kw_only=True)");
+        let deco = self.dataclass_decorator();
+        self.line(deco);
         self.line(&format!("class {cls}:"));
         self.nested(|e| {
             e.line(&format!("\"\"\"{doc}\"\"\""));
@@ -942,7 +989,7 @@ impl<'a> Emitter<'a> {
             }
             for f in &fields {
                 let name = escape_name(&f.name.snake());
-                let ann = annotation(self.prog, &f.ty, f.optional);
+                let ann = annotation(self.prog, &f.ty, f.optional, ver);
                 if f.optional {
                     e.line(&format!("{name}: {ann} = None"));
                 } else {
@@ -952,12 +999,13 @@ impl<'a> Emitter<'a> {
         });
         let codec = self.prog.types[idx].codec;
         if let Some(codec) = codec {
-            self.methods(codec);
+            self.methods(codec, &cls);
         }
     }
 
     fn enum_type(&mut self, idx: TypeIdx) {
         let cls = self.prog.types[idx].name.pascal();
+        let ver = self.ver;
         let doc = self.type_doc(idx);
         let members = match &self.prog.types[idx].kind {
             TypeKind::Enum { members, .. } => members.clone(),
@@ -972,7 +1020,13 @@ impl<'a> Emitter<'a> {
             }
             e.blank();
             for line in MISSING.lines() {
-                e.line(line.trim_end());
+                // `typing.Self` needs 3.11+: older output names the class.
+                let rendered = if ver.supports_typing_self() {
+                    line.to_string()
+                } else {
+                    line.replace("Self | None", &format!("Optional[{cls}]"))
+                };
+                e.line(rendered.trim_end());
             }
         });
     }
@@ -1059,6 +1113,7 @@ impl<'a> Emitter<'a> {
 
     fn sum(&mut self, idx: TypeIdx) {
         let name = self.prog.types[idx].name.pascal();
+        let ver = self.ver;
         let variants = match &self.prog.types[idx].kind {
             TypeKind::Sum { variants } => variants.clone(),
             _ => return,
@@ -1068,7 +1123,8 @@ impl<'a> Emitter<'a> {
                 continue;
             }
             let cls = format!("{name}{}", v.name.pascal());
-            self.line("@dataclasses.dataclass(slots=True, kw_only=True)");
+            let deco = self.dataclass_decorator();
+            self.line(deco);
             self.line(&format!("class {cls}:"));
             self.nested(|e| {
                 e.line(&format!(
@@ -1077,7 +1133,10 @@ impl<'a> Emitter<'a> {
                 ));
                 if let Some(payload) = &v.payload {
                     e.blank();
-                    e.line(&format!("value: {}", annotation(self.prog, payload, false)));
+                    e.line(&format!(
+                        "value: {}",
+                        annotation(self.prog, payload, false, ver)
+                    ));
                 }
             });
             self.blank();
@@ -1092,21 +1151,37 @@ impl<'a> Emitter<'a> {
                 members.push(member);
             }
         }
-        let single = format!("{name}: TypeAlias = {}", members.join(" | "));
-        if self.fits(&single) {
-            self.line(&single);
-        } else {
-            self.line(&format!("{name}: TypeAlias = ("));
-            self.nested(|e| {
-                for (i, m) in members.iter().enumerate() {
-                    if i == 0 {
-                        e.line(m);
-                    } else {
-                        e.line(&format!("| {m}"));
+        if self.ver.supports_union_pipe() {
+            let single = format!("{name}: TypeAlias = {}", members.join(" | "));
+            if self.fits(&single) {
+                self.line(&single);
+            } else {
+                self.line(&format!("{name}: TypeAlias = ("));
+                self.nested(|e| {
+                    for (i, m) in members.iter().enumerate() {
+                        if i == 0 {
+                            e.line(m);
+                        } else {
+                            e.line(&format!("| {m}"));
+                        }
                     }
-                }
-            });
-            self.line(")");
+                });
+                self.line(")");
+            }
+        } else {
+            // The `A | B` union syntax needs 3.10+: spell out `typing.Union`.
+            let single = format!("{name}: TypeAlias = Union[{}]", members.join(", "));
+            if self.fits(&single) {
+                self.line(&single);
+            } else {
+                self.line(&format!("{name}: TypeAlias = Union["));
+                self.nested(|e| {
+                    for m in &members {
+                        e.line(&format!("{m},"));
+                    }
+                });
+                self.line("]");
+            }
         }
         self.line(&format!("\"\"\"{name}: a union of its variants.\"\"\""));
     }
@@ -1198,7 +1273,7 @@ impl<'a> Emitter<'a> {
             unwrap_subst: unwrap_substs(body),
         }
     }
-    fn methods(&mut self, codec: CodecIdx) {
+    fn methods(&mut self, codec: CodecIdx, cls: &str) {
         let c = self.prog.codecs[codec].clone();
         let f = self.ctx_for(&c, &c.decode, true, true);
         let decode_params = self.fn_params(&f, &c, true);
@@ -1209,10 +1284,16 @@ impl<'a> Emitter<'a> {
         self.blank();
         self.indent += 1;
         self.line("@classmethod");
+        // `typing.Self` needs 3.11+: older output names the class instead.
+        let ret = if self.ver.supports_typing_self() {
+            "Self".to_string()
+        } else {
+            cls.to_string()
+        };
         self.def_line(
             "def decode",
             &format!("cls, r: Reader{decode_params}"),
-            " -> Self:",
+            &format!(" -> {ret}:"),
         );
         self.doc_and_body(&decode_doc, &f, &c.decode.stmts);
         self.blank();
@@ -1231,7 +1312,7 @@ impl<'a> Emitter<'a> {
             return Ok(());
         }
         let snake = c.name.snake();
-        let ret = annotation(self.prog, &c.value, false);
+        let ret = annotation(self.prog, &c.value, false, self.ver);
         let f = self.ctx_for(&c, &c.decode, true, false);
         let decode_params = self.fn_params(&f, &c, true);
         let decode_doc = self.doc_for(&c, true);
@@ -1243,7 +1324,7 @@ impl<'a> Emitter<'a> {
         self.doc_and_body(&decode_doc, &f, &c.decode.stmts);
         self.blank();
         self.blank();
-        let value_ann = annotation(self.prog, &c.value, false);
+        let value_ann = annotation(self.prog, &c.value, false, self.ver);
         let f = self.ctx_for(&c, &c.encode, false, false);
         let encode_params = self.fn_params(&f, &c, false);
         let value_name = c
@@ -1306,7 +1387,7 @@ impl<'a> Emitter<'a> {
                 .get(local)
                 .cloned()
                 .unwrap_or_else(|| escape_name(&body.locals[*local].name.snake()));
-            let ann = annotation(self.prog, &p.ty, p.optional);
+            let ann = annotation(self.prog, &p.ty, p.optional, self.ver);
             out.push_str(&format!(", {name}: {ann}"));
         }
         out
@@ -1460,6 +1541,11 @@ impl<'a> Emitter<'a> {
                 arms,
                 other,
             } => {
+                if !self.ver.supports_match() {
+                    // `match` needs 3.10+: compare integer tags with `==`.
+                    self.match_if_chain(f, scrutinee, arms, other);
+                    return Ok(());
+                }
                 let scrut = self.top_or_emit(f, scrutinee);
                 self.line(&format!("match {scrut}:"));
                 self.indent += 1;
@@ -1552,6 +1638,76 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// A `Stmt::Match` for Python < 3.10: an `if`/`elif`/`else` chain over
+    /// `==` tag comparisons instead of a `match` statement.
+    fn match_if_chain(
+        &mut self,
+        f: &FCtx,
+        scrutinee: &Expr,
+        arms: &[crate::ir::typed::MatchArm],
+        other: &Option<Vec<Stmt>>,
+    ) {
+        let scrut = self.top_or_emit(f, scrutinee);
+        let off = if f.decode { "r.pos" } else { "w.offset" };
+        if arms.is_empty() {
+            match other {
+                Some(body) => {
+                    for s in body {
+                        self.stmt_or_long(f, s);
+                    }
+                }
+                None => self.raise_here("NoMatchArm", &format!("{off}, {scrut}")),
+            }
+            return;
+        }
+        for (i, arm) in arms.iter().enumerate() {
+            let kw = if i == 0 { "if" } else { "elif" };
+            let cond = arm
+                .tags
+                .iter()
+                .map(|t| format!("{scrut} == {t}"))
+                .collect::<Vec<_>>()
+                .join(" or ");
+            let head = format!("{kw} {cond}:");
+            if self.fits(&head) {
+                self.line(&head);
+            } else {
+                self.line(&format!("{kw} ("));
+                self.indent += 1;
+                for (j, t) in arm.tags.iter().enumerate() {
+                    let sep = if j + 1 == arm.tags.len() { "" } else { " or" };
+                    self.line(&format!("{scrut} == {t}{sep}"));
+                }
+                self.indent -= 1;
+                self.line("):");
+            }
+            self.indent += 1;
+            if arm.body.is_empty() {
+                self.line("pass");
+            } else {
+                for s in &arm.body {
+                    self.stmt_or_long(f, s);
+                }
+            }
+            self.indent -= 1;
+        }
+        self.line("else:");
+        self.indent += 1;
+        match other {
+            Some(body) => {
+                if body.is_empty() {
+                    self.line("pass");
+                } else {
+                    for s in body {
+                        self.stmt_or_long(f, s);
+                    }
+                }
+            }
+            None => self.raise_here("NoMatchArm", &format!("{off}, {scrut}")),
+        }
+        self.indent -= 1;
+    }
+
     /// An expression for a statement slot: long output stays inline and the
     /// width gate reports it.
     fn top_or_emit(&self, f: &FCtx, e: &Expr) -> String {
@@ -1571,7 +1727,7 @@ impl<'a> Emitter<'a> {
             return;
         }
         let name = self.local_name(f, local);
-        let ann = annotation(self.prog, &l.ty, l.optional);
+        let ann = annotation(self.prog, &l.ty, l.optional, self.ver);
         if l.optional {
             self.line(&format!("{name}: {ann} = None"));
         } else if matches!(l.ty, Ty::List(_)) {
@@ -1869,7 +2025,7 @@ impl<'a> Emitter<'a> {
         let Ty::List(inner) = f.body.locals[list].ty.clone() else {
             return Ok(());
         };
-        let item_ann = annotation(self.prog, &inner, false);
+        let item_ann = annotation(self.prog, &inner, false, self.ver);
         match mode {
             RepeatMode::Count(n) => {
                 let n_s = self.nested_or_long(f, n);
@@ -1880,16 +2036,16 @@ impl<'a> Emitter<'a> {
                 self.indent -= 1;
                 if let [Stmt::Decode { codec, args, .. }] = body {
                     let call = self.decode_call(f, *codec, args);
-                    let single = format!(
-                        "{list_name}: list[{item_ann}] = [{call} for _ in range({n_bare})]"
-                    );
+                    let list_ty = self.list_ann(&item_ann);
+                    let single =
+                        format!("{list_name}: {list_ty} = [{call} for _ in range({n_bare})]");
                     if self.fits(&single) {
                         self.site(&single)?;
                         return Ok(());
                     }
                     // Too long for one line: an explicit loop instead.
                 }
-                self.line(&format!("{list_name}: list[{item_ann}] = []"));
+                self.line(&format!("{list_name}: {} = []", self.list_ann(&item_ann)));
                 self.line(&format!("for _ in range({n_bare}):"));
                 self.indent += 1;
                 if let [Stmt::Decode { codec, args, .. }] = body {
@@ -1911,7 +2067,7 @@ impl<'a> Emitter<'a> {
                     Some(v) => byte_lit(v),
                     None => self.nested_or_long(f, term),
                 };
-                self.line(&format!("{list_name}: list[{item_ann}] = []"));
+                self.line(&format!("{list_name}: {} = []", self.list_ann(&item_ann)));
                 self.line("while True:");
                 self.indent += 1;
                 // The typed `Until` ends at no bytes left too, so the peek
@@ -1945,7 +2101,7 @@ impl<'a> Emitter<'a> {
                 Ok(())
             }
             RepeatMode::UntilEnd => {
-                self.line(&format!("{list_name}: list[{item_ann}] = []"));
+                self.line(&format!("{list_name}: {} = []", self.list_ann(&item_ann)));
                 self.line("while r.remaining > 0:");
                 self.indent += 1;
                 if let [Stmt::Decode { codec, args, .. }] = body {
@@ -2622,18 +2778,29 @@ fn value_rooted(mut e: &Expr, value: LocalId) -> bool {
     }
 }
 
-fn annotation(prog: &Program, ty: &Ty, optional: bool) -> String {
+fn annotation(prog: &Program, ty: &Ty, optional: bool, ver: crate::PythonVersion) -> String {
     let base = match ty {
         Ty::Int(_) => "int".to_string(),
         Ty::Bool => "bool".to_string(),
         Ty::F32 | Ty::F64 => "float".to_string(),
         Ty::Str => "str".to_string(),
         Ty::Bytes => "bytes".to_string(),
-        Ty::List(inner) => format!("list[{}]", annotation(prog, inner, false)),
+        Ty::List(inner) => {
+            let inner = annotation(prog, inner, false, ver);
+            if ver.supports_union_pipe() {
+                format!("list[{inner}]")
+            } else {
+                format!("List[{inner}]")
+            }
+        }
         Ty::Named(t) => prog.types[*t].name.pascal(),
     };
     if optional {
-        format!("{base} | None")
+        if ver.supports_union_pipe() {
+            format!("{base} | None")
+        } else {
+            format!("Optional[{base}]")
+        }
     } else {
         base
     }

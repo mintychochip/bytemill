@@ -36,6 +36,14 @@
 //!   with the alternatives packed under the `<`, and overlong `Construct`
 //!   returns become designated initializers, both exactly the way
 //!   `clang-format` lays them out (no `off/on` guards).
+//!
+//! Language standards (`emit_cpp_with_standard`): the default is C++20 and
+//! its output is byte-for-byte the historical emission. Older standards
+//! replace unavailable facilities with small polyfills declared in the
+//! header (`Optional`, `StringView`, `Span`, `BPS_NODISCARD`,
+//! `BPS_CONSTEXPR`, `BPS_NOEXCEPT`), tagged structs for sums, wrapper
+//! structs for open enums, member-initializing constructors for records,
+//! index loops, `typedef`s, and explicit `operator==`/`!=`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -172,19 +180,34 @@ const RUNTIME_TOP: &[&str] = &[
 const MAX_COL: usize = 80;
 
 pub fn emit_cpp(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+    emit_cpp_with_standard(resolved, out_dir, crate::CppStandard::default())
+}
+
+pub fn emit_cpp_with_standard(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    std_ver: crate::CppStandard,
+) -> BpsResult<()> {
     let program = typed(resolved)?;
     let layout = Layout::build(&program);
     check_top_level(&program, &layout)?;
-    let header = emit_header(&program, &layout)?;
-    let sources = emit_sources(&program, &layout)?;
+    let header = emit_header(&program, &layout, std_ver)?;
+    let sources = emit_sources(&program, &layout, std_ver)?;
     std::fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
     let header_path = out_dir.join("bpsgen.hpp");
     std::fs::write(&header_path, header).map_err(|e| emit(e.to_string()))?;
-    clang_format(&header_path);
+    // `clang-format` assumes C++11 angle brackets (`>>`); pre-C++11 output
+    // keeps its `> >` spacing, so only format what it can parse.
+    let format = std_ver.supports_braced_init();
+    if format {
+        clang_format(&header_path);
+    }
     for (stem, source) in sources {
         let path = out_dir.join(format!("{stem}.cpp"));
         std::fs::write(&path, source).map_err(|e| emit(e.to_string()))?;
-        clang_format(&path);
+        if format {
+            clang_format(&path);
+        }
     }
     Ok(())
 }
@@ -250,25 +273,47 @@ fn int_cpp(ty: IntTy) -> &'static str {
 }
 
 /// C++ spelling of a value type.
-fn cpp_ty(program: &Program, ty: &Ty) -> String {
-    match ty {
+fn cpp_ty(program: &Program, ty: &Ty, std_ver: crate::CppStandard) -> String {
+    let s = match ty {
         Ty::Int(t) => int_cpp(*t).to_string(),
         Ty::Bool => "bool".to_string(),
         Ty::F32 => "float".to_string(),
         Ty::F64 => "double".to_string(),
         Ty::Str => "std::string".to_string(),
         Ty::Bytes => "std::vector<std::uint8_t>".to_string(),
-        Ty::List(inner) => format!("std::vector<{}>", cpp_ty(program, inner)),
+        Ty::List(inner) => format!("std::vector<{}>", cpp_ty(program, inner, std_ver)),
         Ty::Named(t) => pascal(&program.types[*t].name),
-    }
+    };
+    angles(s, std_ver)
 }
 
-fn opt_cpp(program: &Program, ty: &Ty, optional: bool) -> String {
-    if optional {
-        format!("std::optional<{}>", cpp_ty(program, ty))
+/// `std::optional<T>` on C++17 and later, the header's `Optional<T>`
+/// polyfill below that.
+fn opt_cpp(program: &Program, ty: &Ty, optional: bool, std_ver: crate::CppStandard) -> String {
+    let s = if optional {
+        let inner = cpp_ty(program, ty, std_ver);
+        if std_ver.supports_std_optional() {
+            format!("std::optional<{inner}>")
+        } else {
+            format!("Optional<{inner}>")
+        }
     } else {
-        cpp_ty(program, ty)
+        cpp_ty(program, ty, std_ver)
+    };
+    angles(s, std_ver)
+}
+
+/// Leave a space between closing template brackets pre-C++11 (`> >`):
+/// C++11 adopted `>>` in templates, earlier standards parse it as a shift.
+fn angles(s: String, std_ver: crate::CppStandard) -> String {
+    if std_ver.supports_braced_init() {
+        return s;
     }
+    let mut s = s;
+    while s.contains(">>") {
+        s = s.replace(">>", "> >");
+    }
+    s
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,6 +1076,522 @@ inline std::string str128(__int128 v) {
   return s;
 }
 "#;
+// ---------------------------------------------------------------------------
+// Language standards.
+// ---------------------------------------------------------------------------
+
+/// Attribute/keyword macros shared by every pre-C++20 header. Each tracks
+/// `__cplusplus`, so the same header stays correct no matter which `-std=`
+/// flag compiles it.
+const BPS_MACROS: &str = r#"#if __cplusplus >= 201703L
+#define BPS_NODISCARD [[nodiscard]]
+#else
+#define BPS_NODISCARD
+#endif
+#if __cplusplus >= 201402L
+#define BPS_CONSTEXPR constexpr
+#else
+#define BPS_CONSTEXPR inline
+#endif
+#if __cplusplus >= 201103L
+#define BPS_NOEXCEPT noexcept
+#else
+#define BPS_NOEXCEPT
+#endif
+"#;
+
+/// The emitted runtime for one standard. C++20 and later keep the historical
+/// header byte-for-byte; C++17 keeps it apart from `std::span` (replaced by
+/// the `Span` polyfill below); anything older uses the compat runtime, whose
+/// bodies are written in C++98 so they compile under any later flag too.
+fn runtime_header(uses_i128: bool, std_ver: crate::CppStandard) -> String {
+    let mut h = if std_ver.supports_std_span() {
+        RUNTIME_BASE.to_string()
+    } else if std_ver.supports_std_variant() {
+        tier17_runtime()
+    } else {
+        compat_runtime(std_ver)
+    };
+    if uses_i128 {
+        h.push_str(RUNTIME_128);
+    }
+    h
+}
+
+/// C++17 runtime: `RUNTIME_BASE` with `std::span` swapped for a small
+/// borrowed-range polyfill (C++20 is the first standard with `std::span`).
+fn tier17_runtime() -> String {
+    const SPAN_17: &str = r#"template <typename T> class Span {
+public:
+  Span() : data_(nullptr), size_(0) {}
+  Span(const T *d, std::size_t n) : data_(d), size_(n) {}
+  template <typename U>
+  Span(const std::vector<U> &v)
+      : data_(v.empty() ? nullptr : &v[0]), size_(v.size()) {}
+  const T *data() const { return data_; }
+  std::size_t size() const { return size_; }
+  bool empty() const { return size_ == 0; }
+  const T &operator[](std::size_t i) const { return data_[i]; }
+  const T *begin() const { return data_; }
+  const T *end() const { return data_ + size_; }
+
+private:
+  const T *data_;
+  std::size_t size_;
+};
+"#;
+    let h = RUNTIME_BASE.replace("#include <span>\n", "");
+    let h = h.replace("std::span<const std::uint8_t>", "Span<const std::uint8_t>");
+    let h = h.replace("class Writer {", &format!("{SPAN_17}class Writer {{"));
+    h.replace(
+        "#include <vector>\n",
+        &format!("#include <vector>\n\n{BPS_MACROS}"),
+    )
+}
+
+/// Pre-C++17 runtime: includes for the requested standard plus a
+/// C++98-compatible runtime (polyfill `Optional`/`StringView`/`Span`,
+/// `bps_to_string`, index loops, a deep-copying raw-pointer `Box`).
+fn compat_runtime(std_ver: crate::CppStandard) -> String {
+    const HEAD_11: &str = r#"#pragma once
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+"#;
+    // Pre-C++11 has no `<cstdint>`; `<stdint.h>` declares the integer types
+    // globally (there is no `std::uint8_t`), so bring them into `std` the
+    // way `<cstdint>` itself does. (`std::size_t` already comes with
+    // `<stddef.h>`.)
+    const HEAD_98: &str = r#"#pragma once
+#include <algorithm>
+#include <stddef.h>
+#include <stdint.h>
+namespace std {
+using ::int8_t;
+using ::int16_t;
+using ::int32_t;
+using ::int64_t;
+using ::uint8_t;
+using ::uint16_t;
+using ::uint32_t;
+using ::uint64_t;
+}
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+"#;
+    let mut h = if std_ver.supports_cstdint() {
+        HEAD_11.to_string()
+    } else {
+        HEAD_98.to_string()
+    };
+    h.push('\n');
+    h.push_str(BPS_MACROS);
+    h.push_str(COMPAT_BODY);
+    h
+}
+
+/// Pre-C++17 runtime body: only C++98 constructs (index loops, no in-class
+/// member initializers, no `auto`, no `nullptr`), so the same text compiles
+/// under `-std=c++98` through `-std=c++14`.
+const COMPAT_BODY: &str = r#"namespace bps {
+struct Nullopt_t {};
+static Nullopt_t nullopt;
+template <typename T> class Optional {
+public:
+  Optional() : has_(false), value_() {}
+  Optional(const T &v) : has_(true), value_(v) {}
+  Optional(Nullopt_t) : has_(false), value_() {}
+  Optional(const Optional &o) : has_(o.has_), value_(o.value_) {}
+  Optional &operator=(const Optional &o) {
+    has_ = o.has_;
+    value_ = o.value_;
+    return *this;
+  }
+  Optional &operator=(const T &v) {
+    has_ = true;
+    value_ = v;
+    return *this;
+  }
+  Optional &operator=(Nullopt_t) {
+    reset();
+    return *this;
+  }
+  bool has_value() const { return has_; }
+  const T &value() const { return value_; }
+  T &value() { return value_; }
+  const T &operator*() const { return value_; }
+  T &operator*() { return value_; }
+  const T *operator->() const { return &value_; }
+  T *operator->() { return &value_; }
+  void reset() {
+    has_ = false;
+    value_ = T();
+  }
+  bool operator==(const Optional &o) const {
+    return has_ == o.has_ && (!has_ || value_ == o.value_);
+  }
+  bool operator!=(const Optional &o) const { return !(*this == o); }
+
+private:
+  bool has_;
+  T value_;
+};
+class StringView {
+public:
+  StringView() : data_(""), size_(0) {}
+  StringView(const char *s) : data_(s ? s : ""), size_(s ? std::strlen(s) : 0) {}
+  StringView(const std::string &s) : data_(s.data()), size_(s.size()) {}
+  StringView(const char *d, std::size_t n) : data_(d), size_(n) {}
+  const char *data() const { return data_; }
+  std::size_t size() const { return size_; }
+  bool empty() const { return size_ == 0; }
+  char operator[](std::size_t i) const { return data_[i]; }
+  const char *begin() const { return data_; }
+  const char *end() const { return data_ + size_; }
+
+private:
+  const char *data_;
+  std::size_t size_;
+};
+template <typename T> class Span {
+public:
+  Span() : data_(0), size_(0) {}
+  Span(const T *d, std::size_t n) : data_(d), size_(n) {}
+  template <typename U>
+  Span(const std::vector<U> &v)
+      : data_(v.empty() ? 0 : &v[0]), size_(v.size()) {}
+  const T *data() const { return data_; }
+  std::size_t size() const { return size_; }
+  bool empty() const { return size_ == 0; }
+  const T &operator[](std::size_t i) const { return data_[i]; }
+  const T *begin() const { return data_; }
+  const T *end() const { return data_ + size_; }
+
+private:
+  const T *data_;
+  std::size_t size_;
+};
+inline std::string bps_to_string(std::int64_t v) {
+  if (v == 0) {
+    return std::string("0");
+  }
+  bool neg = v < 0;
+  std::uint64_t u =
+      neg ? static_cast<std::uint64_t>(-(v + 1)) + 1 : static_cast<std::uint64_t>(v);
+  std::string s;
+  while (u != 0) {
+    s.push_back(static_cast<char>('0' + u % 10));
+    u /= 10;
+  }
+  if (neg) {
+    s.push_back('-');
+  }
+  std::reverse(s.begin(), s.end());
+  return s;
+}
+class CodecError : public std::runtime_error {
+public:
+  explicit CodecError(const std::string &what) : std::runtime_error(what) {}
+  virtual ~CodecError() throw() {}
+};
+class DecodeError : public CodecError {
+public:
+  DecodeError(const std::string &codec, std::size_t offset,
+              const std::string &what)
+      : CodecError("decode " + codec + " at offset " +
+                   bps_to_string(static_cast<std::int64_t>(offset)) + ": " +
+                   what),
+        codec(codec), offset(offset) {}
+  virtual ~DecodeError() throw() {}
+  std::string codec;
+  std::size_t offset;
+};
+class EncodeError : public CodecError {
+public:
+  EncodeError(const std::string &codec, const std::string &what)
+      : CodecError("encode " + codec + ": " + what), codec(codec) {}
+  virtual ~EncodeError() throw() {}
+  std::string codec;
+};
+inline bool is_utf8(const std::uint8_t *s, std::size_t n) BPS_NOEXCEPT {
+  std::size_t i = 0;
+  while (i < n) {
+    std::uint8_t c = s[i];
+    std::size_t need = 0;
+    std::uint32_t cp = 0;
+    if (c < 0x80) {
+      need = 1;
+      cp = c;
+    } else if (c < 0xC2) {
+      return false;
+    } else if (c < 0xE0) {
+      need = 2;
+      cp = c & 0x1F;
+    } else if (c < 0xF0) {
+      need = 3;
+      cp = c & 0x0F;
+    } else if (c < 0xF5) {
+      need = 4;
+      cp = c & 0x07;
+    } else {
+      return false;
+    }
+    if (i + need > n) {
+      return false;
+    }
+    for (std::size_t k = 1; k < need; ++k) {
+      if ((s[i + k] & 0xC0) != 0x80) {
+        return false;
+      }
+      cp = (cp << 6) | (s[i + k] & 0x3F);
+    }
+    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+      return false;
+    }
+    if ((need == 2 && cp < 0x80) || (need == 3 && cp < 0x800) ||
+        (need == 4 && cp < 0x10000)) {
+      return false;
+    }
+    i += need;
+  }
+  return true;
+}
+class Reader {
+public:
+  Reader(const std::uint8_t *data, std::size_t len)
+      : data_(data), len_(len), pos_(0) {}
+  std::size_t pos() const BPS_NOEXCEPT { return pos_; }
+  std::size_t remaining() const BPS_NOEXCEPT { return len_ - pos_; }
+  std::uint8_t u8(const char *codec) {
+    if (pos_ >= len_) {
+      throw DecodeError(codec, pos_, "short buffer: need 1 byte");
+    }
+    return data_[pos_++];
+  }
+  std::uint8_t peek_u8(const char *codec) const {
+    if (pos_ >= len_) {
+      throw DecodeError(codec, pos_, "short buffer: need 1 byte");
+    }
+    return data_[pos_];
+  }
+  std::vector<std::uint8_t> bytes(std::int64_t n, const char *codec) {
+    if (n < 0) {
+      throw DecodeError(codec, pos_, "negative length " + bps_to_string(n));
+    }
+    if (static_cast<std::uint64_t>(n) > remaining()) {
+      throw DecodeError(codec, pos_,
+                        "short buffer: need " + bps_to_string(n) + " bytes");
+    }
+    std::vector<std::uint8_t> out(data_ + pos_, data_ + pos_ + n);
+    pos_ += static_cast<std::size_t>(n);
+    return out;
+  }
+  std::vector<std::uint8_t> rest() {
+    std::vector<std::uint8_t> out(data_ + pos_, data_ + len_);
+    pos_ = len_;
+    return out;
+  }
+  float f32(const char *codec) {
+    std::vector<std::uint8_t> raw = bytes(4, codec);
+    std::uint32_t u = 0;
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+      u = (u << 8) | raw[i];
+    }
+    float f = 0;
+    std::memcpy(&f, &u, 4);
+    return f;
+  }
+  double f64(const char *codec) {
+    std::vector<std::uint8_t> raw = bytes(8, codec);
+    std::uint64_t u = 0;
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+      u = (u << 8) | raw[i];
+    }
+    double d = 0;
+    std::memcpy(&d, &u, 8);
+    return d;
+  }
+  std::string utf8(std::vector<std::uint8_t> raw, const char *codec) {
+    if (!is_utf8(raw.empty() ? 0 : &raw[0], raw.size())) {
+      throw DecodeError(codec, pos_, "invalid UTF-8");
+    }
+    return std::string(raw.begin(), raw.end());
+  }
+
+private:
+  const std::uint8_t *data_;
+  std::size_t len_;
+  std::size_t pos_;
+};
+class Writer {
+public:
+  std::vector<std::uint8_t> buf;
+  void u8(std::uint8_t v) { buf.push_back(v); }
+  void bytes(Span<const std::uint8_t> b) {
+    buf.insert(buf.end(), b.begin(), b.end());
+  }
+  void bytes_sized(Span<const std::uint8_t> b, std::int64_t n,
+                   const char *codec) {
+    if (n < 0 || b.size() > static_cast<std::size_t>(n)) {
+      throw EncodeError(codec, "bytes too long");
+    }
+    bytes(b);
+    buf.insert(buf.end(), static_cast<std::size_t>(n) - b.size(), 0);
+  }
+  void f32(float v) {
+    std::uint32_t u = 0;
+    std::memcpy(&u, &v, 4);
+    buf.push_back(static_cast<std::uint8_t>(u >> 24));
+    buf.push_back(static_cast<std::uint8_t>(u >> 16));
+    buf.push_back(static_cast<std::uint8_t>(u >> 8));
+    buf.push_back(static_cast<std::uint8_t>(u));
+  }
+  void f64(double v) {
+    std::uint64_t u = 0;
+    std::memcpy(&u, &v, 8);
+    for (int i = 7; i >= 0; --i) {
+      buf.push_back(static_cast<std::uint8_t>(u >> (8 * i)));
+    }
+  }
+};
+BPS_CONSTEXPR std::int64_t add_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+  return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) +
+                                   static_cast<std::uint64_t>(b));
+}
+BPS_CONSTEXPR std::int64_t sub_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+  return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) -
+                                   static_cast<std::uint64_t>(b));
+}
+BPS_CONSTEXPR std::int64_t mul_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+  return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) *
+                                   static_cast<std::uint64_t>(b));
+}
+BPS_CONSTEXPR std::int64_t shl_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+  return static_cast<std::int64_t>(static_cast<std::uint64_t>(a)
+                                   << static_cast<unsigned>(b));
+}
+BPS_CONSTEXPR std::int64_t div_floor(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+  if (b == 0) {
+    return 0;
+  }
+  if (a == INT64_MIN && b == -1) {
+    return INT64_MIN;
+  }
+  std::int64_t q = a / b;
+  std::int64_t r = a % b;
+  if (r != 0 && ((a < 0) != (b < 0))) {
+    --q;
+  }
+  return q;
+}
+BPS_CONSTEXPR std::int64_t mod_sign(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+  if (b == 0) {
+    return 0;
+  }
+  if (a == INT64_MIN && b == -1) {
+    return 0;
+  }
+  std::int64_t r = a % b;
+  if (r != 0 && ((a < 0) != (b < 0))) {
+    r += b;
+  }
+  return r;
+}
+BPS_CONSTEXPR std::int64_t sign_extend(std::int64_t v, std::int64_t bits) BPS_NOEXCEPT {
+  if (bits <= 0 || bits >= 64) {
+    return v;
+  }
+  std::uint64_t u = static_cast<std::uint64_t>(v);
+  std::uint64_t sign = static_cast<std::uint64_t>(1) << (bits - 1);
+  std::uint64_t mask = (static_cast<std::uint64_t>(1) << bits) - 1;
+  u &= mask;
+  if ((u & sign) != 0) {
+    u |= ~mask;
+  }
+  return static_cast<std::int64_t>(u);
+}
+inline std::int64_t utf16_units(StringView s) {
+  std::int64_t n = 0;
+  std::size_t i = 0;
+  while (i < s.size()) {
+    std::uint8_t c = static_cast<std::uint8_t>(s[i]);
+    std::uint32_t cp = 0;
+    std::size_t need = 1;
+    if (c < 0x80) {
+      cp = c;
+      need = 1;
+    } else if (c < 0xE0) {
+      cp = c & 0x1F;
+      need = 2;
+    } else if (c < 0xF0) {
+      cp = c & 0x0F;
+      need = 3;
+    } else {
+      cp = c & 0x07;
+      need = 4;
+    }
+    if (i + need > s.size()) {
+      break;
+    }
+    for (std::size_t j = 1; j < need; ++j) {
+      cp = (cp << 6) | (static_cast<std::uint8_t>(s[i + j]) & 0x3F);
+    }
+    i += need;
+    n += cp > 0xFFFF ? 2 : 1;
+  }
+  return n;
+}
+inline std::int64_t utf8_len(StringView s) BPS_NOEXCEPT {
+  return static_cast<std::int64_t>(s.size());
+}
+inline std::int64_t str_len(StringView s) BPS_NOEXCEPT {
+  std::int64_t n = 0;
+  for (std::size_t i = 0; i < s.size(); ++i) {
+    if ((static_cast<std::uint8_t>(s[i]) & 0xC0) != 0x80) {
+      ++n;
+    }
+  }
+  return n;
+}
+inline std::int64_t bytes_len(const std::vector<std::uint8_t> &b) {
+  return static_cast<std::int64_t>(b.size());
+}
+template <typename T> inline std::int64_t list_len(const std::vector<T> &v) {
+  return static_cast<std::int64_t>(v.size());
+}
+inline std::vector<std::uint8_t> str_bytes(StringView s) {
+  return std::vector<std::uint8_t>(s.begin(), s.end());
+}
+template <typename T> struct Box {
+  T *p;
+  Box() : p(new T()) {}
+  Box(const T &v) : p(new T(v)) {}
+  Box(const Box &o) : p(o.p ? new T(*o.p) : 0) {}
+  Box &operator=(const Box &o) {
+    if (this != &o) {
+      T *q = o.p ? new T(*o.p) : 0;
+      delete p;
+      p = q;
+    }
+    return *this;
+  }
+  ~Box() { delete p; }
+  T &operator*() { return *p; }
+  const T &operator*() const { return *p; }
+  T *operator->() { return p; }
+  const T *operator->() const { return p; }
+  bool operator==(const Box &o) const { return *p == *o.p; }
+  bool operator!=(const Box &o) const { return !(*this == o); }
+};
+"#;
 
 // ---------------------------------------------------------------------------
 // Header and source.
@@ -1117,18 +1678,17 @@ fn member_ty(
     fi: usize,
     ty: &Ty,
     optional: bool,
+    std_ver: crate::CppStandard,
 ) -> String {
-    let inner = cpp_ty(program, ty);
-    let stored = if optional {
-        format!("std::optional<{inner}>")
-    } else {
-        inner
-    };
-    if layout.boxed_field.contains(&(ti, fi)) {
-        format!("Box<{stored}>")
-    } else {
-        stored
-    }
+    let stored = opt_cpp(program, ty, optional, std_ver);
+    angles(
+        if layout.boxed_field.contains(&(ti, fi)) {
+            format!("Box<{stored}>")
+        } else {
+            stored
+        },
+        std_ver,
+    )
 }
 
 /// `bool operator==(const T &) const = default;`, preferring fewer lines:
@@ -1158,25 +1718,285 @@ fn emit_defaulted_eq(src: &mut Src, name: &str) {
     src.ind -= 1;
 }
 
-fn emit_type(program: &Program, layout: &Layout, src: &mut Src, item: &Item) {
+/// Defaulted `==` on C++20 and later, explicit comparison below it
+/// (defaulted comparison is C++20). `exprs` compare against `o`
+/// (`"value == o.value"`); empty means trivially equal.
+fn emit_eq(src: &mut Src, name: &str, exprs: &[String], std_ver: crate::CppStandard) {
+    if std_ver.supports_designated_init() {
+        emit_defaulted_eq(src, name);
+    } else {
+        emit_manual_eq(src, name, exprs);
+    }
+}
+
+/// Explicit `operator==`/`!=` for pre-C++20.
+fn emit_manual_eq(src: &mut Src, name: &str, exprs: &[String]) {
+    if exprs.is_empty() {
+        let one = format!("bool operator==(const {name} &o) const {{ (void)o; return true; }}");
+        if src.ind * 2 + one.len() <= MAX_COL {
+            src.line(&one);
+        } else {
+            src.open(&format!("bool operator==(const {name} &o) const"));
+            src.line("(void)o;");
+            src.line("return true;");
+            src.close("}");
+        }
+    } else {
+        let one = format!(
+            "bool operator==(const {name} &o) const {{ return {}; }}",
+            exprs.join(" && ")
+        );
+        if src.ind * 2 + one.len() <= MAX_COL {
+            src.line(&one);
+        } else {
+            src.open(&format!("bool operator==(const {name} &o) const"));
+            for (i, e) in exprs.iter().enumerate() {
+                let last = i + 1 == exprs.len();
+                let kw = if i == 0 { "return " } else { "    " };
+                let tail = if last { ";" } else { " &&" };
+                src.line(&format!("{kw}{e}{tail}"));
+            }
+            src.close("}");
+        }
+    }
+    let none = format!("bool operator!=(const {name} &o) const {{ return !(*this == o); }}");
+    if src.ind * 2 + none.len() <= MAX_COL {
+        src.line(&none);
+    } else {
+        src.open(&format!("bool operator!=(const {name} &o) const"));
+        src.line("return !(*this == o);");
+        src.close("}");
+    }
+}
+
+/// In-class constructor declarations plus out-of-line definitions for
+/// pre-C++11 records. `Foo{a, b}` temporary construction is C++11;
+/// `Foo(a, b)` needs the constructor. Parameters shadow the members by
+/// name, so `n(n)` initializes member `n` from the argument.
+///
+/// Definitions live after every type is complete: a member may be a
+/// `Box<T>` over a still-incomplete `T`, which only the end of the header
+/// can construct.
+fn emit_ctors(
+    program: &Program,
+    layout: &Layout,
+    src: &mut Src,
+    late: &mut Src,
+    ti: TypeIdx,
+    fields: &[crate::ir::typed::FieldDecl],
+    std_ver: crate::CppStandard,
+) {
+    let name = pascal(&program.types[ti].name);
+    if fields.is_empty() {
+        src.line(&format!("{name}();"));
+        late.line(&format!("inline {name}::{name}() {{}}"));
+        late.line("");
+        return;
+    }
+    let params = fields
+        .iter()
+        .enumerate()
+        .map(|(fi, f)| {
+            format!(
+                "const {} &{}",
+                member_ty(program, layout, ti, fi, &f.ty, f.optional, std_ver),
+                snake(&f.name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let init = fields
+        .iter()
+        .map(|f| {
+            let n = snake(&f.name);
+            format!("{n}({n})")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let zeros = fields
+        .iter()
+        .map(|f| format!("{}()", snake(&f.name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    src.line(&format!("{name}();"));
+    src.line(&format!("{name}({params});"));
+    late.line(&format!("inline {name}::{name}(): {zeros} {{}}"));
+    late.line(&format!("inline {name}::{name}({params}): {init} {{}}"));
+    late.line("");
+}
+
+/// A sum for pre-C++17: one tagged struct holding every alternative, with
+/// per-alternative factories (`make_valueK`), `index()`, and explicit
+/// comparison. (`std::variant` needs C++17.)
+fn emit_tagged_sum(
+    program: &Program,
+    layout: &Layout,
+    src: &mut Src,
+    late: &mut Src,
+    ti: TypeIdx,
+    variants: &[crate::ir::typed::VariantDecl],
+    std_ver: crate::CppStandard,
+) {
+    let name = pascal(&program.types[ti].name);
+    // Wrappers first (same shapes as the `std::variant` path).
+    for (vi, variant) in variants.iter().enumerate() {
+        let w = layout.wrapper(ti, vi);
+        if w.existing.is_some() {
+            continue;
+        }
+        src.line(&format!("// Variant {}.{}.", name, pascal(&variant.name)));
+        src.open(&format!("struct {}", w.name));
+        let exprs = if let Some(p) = &w.payload {
+            let pty = cpp_ty(program, p, std_ver);
+            let wi = layout.wrapper_of[&(ti, vi)];
+            let stored = angles(
+                if layout.boxed_payload.contains(&wi) {
+                    format!("Box<{pty}>")
+                } else {
+                    pty
+                },
+                std_ver,
+            );
+            src.line(&format!("{stored} value;"));
+            vec!["value == o.value".to_string()]
+        } else {
+            vec![]
+        };
+        emit_eq(src, &w.name, &exprs, std_ver);
+        src.close("};");
+    }
+    // The tagged struct itself.
+    let mut members: Vec<(String, String)> = Vec::new();
+    for (vi, _) in variants.iter().enumerate() {
+        let w = layout.wrapper(ti, vi);
+        let base = w
+            .existing
+            .map(|t| pascal(&program.types[t].name))
+            .unwrap_or_else(|| w.name.clone());
+        let stored = angles(
+            if layout.boxed_alt.contains(&(ti, vi)) {
+                format!("Box<{base}>")
+            } else {
+                base
+            },
+            std_ver,
+        );
+        members.push((format!("value{vi}"), stored));
+    }
+    src.open(&format!("struct {name}"));
+    src.line("int tag_;");
+    for (m, t) in &members {
+        src.line(&format!("{t} {m};"));
+    }
+    // Constructors and factories are defined after every type is complete
+    // (a member may be a `Box<T>` over a still-incomplete `T`).
+    src.line(&format!("{name}();"));
+    for (vi, variant) in variants.iter().enumerate() {
+        match &variant.payload {
+            None => src.line(&format!("static {name} make_value{vi}();")),
+            Some(p) => {
+                let pty = cpp_ty(program, p, std_ver);
+                src.line(&format!("static {name} make_value{vi}(const {pty} &v);"));
+            }
+        }
+    }
+    src.line("int index() const { return tag_; }");
+    let mut exprs = vec!["tag_ == o.tag_".to_string()];
+    for (m, _) in &members {
+        exprs.push(format!("{m} == o.{m}"));
+    }
+    emit_eq(src, &name, &exprs, std_ver);
+    src.close("};");
+    let init = if members.is_empty() {
+        "tag_(0)".to_string()
+    } else {
+        format!(
+            "tag_(0), {}",
+            members
+                .iter()
+                .map(|(m, _)| format!("{m}()"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    late.line(&format!("inline {name}::{name}(): {init} {{}}"));
+    for (vi, variant) in variants.iter().enumerate() {
+        let (m, _) = &members[vi];
+        let boxed = layout.boxed_alt.contains(&(ti, vi));
+        let (params, body) = match &variant.payload {
+            None => (
+                "()".to_string(),
+                format!("{name} s; s.tag_ = {vi}; return s;"),
+            ),
+            Some(p) => {
+                let pty = cpp_ty(program, p, std_ver);
+                let w = layout.wrapper(ti, vi);
+                let whole = matches!(p, Ty::Named(t) if Some(*t) == w.existing);
+                let assign = if whole {
+                    if boxed {
+                        format!("*s.{m} = v;")
+                    } else {
+                        format!("s.{m} = v;")
+                    }
+                } else if boxed {
+                    format!("s.{m}->value = v;")
+                } else {
+                    format!("s.{m}.value = v;")
+                };
+                (
+                    format!("(const {pty} &v)"),
+                    format!("{name} s; s.tag_ = {vi}; {assign} return s;"),
+                )
+            }
+        };
+        late.line(&format!(
+            "inline {name} {name}::make_value{vi}{params} {{ {body} }}"
+        ));
+    }
+    late.line("");
+}
+
+fn emit_type(
+    program: &Program,
+    layout: &Layout,
+    src: &mut Src,
+    late: &mut Src,
+    item: &Item,
+    std_ver: crate::CppStandard,
+) {
     match item {
         Item::Type(ti) => {
             let decl = &program.types[*ti];
             src.lines(&origin_doc(program, &decl.origin));
             match &decl.kind {
                 crate::ir::typed::TypeKind::Record { fields } => {
-                    src.open(&format!("struct {}", pascal(&decl.name)));
+                    let name = pascal(&decl.name);
+                    src.open(&format!("struct {name}"));
                     for (fi, f) in fields.iter().enumerate() {
                         src.line(&format!(
                             "{} {};",
-                            member_ty(program, layout, *ti, fi, &f.ty, f.optional),
+                            member_ty(program, layout, *ti, fi, &f.ty, f.optional, std_ver),
                             snake(&f.name)
                         ));
                     }
-                    emit_defaulted_eq(src, &pascal(&decl.name));
+                    if !std_ver.supports_braced_init() {
+                        emit_ctors(program, layout, src, late, *ti, fields, std_ver);
+                    }
+                    let exprs = fields
+                        .iter()
+                        .map(|f| {
+                            let n = snake(&f.name);
+                            format!("{n} == o.{n}")
+                        })
+                        .collect::<Vec<_>>();
+                    emit_eq(src, &name, &exprs, std_ver);
                     src.close("};");
                 }
                 crate::ir::typed::TypeKind::Sum { variants } => {
+                    if !std_ver.supports_std_variant() {
+                        emit_tagged_sum(program, layout, src, late, *ti, variants, std_ver);
+                        return;
+                    }
                     for (vi, variant) in variants.iter().enumerate() {
                         let w = layout.wrapper(*ti, vi);
                         if w.existing.is_some() {
@@ -1188,8 +2008,8 @@ fn emit_type(program: &Program, layout: &Layout, src: &mut Src, item: &Item) {
                             pascal(&variant.name)
                         ));
                         src.open(&format!("struct {}", w.name));
-                        if let Some(p) = &w.payload {
-                            let pty = cpp_ty(program, p);
+                        let exprs = if let Some(p) = &w.payload {
+                            let pty = cpp_ty(program, p, std_ver);
                             let wi = layout.wrapper_of[&(*ti, vi)];
                             let stored = if layout.boxed_payload.contains(&wi) {
                                 format!("Box<{pty}>")
@@ -1197,8 +2017,11 @@ fn emit_type(program: &Program, layout: &Layout, src: &mut Src, item: &Item) {
                                 pty
                             };
                             src.line(&format!("{stored} value;"));
-                        }
-                        emit_defaulted_eq(src, &w.name);
+                            vec!["value == o.value".to_string()]
+                        } else {
+                            vec![]
+                        };
+                        emit_eq(src, &w.name, &exprs, std_ver);
                         src.close("};");
                     }
                     let mut alts = Vec::new();
@@ -1217,6 +2040,10 @@ fn emit_type(program: &Program, layout: &Layout, src: &mut Src, item: &Item) {
                     emit_using(src, &pascal(&decl.name), &alts);
                 }
                 crate::ir::typed::TypeKind::Enum { base, members } => {
+                    if !std_ver.supports_enum_class() {
+                        emit_plain_enum(src, &pascal(&decl.name), *base, members);
+                        return;
+                    }
                     let head = format!("enum class {} : {}", pascal(&decl.name), int_cpp(*base));
                     let inits = members
                         .iter()
@@ -1236,11 +2063,14 @@ fn emit_type(program: &Program, layout: &Layout, src: &mut Src, item: &Item) {
                     }
                 }
                 crate::ir::typed::TypeKind::Alias { target } => {
-                    src.line(&format!(
-                        "using {} = {};",
-                        pascal(&decl.name),
-                        pascal(&program.types[*target].name)
-                    ));
+                    let alias = pascal(&decl.name);
+                    let base = pascal(&program.types[*target].name);
+                    if std_ver.supports_braced_init() {
+                        src.line(&format!("using {alias} = {base};"));
+                    } else {
+                        // Pre-C++11 has no alias declarations.
+                        src.line(&format!("typedef {base} {alias};"));
+                    }
                 }
             }
         }
@@ -1248,6 +2078,32 @@ fn emit_type(program: &Program, layout: &Layout, src: &mut Src, item: &Item) {
             // Synthetic wrappers are defined with their sum.
         }
     }
+}
+
+/// An open enum for pre-C++11: a struct over the base type. The nested
+/// `enum` keeps `Name::Member` spelling, the explicit constructor keeps
+/// `static_cast<Name>(v)` (unknown values survive), and the conversion
+/// operator keeps `static_cast<base>(e)` and comparisons working.
+fn emit_plain_enum(
+    src: &mut Src,
+    name: &str,
+    base: IntTy,
+    members: &[crate::ir::typed::EnumMember],
+) {
+    src.open(&format!("struct {name}"));
+    src.open("enum Enum");
+    for (i, m) in members.iter().enumerate() {
+        let comma = if i + 1 == members.len() { "" } else { "," };
+        src.line(&format!("{} = {}{}", pascal(&m.name), m.value, comma));
+    }
+    src.close("};");
+    let base_ty = int_cpp(base);
+    src.line(&format!("{base_ty} value;"));
+    src.line(&format!("{name}(): value(0) {{}}"));
+    src.line(&format!("explicit {name}({base_ty} v): value(v) {{}}"));
+    src.line(&format!("operator {base_ty}() const {{ return value; }}"));
+    emit_manual_eq(src, name, &["value == o.value".to_string()]);
+    src.close("};");
 }
 
 /// `using Name = std::variant<...>;`, one line when it fits. An overlong
@@ -1849,12 +2705,13 @@ fn pack_sig(src: &mut Src, head: &str, args: &[String], end: &str) {
     }
 }
 
-fn emit_header(program: &Program, layout: &Layout) -> BpsResult<String> {
+fn emit_header(
+    program: &Program,
+    layout: &Layout,
+    std_ver: crate::CppStandard,
+) -> BpsResult<String> {
     let mut src = Src::new();
-    src.raw(RUNTIME_BASE);
-    if layout.uses_i128 {
-        src.raw(RUNTIME_128);
-    }
+    src.raw(&runtime_header(layout.uses_i128, std_ver));
     for decl in &program.types {
         if matches!(decl.kind, crate::ir::typed::TypeKind::Record { .. }) {
             src.line(&format!("struct {};", pascal(&decl.name)));
@@ -1866,6 +2723,10 @@ fn emit_header(program: &Program, layout: &Layout) -> BpsResult<String> {
         }
     }
     src.line("");
+    // Out-of-line constructor/factory definitions, flushed after every type
+    // is complete. Empty on C++17 and later (nothing needs it there), so the
+    // default output is unchanged.
+    let mut late = Src::new();
     let mut first = true;
     for item in &layout.order {
         if matches!(item, Item::Wrapper) {
@@ -1875,16 +2736,20 @@ fn emit_header(program: &Program, layout: &Layout) -> BpsResult<String> {
             src.line("");
         }
         first = false;
-        emit_type(program, layout, &mut src, item);
+        emit_type(program, layout, &mut src, &mut late, item, std_ver);
+    }
+    if !late.out.is_empty() {
+        src.line("");
+        src.raw(&late.out);
     }
     for (ci, codec) in program.codecs.iter().enumerate() {
         let (rname, wname) = cursor_names(&codec.decode);
         src.line("");
         src.lines(&origin_doc(program, &codec.origin));
-        let decode = sig_string(program, ci, true, &rname, &wname)?;
+        let decode = sig_string(program, ci, true, &rname, &wname, std_ver)?;
         pack_sig(&mut src, &decode.0, &decode.1, ");");
         src.lines(&origin_doc(program, &codec.origin));
-        let encode = sig_string(program, ci, false, &rname, &wname)?;
+        let encode = sig_string(program, ci, false, &rname, &wname, std_ver)?;
         pack_sig(&mut src, &encode.0, &encode.1, ");");
     }
     src.line("} // namespace bps");
@@ -1926,13 +2791,21 @@ fn sig_string(
     decode: bool,
     rname: &str,
     wname: &str,
+    std_ver: crate::CppStandard,
 ) -> BpsResult<(String, Vec<String>)> {
     let c = &program.codecs[codec];
     let body = if decode { &c.decode } else { &c.encode };
     if decode {
+        // Pre-C++17 has no `[[nodiscard]]`; the header's BPS_NODISCARD
+        // macro expands to it (or nothing) per `__cplusplus`.
+        let discard = if std_ver.supports_nodiscard() {
+            "[[nodiscard]]"
+        } else {
+            "BPS_NODISCARD"
+        };
         let head = format!(
-            "[[nodiscard]] {} {}",
-            cpp_ty(program, &c.value),
+            "{discard} {} {}",
+            cpp_ty(program, &c.value, std_ver),
             decode_fn(program, codec)
         );
         let mut args = Vec::new();
@@ -1948,7 +2821,13 @@ fn sig_string(
             } else {
                 Some(snake(&body.locals[local].name))
             };
-            args.push(param_decl(program, &p.ty, p.optional, name.as_deref()));
+            args.push(param_decl(
+                program,
+                &p.ty,
+                p.optional,
+                name.as_deref(),
+                std_ver,
+            ));
         }
         Ok((head, args))
     } else {
@@ -1968,7 +2847,13 @@ fn sig_string(
             "Writer &".to_string()
         });
         let l = &body.locals[value];
-        args.push(param_decl(program, &l.ty, l.optional, name.as_deref()));
+        args.push(param_decl(
+            program,
+            &l.ty,
+            l.optional,
+            name.as_deref(),
+            std_ver,
+        ));
         for (i, p) in c.params.iter().enumerate() {
             let local = body.params[i];
             let name = if body.locals[local].uses == 0 {
@@ -1976,32 +2861,50 @@ fn sig_string(
             } else {
                 Some(snake(&body.locals[local].name))
             };
-            args.push(param_decl(program, &p.ty, p.optional, name.as_deref()));
+            args.push(param_decl(
+                program,
+                &p.ty,
+                p.optional,
+                name.as_deref(),
+                std_ver,
+            ));
         }
         Ok((head, args))
     }
 }
 
-fn param_decl(program: &Program, ty: &Ty, optional: bool, name: Option<&str>) -> String {
-    let t = param_t(program, ty, optional);
+fn param_decl(
+    program: &Program,
+    ty: &Ty,
+    optional: bool,
+    name: Option<&str>,
+    std_ver: crate::CppStandard,
+) -> String {
+    let t = param_t(program, ty, optional, std_ver);
     let by_value = !optional
         && (matches!(ty, Ty::Int(_) | Ty::Bool | Ty::F32 | Ty::F64) || is_enum_ty(program, ty));
     let borrowed = matches!(ty, Ty::Str) && !optional;
+    // Pre-C++17 borrows strings as the header's `StringView` polyfill.
+    let view = if std_ver.supports_std_string_view() {
+        "std::string_view"
+    } else {
+        "StringView"
+    };
     match (by_value, borrowed, name) {
         (true, _, Some(n)) => format!("{t} {n}"),
         (true, _, None) => t,
-        (_, true, Some(n)) => format!("std::string_view {n}"),
-        (_, true, None) => "std::string_view".to_string(),
+        (_, true, Some(n)) => format!("{view} {n}"),
+        (_, true, None) => view.to_string(),
         (_, _, Some(n)) => format!("const {t} &{n}"),
         (_, _, None) => format!("const {t} &"),
     }
 }
 
 /// A parameter's C++ spelling: a `std::string` parameter is borrowed as a
-/// `std::string_view` (the codecs only read it), everything else keeps its
-/// value spelling (`std::optional<T>` when the parameter is optional).
-fn param_t(program: &Program, ty: &Ty, optional: bool) -> String {
-    opt_cpp(program, ty, optional)
+/// string view (the codecs only read it), everything else keeps its value
+/// spelling (optional wrapped per the standard).
+fn param_t(program: &Program, ty: &Ty, optional: bool, std_ver: crate::CppStandard) -> String {
+    opt_cpp(program, ty, optional, std_ver)
 }
 
 fn is_enum_ty(program: &Program, ty: &Ty) -> bool {
@@ -2012,7 +2915,11 @@ fn is_enum_ty(program: &Program, ty: &Ty) -> bool {
     )
 }
 
-fn emit_sources(program: &Program, layout: &Layout) -> BpsResult<BTreeMap<String, String>> {
+fn emit_sources(
+    program: &Program,
+    layout: &Layout,
+    std_ver: crate::CppStandard,
+) -> BpsResult<BTreeMap<String, String>> {
     let mut bodies: BTreeMap<String, Src> = BTreeMap::new();
     for ci in 0..program.codecs.len() {
         let stem = program.output_stem(&program.codecs[ci].origin);
@@ -2021,7 +2928,7 @@ fn emit_sources(program: &Program, layout: &Layout) -> BpsResult<BTreeMap<String
             if !src.out.is_empty() {
                 src.line("");
             }
-            src.raw(&emit_function(program, layout, ci, decode)?);
+            src.raw(&emit_function(program, layout, ci, decode, std_ver)?);
         }
     }
     let mut files = BTreeMap::new();
@@ -2108,6 +3015,8 @@ fn expr_reads(e: &Expr) -> bool {
 struct Emitter<'a> {
     program: &'a Program,
     layout: &'a Layout,
+    /// The requested language standard; every emission consults it.
+    std: crate::CppStandard,
     snake: String,
     body: &'a Body,
     is_encode: bool,
@@ -2129,6 +3038,7 @@ fn emit_function(
     layout: &Layout,
     codec: CodecIdx,
     decode: bool,
+    std_ver: crate::CppStandard,
 ) -> BpsResult<String> {
     let c = &program.codecs[codec];
     let body: &Body = if decode { &c.decode } else { &c.encode };
@@ -2136,6 +3046,7 @@ fn emit_function(
     let mk = |src: Src| Emitter {
         program,
         layout,
+        std: std_ver,
         snake: c.name.snake(),
         body,
         is_encode: !decode,
@@ -2146,7 +3057,7 @@ fn emit_function(
         declared: HashSet::new(),
         src,
     };
-    let (head, args) = sig_string(program, codec, decode, &rname, &wname)?;
+    let (head, args) = sig_string(program, codec, decode, &rname, &wname, std_ver)?;
     let sig_one = format!("{head}({})", args.join(", "));
     // Render the body aside at function-level indent, so width checks are
     // exact; short bodies join onto the signature line.
@@ -2203,8 +3114,9 @@ impl<'a> Emitter<'a> {
         if !dst.declare {
             return name;
         }
-        let ty = opt_cpp(self.program, &l.ty, l.optional);
-        if l.uses == 0 {
+        let ty = opt_cpp(self.program, &l.ty, l.optional, self.std);
+        // `[[maybe_unused]]` is C++17; older standards simply omit it.
+        if l.uses == 0 && self.std.supports_nodiscard() {
             format!("[[maybe_unused]] {ty} {name}")
         } else {
             format!("{ty} {name}")
@@ -2266,7 +3178,7 @@ impl<'a> Emitter<'a> {
                 Some((call_head(*func).to_string(), vals))
             }
             Expr::Cast { expr, to } => Some((
-                format!("static_cast<{}>", cpp_ty(self.program, to)),
+                format!("static_cast<{}>", cpp_ty(self.program, to, self.std)),
                 vec![self.val(expr)],
             )),
             Expr::StrBytes(inner) => Some(("str_bytes".to_string(), vec![self.val(inner)])),
@@ -2289,12 +3201,23 @@ impl<'a> Emitter<'a> {
     fn stmt(&mut self, s: &Stmt) {
         match s {
             Stmt::Declare { local, .. } => {
-                let d = self.bind_decl(&crate::ir::typed::Bind {
-                    local: *local,
-                    declare: true,
-                    some: false,
-                });
-                self.src.line(&format!("{d}{{}};"));
+                if self.std.supports_braced_init() {
+                    let d = self.bind_decl(&crate::ir::typed::Bind {
+                        local: *local,
+                        declare: true,
+                        some: false,
+                    });
+                    self.src.line(&format!("{d}{{}};"));
+                } else {
+                    // Pre-C++11 has no `{}` value-initialization; copy from
+                    // a value-initialized temporary instead (scalars must
+                    // still start at zero: varint decoders read their bytes
+                    // conditionally).
+                    let l = &self.body.locals[*local];
+                    let ty = opt_cpp(self.program, &l.ty, l.optional, self.std);
+                    let name = snake(&l.name);
+                    self.src.line(&format!("{ty} {name} = {ty}();"));
+                }
             }
             Stmt::Let { dst, value } => {
                 let d = self.bind_decl(dst);
@@ -2335,7 +3258,12 @@ impl<'a> Emitter<'a> {
                     Expr::Local(id)
                         if self.body.locals[*id].uses == 1 && !self.body.locals[*id].optional =>
                     {
-                        format!("std::move({})", self.local_name(*id))
+                        // Pre-C++11 has no move semantics; copy instead.
+                        if self.std.supports_braced_init() {
+                            format!("std::move({})", self.local_name(*id))
+                        } else {
+                            self.local_name(*id)
+                        }
                     }
                     _ => self.val(src),
                 };
@@ -2393,9 +3321,9 @@ impl<'a> Emitter<'a> {
                 let access = format!("{base}{dot}value()");
                 if dst.declare {
                     let l = &self.body.locals[dst.local];
-                    let ty = cpp_ty(self.program, &l.ty);
+                    let ty = cpp_ty(self.program, &l.ty, self.std);
                     let name = snake(&l.name);
-                    let decl = if l.uses == 0 {
+                    let decl = if l.uses == 0 && self.std.supports_nodiscard() {
                         format!("[[maybe_unused]] const {ty} &{name}")
                     } else {
                         format!("const {ty} &{name}")
@@ -2451,14 +3379,39 @@ impl<'a> Emitter<'a> {
                 let l = list.clone();
                 let lv = self.val(&l);
                 let iname = self.local_name(*item);
-                self.src.open(&format!("for (const auto &{iname} : {lv})"));
-                self.loop_depth += 1;
-                let body = body.clone();
-                for s in &body {
-                    self.stmt(s);
+                if self.std.supports_range_for() {
+                    self.src.open(&format!("for (const auto &{iname} : {lv})"));
+                    self.loop_depth += 1;
+                    let body = body.clone();
+                    for s in &body {
+                        self.stmt(s);
+                    }
+                    self.loop_depth -= 1;
+                    self.src.close("}");
+                } else {
+                    // Pre-C++11 has no range-based for; hoist the list and
+                    // index it. The const reference extends a temporary.
+                    let (lty, _) = self.program.expr_ty(self.body, &l);
+                    let elem = match &lty {
+                        Ty::List(inner) => cpp_ty(self.program, inner, self.std),
+                        other => cpp_ty(self.program, other, self.std),
+                    };
+                    let elem_vec = angles(format!("std::vector<{elem}>"), self.std);
+                    let d = self.loop_depth;
+                    self.decl_init(&format!("const {elem_vec} &_fr{d}"), &lv);
+                    self.src.open(&format!(
+                        "for (std::size_t _fi{d} = 0; _fi{d} < _fr{d}.size(); ++_fi{d})"
+                    ));
+                    self.src
+                        .line(&format!("const {elem} &{iname} = _fr{d}[_fi{d}];"));
+                    self.loop_depth += 1;
+                    let body = body.clone();
+                    for s in &body {
+                        self.stmt(s);
+                    }
+                    self.loop_depth -= 1;
+                    self.src.close("}");
                 }
-                self.loop_depth -= 1;
-                self.src.close("}");
             }
             Stmt::ExpectVariant {
                 dst,
@@ -2560,12 +3513,15 @@ impl<'a> Emitter<'a> {
 
     /// The `std::to_string` operand of a dynamic error message, printed inline
     /// as one expression; long throw lines break around it canonically.
+    /// Pre-C++11 uses the header's `bps_to_string` helper instead.
     fn stringify_operand(&mut self, e: &Expr) -> String {
         let (ty, _) = self.program.expr_ty(self.body, e);
         let stringify = if matches!(ty, Ty::Int(IntTy::I128)) {
             "str128"
-        } else {
+        } else if self.std.supports_braced_init() {
             "std::to_string"
+        } else {
+            "bps_to_string"
         };
         let v = e.clone();
         let s = self.val(&v);
@@ -2606,13 +3562,14 @@ impl<'a> Emitter<'a> {
         };
         if !self.declared.contains(&list) {
             let item_ty = match &lty {
-                Ty::List(inner) => cpp_ty(self.program, inner),
-                other => cpp_ty(self.program, other),
+                Ty::List(inner) => cpp_ty(self.program, inner, self.std),
+                other => cpp_ty(self.program, other, self.std),
             };
-            let decl = if luses == 0 {
-                format!("[[maybe_unused]] std::vector<{item_ty}> {lname}")
+            let item_vec = angles(format!("std::vector<{item_ty}>"), self.std);
+            let decl = if luses == 0 && self.std.supports_nodiscard() {
+                format!("[[maybe_unused]] {item_vec} {lname}")
             } else {
-                format!("std::vector<{item_ty}> {lname}")
+                format!("{item_vec} {lname}")
             };
             self.src.line(&format!("{decl};"));
             self.declared.insert(list);
@@ -2700,12 +3657,31 @@ impl<'a> Emitter<'a> {
         }
         self.loop_depth -= 1;
         let iname = self.local_name(item);
-        self.src
-            .line(&format!("{lname}.push_back(std::move({iname}));"));
+        // Pre-C++11 has no move semantics; copy instead.
+        if self.std.supports_braced_init() {
+            self.src
+                .line(&format!("{lname}.push_back(std::move({iname}));"));
+        } else {
+            self.src.line(&format!("{lname}.push_back({iname});"));
+        }
         self.src.close("}");
     }
 
     fn stmt_expect(
+        &mut self,
+        dst: &Option<crate::ir::typed::Bind>,
+        sum: &Expr,
+        ty: TypeIdx,
+        variant: usize,
+    ) {
+        if self.std.supports_std_variant() {
+            self.stmt_expect_variant(dst, sum, ty, variant);
+        } else {
+            self.stmt_expect_tagged(dst, sum, ty, variant);
+        }
+    }
+
+    fn stmt_expect_variant(
         &mut self,
         dst: &Option<crate::ir::typed::Bind>,
         sum: &Expr,
@@ -2754,7 +3730,12 @@ impl<'a> Emitter<'a> {
             let w = self.layout.wrapper(ty, variant);
             let l = &self.body.locals[d.local];
             let whole = matches!(&p, Ty::Named(t) if Some(*t) == w.existing);
-            (cpp_ty(self.program, &p), snake(&l.name), l.uses, whole)
+            (
+                cpp_ty(self.program, &p, self.std),
+                snake(&l.name),
+                l.uses,
+                whole,
+            )
         };
         let init = if is_whole {
             if boxed {
@@ -2771,7 +3752,75 @@ impl<'a> Emitter<'a> {
             self.src.line(&format!("{pname} = {init};"));
             return;
         }
-        let decl = if puses == 0 {
+        let decl = if puses == 0 && self.std.supports_nodiscard() {
+            format!("[[maybe_unused]] const {pty} &{pname}")
+        } else {
+            format!("const {pty} &{pname}")
+        };
+        self.decl_init(&decl, &init);
+        self.declared.insert(d.local);
+    }
+
+    /// Pre-C++17 `ExpectVariant`: check the tagged struct's `tag_` and bind
+    /// the active member (`valueK`, or its `value` for wrapper payloads).
+    fn stmt_expect_tagged(
+        &mut self,
+        dst: &Option<crate::ir::typed::Bind>,
+        sum: &Expr,
+        ty: TypeIdx,
+        variant: usize,
+    ) {
+        let vname = match &self.program.types[ty].kind {
+            crate::ir::typed::TypeKind::Sum { variants } => snake(&variants[variant].name),
+            _ => format!("tag{variant}"),
+        };
+        let s = sum.clone();
+        let r = self.render(&s);
+        let base = if r.boxed {
+            format!("(*{})", r.s)
+        } else if is_postfix(&s) {
+            r.s.clone()
+        } else {
+            format!("({})", r.s)
+        };
+        self.src.open(&format!("if ({base}.tag_ != {variant})"));
+        self.throw_msg(&format!("wrong variant: expected {vname}"));
+        self.src.close("}");
+        let Some(d) = dst else { return };
+        let payload = match &self.program.types[ty].kind {
+            crate::ir::typed::TypeKind::Sum { variants } => variants[variant].payload.clone(),
+            _ => None,
+        };
+        let Some(p) = payload else { return };
+        let (pty, pname, puses, is_whole) = {
+            let w = self.layout.wrapper(ty, variant);
+            let l = &self.body.locals[d.local];
+            let whole = matches!(&p, Ty::Named(t) if Some(*t) == w.existing);
+            (
+                cpp_ty(self.program, &p, self.std),
+                snake(&l.name),
+                l.uses,
+                whole,
+            )
+        };
+        let boxed = self.layout.boxed_alt.contains(&(ty, variant));
+        let member = format!("value{variant}");
+        let init = if is_whole {
+            if boxed {
+                format!("*({base}.{member})")
+            } else {
+                format!("{base}.{member}")
+            }
+        } else if boxed {
+            format!("(*{base}.{member}).value")
+        } else {
+            format!("{base}.{member}.value")
+        };
+        if !d.declare {
+            self.src.line(&format!("{pname} = {init};"));
+            return;
+        }
+        let decl = if puses == 0 && self.std.supports_nodiscard() {
             format!("[[maybe_unused]] const {pty} &{pname}")
         } else {
             format!("const {pty} &{pname}")
@@ -2782,6 +3831,12 @@ impl<'a> Emitter<'a> {
 
     fn stmt_return(&mut self, e: &Expr) {
         if let Expr::Construct { ty, fields } = e {
+            if !self.std.supports_designated_init() {
+                // Pre-C++20 has no designated initializers; pass the
+                // fields positionally, in order, to the constructor.
+                self.stmt_return_positional(*ty, fields);
+                return;
+            }
             let v = e.clone();
             let one = format!("return {};", self.val(&v));
             if self.fits(&one) {
@@ -2811,6 +3866,46 @@ impl<'a> Emitter<'a> {
         }
         let s = self.val(e);
         self.src.line(&format!("return {s};"));
+    }
+
+    /// Pre-C++20 `return T{...}`: positional arguments in field order.
+    /// Braced on C++11 and later, parenthesized below that (where the
+    /// member-initializing constructor takes over).
+    fn stmt_return_positional(&mut self, ty: TypeIdx, fields: &[Expr]) {
+        let tname = pascal(&self.program.types[ty].name);
+        let parts = self.construct_parts(ty, fields);
+        let (open, close) = if self.std.supports_braced_init() {
+            ("{", "};")
+        } else {
+            ("(", ");")
+        };
+        let one = format!("return {tname}{}{}{}", open, parts.join(", "), close);
+        if self.fits(&one) {
+            self.src.line(&one);
+            return;
+        }
+        pack_call(
+            &mut self.src,
+            &format!("return {tname}{open}"),
+            &parts,
+            close,
+            false,
+        );
+    }
+
+    /// Positional constructor arguments for `Construct`, in field order.
+    fn construct_parts(&mut self, ty: TypeIdx, fields: &[Expr]) -> Vec<String> {
+        let mut parts = Vec::new();
+        for (i, init) in fields.iter().enumerate() {
+            let r = self.render(init);
+            let boxed = self.layout.boxed_field.contains(&(ty, i));
+            parts.push(if r.boxed && !boxed {
+                format!("(*{})", r.s)
+            } else {
+                r.s
+            });
+        }
+        parts
     }
 
     /// The value of an expression, dereferencing `Box` when a plain value
@@ -2911,7 +4006,7 @@ impl<'a> Emitter<'a> {
                 EVal {
                     s: format!(
                         "static_cast<{}>({})",
-                        cpp_ty(self.program, &tc),
+                        cpp_ty(self.program, &tc, self.std),
                         self.val(&ic)
                     ),
                     boxed: false,
@@ -2937,18 +4032,15 @@ impl<'a> Emitter<'a> {
             },
             Expr::Construct { ty, fields } => {
                 let tname = pascal(&self.program.types[*ty].name);
-                let mut parts = Vec::new();
-                for (i, init) in fields.iter().enumerate() {
-                    let r = self.render(init);
-                    let boxed = self.layout.boxed_field.contains(&(*ty, i));
-                    parts.push(if r.boxed && !boxed {
-                        format!("(*{})", r.s)
-                    } else {
-                        r.s
-                    });
-                }
+                let parts = self.construct_parts(*ty, fields);
                 EVal {
-                    s: format!("{tname}{{{}}}", parts.join(", ")),
+                    s: if self.std.supports_braced_init() {
+                        format!("{tname}{{{}}}", parts.join(", "))
+                    } else {
+                        // Pre-C++11 aggregates take no braced list; the
+                        // member-initializing constructor takes parens.
+                        format!("{tname}({})", parts.join(", "))
+                    },
                     boxed: false,
                 }
             }
@@ -2957,6 +4049,20 @@ impl<'a> Emitter<'a> {
                 variant,
                 payload,
             } => {
+                if !self.std.supports_std_variant() {
+                    // Pre-C++17 sums are tagged structs built by factories.
+                    let sname = pascal(&self.program.types[*ty].name);
+                    return EVal {
+                        s: match payload {
+                            None => format!("{sname}::make_value{variant}()"),
+                            Some(p) => {
+                                let pc = p.clone();
+                                format!("{sname}::make_value{variant}({})", self.val(&pc))
+                            }
+                        },
+                        boxed: false,
+                    };
+                }
                 let (altbase, existing) = {
                     let w = self.layout.wrapper(*ty, *variant);
                     (

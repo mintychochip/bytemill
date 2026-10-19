@@ -274,7 +274,8 @@ fn ts_26_3_packets_roundtrip() {
 #[test]
 fn ts_type_and_import_idioms() {
     let resolved =
-        bps::analyze(&bps::load_schema(&[repo("schemas/minecraft_26_3_wiki.bps")]).unwrap()).unwrap();
+        bps::analyze(&bps::load_schema(&[repo("schemas/minecraft_26_3_wiki.bps")]).unwrap())
+            .unwrap();
     let dir = scratch("idioms");
     bps::emit_ts::emit_typescript(&resolved, &dir).unwrap();
     let src = generated(&dir);
@@ -309,4 +310,34 @@ fn ts_type_and_import_idioms() {
 #[test]
 fn ts_hytale_packets_roundtrip() {
     roundtrip_schema("schemas/hytale/2026_02_17.bps", "hytale", 1);
+}
+
+/// `emit_typescript_with_target` writes a `tsconfig.json` with the requested
+/// target, `ESNext` modules, and strict mode. Text-only: no node run here.
+#[test]
+fn ts_target_option() {
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "packet probe { n: varint }\n";
+    let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
+    for (tag, target) in [
+        ("es2020", bps::TsTarget::ES2020),
+        ("es2022", bps::TsTarget::ES2022),
+    ] {
+        let dir = scratch(&format!("target-{tag}"));
+        bps::emit_ts::emit_typescript_with_target(&resolved, &dir, target).unwrap();
+        let tsconfig = std::fs::read_to_string(dir.join("tsconfig.json")).unwrap();
+        assert!(
+            tsconfig.contains(&format!("\"target\": \"{tag}\"")),
+            "tsconfig.json must request target {tag}:\n{tsconfig}"
+        );
+        assert!(
+            tsconfig.contains("\"module\": \"ESNext\""),
+            "tsconfig.json must use ESNext modules:\n{tsconfig}"
+        );
+        assert!(
+            tsconfig.contains("\"strict\": true"),
+            "tsconfig.json must enable strict mode:\n{tsconfig}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

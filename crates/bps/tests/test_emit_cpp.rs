@@ -363,3 +363,195 @@ fn cpp_hytale_packets_roundtrip() {
     // Connection carries 4 packets; every synthesizable one must survive.
     roundtrip_suite("schemas/hytale/2026_02_17.bps", "hytale", 3);
 }
+
+/// Probe round-trip under one `g++ -std=...` flag, emitted with the matching
+/// `CppStandard`. The check program is written in C++98 (no `auto`,
+/// `nullptr`, braced init, or range-for), so the same source proves every
+/// standard from C++98 to C++23.
+fn probe_roundtrip_std(std_ver: bps::CppStandard, flag: &str, dir_name: &str) {
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "packet probe { n: varint, f: f32be, d: f64be }\n";
+    let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
+    let program = bps::ir::typed::typed(&resolved).unwrap();
+    let dir = temp(dir_name);
+    bps::emit_cpp::emit_cpp_with_standard(&resolved, &dir, std_ver).unwrap();
+    let header = std::fs::read_to_string(dir.join("bpsgen.hpp")).unwrap();
+    if std_ver.supports_std_span() {
+        assert!(
+            header.contains("std::span<const std::uint8_t>"),
+            "{flag}: byte buffers are borrowed as a span"
+        );
+    } else {
+        assert!(
+            header.contains("class Span"),
+            "{flag}: pre-C++20 headers polyfill Span"
+        );
+        assert!(
+            !header.contains("std::span"),
+            "{flag}: pre-C++20 headers must not use std::span"
+        );
+    }
+    if std_ver.supports_std_optional() {
+        assert!(
+            header.contains("#include <optional>"),
+            "{flag}: C++17+ headers use std::optional"
+        );
+    } else {
+        assert!(
+            header.contains("class Optional"),
+            "{flag}: pre-C++17 headers polyfill Optional"
+        );
+        assert!(
+            !header.contains("#include <optional>"),
+            "{flag}: pre-C++17 headers must not include <optional>"
+        );
+    }
+    if std_ver.supports_nodiscard() {
+        assert!(
+            header.contains("[[nodiscard]] Probe decode_probe"),
+            "{flag}: decoders must be [[nodiscard]]"
+        );
+    } else {
+        // (The `[[nodiscard]]` spelling still appears inside the
+        // `BPS_NODISCARD` macro definition; the declarations themselves
+        // must use the macro.)
+        assert!(
+            header.contains("BPS_NODISCARD Probe decode_probe"),
+            "{flag}: pre-C++17 declarations use the BPS_NODISCARD macro"
+        );
+        assert!(
+            !header.contains("[[nodiscard]] Probe decode_probe"),
+            "{flag}: pre-C++17 declarations must not use [[nodiscard]]"
+        );
+    }
+    if std_ver.supports_cstdint() {
+        assert!(
+            header.contains("#include <cstdint>"),
+            "{flag}: C++11+ headers use <cstdint>"
+        );
+    } else {
+        assert!(
+            header.contains("#include <stdint.h>"),
+            "{flag}: pre-C++11 headers use <stdint.h>"
+        );
+        assert!(
+            !header.contains("#include <cstdint>"),
+            "{flag}: pre-C++11 headers must not include <cstdint>"
+        );
+    }
+    let probe = program.packet_codec("probe").expect("probe codec");
+    assert_eq!(bps::emit_cpp::decode_fn(&program, probe), "decode_probe");
+    assert_eq!(bps::emit_cpp::encode_fn(&program, probe), "encode_probe");
+    let check = r#"#include "bpsgen.hpp"
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+static int fails = 0;
+static void check(bool ok, const char *msg) {
+  if (!ok) {
+    std::printf("fail: %s\n", msg);
+    ++fails;
+  }
+}
+int main() {
+  using namespace bps;
+  {
+    Writer w;
+    encode_varint(w, 300);
+    std::vector<std::uint8_t> want;
+    want.push_back(0xac);
+    want.push_back(0x02);
+    check(w.buf == want, "encode 300");
+    Reader r(&w.buf[0], w.buf.size());
+    check(decode_varint(r) == 300, "decode 300");
+  }
+  {
+    const std::uint8_t raw[] = {0xac, 0x02, 0x3f, 0xc0, 0x00, 0x00, 0xbf,
+                                0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    Reader r(raw, sizeof(raw) / sizeof(raw[0]));
+    Probe v = decode_probe(r);
+    check(v.n == 300, "probe n");
+    float want_f = 1.5f;
+    check(std::memcmp(&v.f, &want_f, 4) == 0, "probe f");
+    double want_d = -1.0;
+    check(std::memcmp(&v.d, &want_d, 8) == 0, "probe d");
+    Writer w;
+    encode_probe(w, v);
+    std::vector<std::uint8_t> want(raw, raw + sizeof(raw) / sizeof(raw[0]));
+    check(w.buf == want, "probe round trip");
+  }
+  {
+    Reader r(0, 0);
+    bool threw = false;
+    try {
+      (void)decode_varint(r);
+    } catch (const DecodeError &e) {
+      threw = true;
+      check(e.offset == 0, "short offset");
+      check(std::string(e.what()).find("varint") != std::string::npos,
+            "short codec");
+    }
+    check(threw, "short throws");
+  }
+  return fails != 0 ? 1 : 0;
+}
+"#;
+    std::fs::write(dir.join("check.cpp"), check).unwrap();
+    compile_with_std(&dir, flag);
+    run_check(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `g++ -std=<flag>` without `-Werror`/`-Wpedantic`: pre-C++11 code may use
+/// `long long` literals, which are an extension there, so the gate is
+/// compilation plus a passing round-trip, not warning-freedom.
+fn compile_with_std(dir: &Path, flag: &str) {
+    let mut sources: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("cpp")
+                && p.file_name().and_then(|n| n.to_str()) != Some("check.cpp")
+        })
+        .collect();
+    sources.sort();
+    let mut cmd = Command::new("g++");
+    cmd.arg(format!("-std={flag}"));
+    cmd.args(["-Wall", "-O1", "-o"])
+        .arg(dir.join("check"))
+        .arg(dir.join("check.cpp"));
+    cmd.args(&sources);
+    let out = cmd.output().unwrap();
+    assert!(
+        out.status.success(),
+        "g++ -std={flag} failed\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn cpp_std98_probe_roundtrip() {
+    probe_roundtrip_std(bps::CppStandard::Cpp98, "c++98", "probe-98");
+}
+
+#[test]
+fn cpp_std11_probe_roundtrip() {
+    probe_roundtrip_std(bps::CppStandard::Cpp11, "c++11", "probe-11");
+}
+
+#[test]
+fn cpp_std17_probe_roundtrip() {
+    probe_roundtrip_std(bps::CppStandard::Cpp17, "c++17", "probe-17");
+}
+
+#[test]
+fn cpp_std20_probe_roundtrip() {
+    probe_roundtrip_std(bps::CppStandard::Cpp20, "c++20", "probe-20");
+}
+
+#[test]
+fn cpp_std23_probe_roundtrip() {
+    probe_roundtrip_std(bps::CppStandard::Cpp23, "c++23", "probe-23");
+}

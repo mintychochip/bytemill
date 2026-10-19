@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use bps::GoVersion;
 use bps::ir::typed::{CodecIdx, Program};
 
 fn repo(rel: &str) -> PathBuf {
@@ -258,4 +259,73 @@ fn go_v1_20_1_packets_roundtrip() {
 #[test]
 fn go_hytale_packets_roundtrip() {
     roundtrip_schema("schemas/hytale/2026_02_17.bps", "hytale", 1);
+}
+
+/// Emit a package containing a counted list under `ver`, returning its scratch dir.
+fn emit_versioned(ver: GoVersion, tag: &str) -> PathBuf {
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "packet probe { n: varint }\npacket holder { n: varint\n ids: varint[] count = n }\n";
+    let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
+    let dir = scratch(&format!("ver-{tag}"));
+    bps::emit_go::emit_go_with_version(&resolved, &dir, ver).unwrap();
+    dir
+}
+
+#[test]
+fn go_version_go_mod_directives() {
+    for (ver, directive) in [
+        (GoVersion::V1_18, "go 1.18"),
+        (GoVersion::V1_21, "go 1.21"),
+        (GoVersion::V1_23, "go 1.23"),
+    ] {
+        let dir = emit_versioned(ver, &format!("mod-{}", ver.mod_str()));
+        let gomod = std::fs::read_to_string(dir.join("go.mod")).unwrap();
+        assert!(
+            gomod.contains(directive),
+            "go.mod for {ver} should contain {directive:?}:\n{gomod}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn go_version_counted_loop_form() {
+    let dir = emit_versioned(GoVersion::V1_18, "loop-1-18");
+    let text = generated(&dir);
+    assert!(
+        text.contains("for i := 0; i < int(n); i++"),
+        "Go 1.18 cannot range over an integer:\n{text}"
+    );
+    assert!(
+        !text.contains("for range"),
+        "no integer range on Go 1.18:\n{text}"
+    );
+    assert!(
+        text.contains("through any layer of wrapping"),
+        "comments must survive the pre-1.18 any downgrade:\n{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    let dir = emit_versioned(GoVersion::V1_23, "loop-1-23");
+    let text = generated(&dir);
+    assert!(
+        text.contains("for range n"),
+        "Go 1.23 keeps the integer range:\n{text}"
+    );
+    assert!(
+        !text.contains("i < int(n); i++"),
+        "no legacy loop on Go 1.23:\n{text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn go_version_vet_old_and_new() {
+    for (ver, tag) in [
+        (GoVersion::V1_18, "vet-1-18"),
+        (GoVersion::V1_23, "vet-1-23"),
+    ] {
+        let dir = emit_versioned(ver, tag);
+        assert_go_gates(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

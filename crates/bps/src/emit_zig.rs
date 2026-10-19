@@ -46,8 +46,16 @@ use crate::ir::typed::{
 
 /// Emit `bpsgen.zig` and its modules for `resolved` into `out_dir`.
 pub fn emit_zig(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+    emit_zig_with_version(resolved, out_dir, crate::ZigVersion::default())
+}
+
+pub fn emit_zig_with_version(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    ver: crate::ZigVersion,
+) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
-    let mut printer = Printer::build(&program)?;
+    let mut printer = Printer::build(&program, ver)?;
     let files = printer.files()?;
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
     for (stem, src) in &files {
@@ -364,7 +372,9 @@ fn hoist_imports(body: &str, self_stem: &str, aliases: &mut BTreeSet<String>) ->
             out.push_str(&rest[at..after.len() + "@import(\"".len() + close + 2 - after.len()]);
             rest = tail;
             // Keep the original text when it is not a hoistable import.
-            out.truncate(out.len() - (close + 2) - "@import(\"".len() - (after.len() - after.len()));
+            out.truncate(
+                out.len() - (close + 2) - "@import(\"".len() - (after.len() - after.len()),
+            );
             out.push_str(&format!("@import(\"{stem}.zig\")"));
             out.push('.');
         }
@@ -532,6 +542,10 @@ pub fn strLen(s: []const u8) i64 {
 
 struct Printer<'a> {
     prog: &'a Program,
+    /// Target Zig version: the emitted constructs are stable across every
+    /// supported version, so this is stored for future version-conditional
+    /// formatting without changing today's output.
+    ver: crate::ZigVersion,
     /// Fields stored as pointers to break by-value recursion cycles.
     boxed_field: HashSet<(TypeIdx, usize)>,
     /// Sum variant payloads stored as pointers, same reason.
@@ -545,7 +559,7 @@ struct Printer<'a> {
 }
 
 impl<'a> Printer<'a> {
-    fn build(prog: &'a Program) -> BpsResult<Self> {
+    fn build(prog: &'a Program, ver: crate::ZigVersion) -> BpsResult<Self> {
         let (boxed_field, boxed_variant) = boxed_edges(prog);
         let owns = owns_fixpoint(prog, &boxed_field, &boxed_variant);
         let needs_strlen = prog
@@ -565,6 +579,7 @@ impl<'a> Printer<'a> {
             .collect();
         let mut printer = Self {
             prog,
+            ver,
             boxed_field,
             boxed_variant,
             owns,
@@ -586,6 +601,9 @@ impl<'a> Printer<'a> {
     /// `stem` -> module source: `runtime.zig`, one module per route category,
     /// and the `bpsgen.zig` index that re-exports them all.
     fn files(&mut self) -> BpsResult<BTreeMap<String, String>> {
+        // The constructs printed here are stable across every supported Zig
+        // version, so the target only selects this shared formatting.
+        let _ = self.ver;
         let mut runtime = RUNTIME.to_string();
         if self.needs_strlen {
             runtime.push_str(STRLEN_HELPER);
@@ -993,7 +1011,11 @@ impl Printer<'_> {
             let p = &body.locals[*pid];
             param(
                 &mut sig,
-                &format!("{}: {}", local_name(&p.name, &self.stems), self.param_ty(p, here)?),
+                &format!(
+                    "{}: {}",
+                    local_name(&p.name, &self.stems),
+                    self.param_ty(p, here)?
+                ),
             );
         }
         let ret = if decode {

@@ -385,6 +385,14 @@ pub fn type_name(program: &Program, ty: TypeIdx) -> String {
 }
 
 pub fn emit_typescript(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+    emit_typescript_with_target(resolved, out_dir, crate::TsTarget::default())
+}
+
+pub fn emit_typescript_with_target(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    target: crate::TsTarget,
+) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
     let printer = Printer { program: &program };
     let mut parts: BTreeMap<String, String> = BTreeMap::new();
@@ -431,7 +439,17 @@ pub fn emit_typescript(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<(
         .map(|stem| format!("export * from \"./{stem}.ts\";\n"))
         .collect();
     fs::write(out_dir.join("bpsgen.ts"), index).map_err(|e| emit(e.to_string()))?;
+    fs::write(out_dir.join("tsconfig.json"), tsconfig(target)).map_err(|e| emit(e.to_string()))?;
     Ok(())
+}
+
+/// The emitted `tsconfig.json`: the requested `target`, `ESNext` modules, and
+/// strict type checking.
+fn tsconfig(target: crate::TsTarget) -> String {
+    format!(
+        "{{\n  \"compilerOptions\": {{\n    \"target\": \"{}\",\n    \"module\": \"ESNext\",\n    \"strict\": true\n  }}\n}}\n",
+        target.as_str(),
+    )
 }
 
 /// A generated export and the module that defines it, plus whether it is a

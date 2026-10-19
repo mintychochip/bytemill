@@ -90,13 +90,21 @@ const KEYWORDS: &[&str] = &[
 
 /// Emit the `rust-typed` crate for `resolved` into `out_dir`.
 pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+    emit_rust_typed_with_edition(resolved, out_dir, crate::RustEdition::default())
+}
+
+pub fn emit_rust_typed_with_edition(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    edition: crate::RustEdition,
+) -> BpsResult<()> {
     let program = typed(resolved)?;
     let printer = Gen::new(&program);
     let src = out_dir.join("src");
     let packets = src.join("packets");
     fs::create_dir_all(&packets).map_err(|e| emit(e.to_string()))?;
     let _ = fs::remove_file(src.join("packets.rs"));
-    fs::write(out_dir.join("Cargo.toml"), cargo_toml()).map_err(|e| emit(e.to_string()))?;
+    fs::write(out_dir.join("Cargo.toml"), cargo_toml(edition)).map_err(|e| emit(e.to_string()))?;
     fs::write(src.join("lib.rs"), printer.lib_rs()).map_err(|e| emit(e.to_string()))?;
     fs::write(src.join("runtime.rs"), RUNTIME).map_err(|e| emit(e.to_string()))?;
     fs::write(src.join("model.rs"), printer.file_rs(false, None))
@@ -116,7 +124,7 @@ pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<(
             .map_err(|e| emit(e.to_string()))?;
         paths.push(path);
     }
-    rustfmt_paths(&paths);
+    rustfmt_paths(&paths, edition);
     Ok(())
 }
 
@@ -124,10 +132,10 @@ pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<(
 /// output is canonically formatted even where the line writer's breaking
 /// differs from `rustfmt`'s (long operator chains, nested calls). The pass
 /// is deterministic; without `rustfmt` the writer's output stands as is.
-fn rustfmt_paths(paths: &[std::path::PathBuf]) {
+fn rustfmt_paths(paths: &[std::path::PathBuf], edition: crate::RustEdition) {
     for path in paths {
         let Ok(status) = std::process::Command::new("rustfmt")
-            .args(["--edition", "2024"])
+            .args(["--edition", edition.as_str()])
             .arg(path)
             .status()
         else {
@@ -211,9 +219,12 @@ fn claim(want: String, taken: &mut HashSet<String>) -> String {
     out
 }
 
-fn cargo_toml() -> &'static str {
-    "[package]\nname = \"bps_generated\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\
-     description = \"Generated BPS encoders and decoders.\"\n"
+fn cargo_toml(edition: crate::RustEdition) -> String {
+    format!(
+        "[package]\nname = \"bps_generated\"\nversion = \"0.1.0\"\nedition = \"{}\"\n\
+         description = \"Generated BPS encoders and decoders.\"\n",
+        edition.as_str(),
+    )
 }
 /// The emitted `runtime.rs`: [`Error`], [`Reader`], [`Writer`], and the
 /// integer helpers. This is exactly the surface the typed program needs:
@@ -1734,7 +1745,10 @@ fn walk_uses(stmts: &[Stmt], f: &mut impl FnMut(LocalId, bool)) {
             // The unwrapped place is only ever read through `.as_ref()`.
             Stmt::Unwrap { src, .. } => use_expr(src, false, f),
             Stmt::Match {
-                scrutinee, arms, other, ..
+                scrutinee,
+                arms,
+                other,
+                ..
             } => {
                 use_expr(scrutinee, true, f);
                 for a in arms {
@@ -3073,7 +3087,9 @@ impl<'a> Gen<'a> {
                     // it, a boxed one derefs, and a payload the body only
                     // borrows binds as the reference itself.
                     let by_ref = d.declare
-                        && dst.as_ref().is_some_and(|d| self.borrowed_binding(cx.ctx, d.local));
+                        && dst
+                            .as_ref()
+                            .is_some_and(|d| self.borrowed_binding(cx.ctx, d.local));
                     let binding = if boxed {
                         if by_ref {
                             "&**v".to_string()

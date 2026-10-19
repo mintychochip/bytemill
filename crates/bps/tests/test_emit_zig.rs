@@ -303,3 +303,23 @@ fn zig_26_3_packets_roundtrip() {
 fn zig_hytale_packets_roundtrip() {
     roundtrip_suite("schemas/hytale/2026_02_17.bps", "bps-zig-hytale", 1);
 }
+
+/// `emit_zig_with_version` accepts the target version and emits the same
+/// module tree. Text-only: no `zig` run here.
+#[test]
+fn zig_version_option() {
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+        + "packet probe { n: varint }\n";
+    let resolved = bps::analyze(&bps::parse(&source).unwrap()).unwrap();
+    let dir = std::env::temp_dir().join(format!("bps-zig-v014-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    bps::emit_zig::emit_zig_with_version(&resolved, &dir, bps::ZigVersion::V0_14).unwrap();
+    assert!(dir.join("bpsgen.zig").is_file(), "missing bpsgen.zig");
+    assert!(dir.join("encoding.zig").is_file(), "missing encoding.zig");
+    assert!(
+        index(&dir).contains("pub const Error = @import(\"runtime.zig\").Error;"),
+        "bpsgen.zig must re-export the runtime\n{}",
+        index(&dir)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
