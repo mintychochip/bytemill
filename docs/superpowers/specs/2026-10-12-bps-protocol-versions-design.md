@@ -11,8 +11,8 @@ One BPS schema per Minecraft Java Edition **release protocol** from 1.13 (protoc
 (no `rest` stubs except where the source declares an opaque tail). 39 protocol numbers cover the
 51 release versions in that range (a protocol number is shared by e.g. 1.20 and 1.20.1).
 
-Each schema is a single root file: `bpsc check schemas/versions/v1_20_1.bps`,
-`bpsc routes …`, `bpsc decode …`, `bpsc encode …` work on it unchanged.
+Each schema is a single root file: `bml check schemas/versions/v1_20_1.bps`,
+`bml routes …`, `bml decode …`, `bml encode …` work on it unchanged.
 
 ## 2. Non-goals
 
@@ -53,7 +53,7 @@ can be graded against an independent schema.
 ## 4. Approach
 
 A protodef → BPS **importer** in the existing crate (`crates/bps/src/protodef/`, zero
-dependencies), exposed as `bpsc import-protodef` / `bpsc import-versions`. Output is committed
+dependencies), exposed as `bml import-protodef` / `bml import-versions`. Output is committed
 (`schemas/versions/`), and `import-versions --check` fails when a committed file is stale, the
 way `emit rstom-tree --check` does.
 

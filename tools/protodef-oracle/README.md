@@ -72,7 +72,7 @@ Two codec quirks are mirrored faithfully rather than worked around:
 ## Modes
 
 Every mode takes `--patches <patch.json>`: a `schemas/versions/patches/*.json` file whose named types
-replace or extend the description before it is compiled, exactly as `bpsc import-versions` applies
+replace or extend the description before it is compiled, exactly as `bml import-versions` applies
 them, so the oracle and BPS read the same corrected description.
 
 ### `list` — route tables
@@ -157,7 +157,7 @@ node oracle.js list --protocol data/minecraft-data/pc/1.20/protocol.json
 # 2. Produce differential vectors (20 per packet here).
 node oracle.js gen --protocol data/minecraft-data/pc/1.20/protocol.json --count 20 --seed 1 > vectors.jsonl
 # 3. Strict decode + re-encode check on the Rust side.
-bpsc wire-check schemas/versions/v1_20_1.bps --file vectors.jsonl
+bml wire-check schemas/versions/v1_20_1.bps --file vectors.jsonl
 #    prints `checked N, failed M`, failures on stderr, exit 3 on failure.
 # 4. Sanity: the oracle must accept its own output.
 node oracle.js check --protocol data/minecraft-data/pc/1.20/protocol.json --file vectors.jsonl

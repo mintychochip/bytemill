@@ -53,10 +53,10 @@ fn worktree_present() -> bool {
         .is_dir()
 }
 
-/// Run the compiled `bpsc` like the Python tests spawn the CLI, keeping
+/// Run the compiled `bml` like the Python tests spawn the CLI, keeping
 /// stderr for failure messages.
 fn run_cli(args: &[String]) -> (i32, String, String) {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_bpsc"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_bml"))
         .args(args)
         .output()
         .unwrap();

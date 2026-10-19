@@ -7,10 +7,10 @@ stored once per set of versions in which it is identical. Loading a root loads i
 files, so every example works the same:
 
 ```bash
-bpsc check  schemas/versions/v1_20_1.bps          # parse + resolve
-bpsc routes schemas/versions/v1_20_1.bps          # state × direction × id → packet
-echo '<hex payload>' | bpsc decode --packet spawn_entity schemas/versions/v1_20_1.bps --hex
-bpsc wire-check schemas/versions/v1_20_1.bps --file vectors.jsonl   # decode + re-encode, in bulk
+bml check  schemas/versions/v1_20_1.bps          # parse + resolve
+bml routes schemas/versions/v1_20_1.bps          # state × direction × id → packet
+echo '<hex payload>' | bml decode --packet spawn_entity schemas/versions/v1_20_1.bps --hex
+bml wire-check schemas/versions/v1_20_1.bps --file vectors.jsonl   # decode + re-encode, in bulk
 ```
 
 A root is named after the newest release that shares the protocol number (`v1_20_1.bps` is 763,
@@ -73,7 +73,7 @@ lists.
 The packet layouts are PrismarineJS [minecraft-data](https://github.com/PrismarineJS/minecraft-data)'s
 ProtoDef `protocol.json` files, the data behind mineflayer and node-minecraft-protocol, **vendored
 byte for byte** in `data/minecraft-data/` (`sources.json` names the commit, upstream path and
-SHA-256 of each file; `NOTICE.md` has the licence). `bpsc import-versions` turns them into the
+SHA-256 of each file; `NOTICE.md` has the licence). `bml import-versions` turns them into the
 schemas here: `crates/bps/src/protodef/` is the importer, `docs/superpowers/specs/2026-10-12-bps-protocol-versions-design.md`
 the design, the translation table and the reasoning.
 
@@ -119,9 +119,9 @@ A packet whose name exists in several states or directions is suffixed `_<state>
 ## Regenerate and check
 
 ```bash
-bpsc import-versions            # rewrite schemas/versions/*.bps + common/ from manifest.json + data/
-bpsc import-versions --check    # exit 3 listing any committed file that differs (also a cargo test)
-bpsc import-protodef data/minecraft-data/pc/1.20/protocol.json --protocol 763 --release 1.20.1 | less
+bml import-versions            # rewrite schemas/versions/*.bps + common/ from manifest.json + data/
+bml import-versions --check    # exit 3 listing any committed file that differs (also a cargo test)
+bml import-protodef data/minecraft-data/pc/1.20/protocol.json --protocol 763 --release 1.20.1 | less
 ```
 
 Every generated file is parsed and run through a name-flow lint at import time: each identifier an

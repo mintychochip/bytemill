@@ -1,7 +1,7 @@
-# Wirecraft — Project Status and Remaining Goals
+# Bytemill — Project Status and Remaining Goals
 
 **Status date:** 2026-10-19
-**Scope:** the Rust compiler (`crates/bps`, binary `bpsc`), the shipped schemas, the nine
+**Scope:** the Rust compiler (`crates/bps`, binary `bml`), the shipped schemas, the nine
 typed code generators, and the rstom/Minestom downstream.
 
 This file is the project's work queue. A goal is *remaining* until its "done when" has
@@ -18,7 +18,7 @@ current-tree evidence (code, test, workflow, or committed report). Design ration
 | Typed printers | Rust (typed), Go, Python, Java, C#, C, C++, TypeScript, Zig — all lower `ir::typed::Program` |
 | Language versions | C++98–26, Go 1.16–1.24, Python 3.8–3.14, C89–C23, Rust 2015–2024, TS ES2015–ESNext, Zig 0.11–0.14, Java 8–21, C# 8–12 via `--std`/`<target>:<version>` |
 | Protocol coverage | 39 version roots / 51 releases (1.13 → 26.3), hand-written 26.3, Hytale connection packets |
-| Binaries | `.github/workflows/release.yml` publishes `bpsc` for Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), Windows x86_64, with `SHA256SUMS` |
+| Binaries | `.github/workflows/release.yml` publishes `bml` for Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), Windows x86_64, with `SHA256SUMS` |
 | Gates run locally | full `cargo test` suite green, `clippy -D warnings` clean, per-printer compile/roundtrip tests |
 
 **Not** in CI today: tests, formatters, oracle, protocol roundtrips, or any emitted-language
@@ -37,7 +37,7 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 | A3 | Enforce formatting of the compiler itself | No `.rustfmt.toml`, no fmt workflow, no fmt in `.githooks/pre-commit`; the baseline tree is not `cargo fmt --check` clean, and the only fmt gates are for *emitted* code | A pinned rustfmt config + normalized tree (or an explicitly scoped check) runs as a required check |
 | A4 | Schedule the ProtoDef oracle | `scripts/verify_versions.py` is manual, needs `npm ci` in `tools/protodef-oracle` and `write_generated_vectors --ignored` | A scheduled (and manually dispatchable) job runs both directions, refreshes pinned vectors only via reviewed PRs, and reports drift |
 | A5 | Publish diagnostic results instead of hiding them | Four `#[ignore]` diagnostics: `test_versions.rs:208` (round-trip failures), `:223` (generator coverage), `:246` (vector writer), `test_versions_cross.rs:77` (cross disagreements) | Each release attaches or commits the diagnostic output, or the test becomes an assertion with a bound |
-| A6 | Broaden the release smoke test | `.github/workflows/release.yml` smoke-tests only `bpsc check schemas/std/varint.bps` | Release builds also `check` the 26.3 wiki root and Hytale root, and run `wire-check` on a committed vector file |
+| A6 | Broaden the release smoke test | `.github/workflows/release.yml` smoke-tests only `bml check schemas/std/varint.bps` | Release builds also `check` the 26.3 wiki root and Hytale root, and run `wire-check` on a committed vector file |
 
 ### P1 — Emitter and runtime completeness
 

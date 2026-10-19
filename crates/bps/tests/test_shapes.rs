@@ -902,9 +902,9 @@ fn module_level_fn_packets_extract() {
     }
 }
 
-/// Run the compiled `bpsc` exactly like the Python tests spawn the CLI.
+/// Run the compiled `bml` exactly like the Python tests spawn the CLI.
 fn run_cli(args: &[String]) -> (i32, String) {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_bpsc"))
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_bml"))
         .args(args)
         .output()
         .unwrap();

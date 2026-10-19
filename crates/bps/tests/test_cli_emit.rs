@@ -96,7 +96,7 @@ fn without_a_table_the_error_names_the_flag_and_file() {
     let schema = dir.join("probe.bps");
     write(&schema, &common::rstom_tables::probe_source_default(&common::repo_root()));
     let out = dir.join("scratch");
-    let result = std::process::Command::new(env!("CARGO_BIN_EXE_bpsc"))
+    let result = std::process::Command::new(env!("CARGO_BIN_EXE_bml"))
         .args([
             "emit",
             "rstom",

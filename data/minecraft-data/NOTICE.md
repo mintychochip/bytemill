@@ -13,5 +13,5 @@ Upstream states its licence in the README (`## License`, there is no LICENSE fil
 > minecraft.gamepedia.com. If required by one of the sources the license might change to
 > something more appropriate.
 
-Nothing here is edited. Regenerate the schemas from it with `bpsc import-versions`; do not hand-edit
+Nothing here is edited. Regenerate the schemas from it with `bml import-versions`; do not hand-edit
 these files, change `schemas/versions/manifest.json` or the importer instead.

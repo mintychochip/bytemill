@@ -10,7 +10,7 @@ appears there in context.
 ## 1. Declare in this order
 
 Order is not semantically required (forward references resolve), but this order
-keeps a file readable and lets `bpsc check` fail on the missing piece nearest the
+keeps a file readable and lets `bml check` fail on the missing piece nearest the
 mistake.
 
 ```
@@ -55,9 +55,9 @@ The rules:
 - The path is relative to the file that contains the `import`. Each file loads
   once, however many files import it.
 - The five primitives are the only names that need no import.
-- `bpsc` takes one or more files. A file that imports everything else is the
+- `bml` takes one or more files. A file that imports everything else is the
   root: `schemas/minecraft_26_3_wiki.bps` imports every packet file, so
-  `bpsc check schemas/minecraft_26_3_wiki.bps` loads the whole protocol.
+  `bml check schemas/minecraft_26_3_wiki.bps` loads the whole protocol.
 - Forget an import and the error names the line to add. It also looks at the
   `.bps` files beside the file and one folder down, so `std/` is found:
 
@@ -298,23 +298,23 @@ sound = { sound_event_id: varint, if sound_event_id == 0 { ... sound_event }, ..
 ## 7. Verify as you write
 
 ```bash
-bpsc check schemas/your.bps          # parse + resolve + type-check
-bpsc routes schemas/your.bps         # the routing table
-bpsc dump-json schemas/your.bps      # schema.json for other tools
+bml check schemas/your.bps          # parse + resolve + type-check
+bml routes schemas/your.bps         # the routing table
+bml dump-json schemas/your.bps      # schema.json for other tools
 ```
 
 Then prove a value round-trips (`--packet` precedes the schema list, so the flag is not
 mistaken for the trailing JSON):
 
 ```bash
-bpsc encode --packet handshake schemas/your.bps \
+bml encode --packet handshake schemas/your.bps \
   '{"protocol_version":777,"server_address":"localhost","server_port":25565,"intent":1}'
 ```
 
 And decode a frame:
 
 ```bash
-echo '10008906096c6f63616c686f737463dd01' | bpsc decode schemas/your.bps \
+echo '10008906096c6f63616c686f737463dd01' | bml decode schemas/your.bps \
   --state handshaking --direction serverbound --hex
 ```
 

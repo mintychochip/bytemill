@@ -16,7 +16,7 @@ name = "game_probe"
 path = "src/bin/game_probe.rs"
 
 [[bin]]
-name = "bpsc"
+name = "bml"
 path = "src/main.rs"
 
 [[bin]]

@@ -34,7 +34,7 @@ everything it references, is identical.
 - A generic building-block library (`string(Len)`, arrays, options): needs B.
 - Sharing a declaration across a change of something it references (a packet that mentions `slot`
   cannot be shared across a `slot` change): needs B or C. See §3.
-- `bpsc flatten` (printing a version as one file). Declined for now; cheap to add later by concatenating
+- `bml flatten` (printing a version as one file). Declined for now; cheap to add later by concatenating
   the loaded files without their import lines.
 
 ## 3. Measurements
@@ -85,7 +85,7 @@ declarations that change in 26.4 leave `from_…` for a closed range.
 
 The importer renders each version into the single-file text exactly as today (`render::import`): it
 stays the definition of what a version means, still runs through the name-flow lint, and is still what
-`bpsc import-protodef` prints. That text is then split into header, imports, declarations and protocol
+`bml import-protodef` prints. That text is then split into header, imports, declarations and protocol
 block.
 
 A **declaration** is the doc comment lines directly above an `encoding` or `packet` (divider comments
@@ -151,7 +151,7 @@ define its declarations, so no name is declared twice in one load.
 ### 4.6 Unchanged
 
 The language, loader, interpreters, emitters, the manifest format, the patch mechanism, the hand-written
-schemas, Python, and `bpsc import-protodef` (still one self-contained file).
+schemas, Python, and `bml import-protodef` (still one self-contained file).
 
 ## 5. Verification
 
@@ -159,7 +159,7 @@ schemas, Python, and `bpsc import-protodef` (still one self-contained file).
 loaded from the single-file rendering, declaration by declaration (AST `PartialEq`; declaration order is
 not meaningful), protocol block included.
 
-1. **Baseline, once, in scratch (not committed), before regenerating.** `bpsc wire-check --dump` on the
+1. **Baseline, once, in scratch (not committed), before regenerating.** `bml wire-check --dump` on the
    current single-file schemas for all 39 versions, over (a) the 7,271 pinned oracle packets and (b)
    vectors drawn from each schema (`write_generated_vectors`, 12 seeds). After regenerating, the same
    vectors through the roots must give byte-identical dumps.
@@ -181,7 +181,7 @@ not meaningful), protocol block included.
 
 The importer reports, with the version and declaration name: a piece that does not parse as one declaration
 of the expected kind and name; two declarations with the same kind and name in one version; a non-generated
-file in `common/`; a name used but declared nowhere (the loader's import check, via `bpsc check`).
+file in `common/`; a name used but declared nowhere (the loader's import check, via `bml check`).
 There is no fallback to the single-file layout.
 
 ## 7. Risks and limits
@@ -197,7 +197,7 @@ There is no fallback to the single-file layout.
 
 ## 8. Success criteria
 
-1. All 39 roots and all shared files pass `bpsc check`.
+1. All 39 roots and all shared files pass `bml check`.
 2. The equivalence test passes for all 39 versions; the baseline dumps are byte-identical.
 3. The generated text is at most 55% of today's 2.32 MB (the estimate is 47%; the size is a consequence,
    the equivalence test is the criterion).

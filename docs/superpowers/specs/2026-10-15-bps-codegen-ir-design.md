@@ -7,7 +7,7 @@ Decisions already made: typed encode and decode; the IR lives in the Rust compil
 
 ## 1. Goal
 
-`bpsc` lowers a resolved schema to one language-neutral IR, then prints libraries that encode and decode with the same meaning as the existing interpreter.
+`bml` lowers a resolved schema to one language-neutral IR, then prints libraries that encode and decode with the same meaning as the existing interpreter.
 
 In scope:
 
@@ -157,10 +157,10 @@ Go `int` is not used. Its width depends on the architecture.
 
 Commands, each requiring `--out <dir>`:
 
-- `bpsc emit go`
-- `bpsc emit rust-typed`
-- `bpsc emit python`
-- `bpsc emit c`
+- `bml emit go`
+- `bml emit rust-typed`
+- `bml emit python`
+- `bml emit c`
 
 Output:
 

@@ -2,7 +2,7 @@
 // Every route binds to a packet declared in a minecraft_26_3*.bps file, so this
 // file holds no packet bodies. It imports each of those files, which makes it
 // the one root that loads the whole protocol:
-//   bpsc check schemas/minecraft_26_3_wiki.bps
+//   bml check schemas/minecraft_26_3_wiki.bps
 // Regenerate with:
 //   cargo run -q -p bps --bin scrape_wiki_routes -- -o schemas/minecraft_26_3_wiki.bps \
 //     --manual-replace schemas/minecraft_core.bps schemas/minecraft_26_3.bps \

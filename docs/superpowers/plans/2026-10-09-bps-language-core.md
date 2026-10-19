@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Python 3.11+, stdlib only for compiler/runtime.
-- Naming: language **BPS**, files `*.bps`, CLI **`bpsc`**.
+- Naming: language **BPS**, files `*.bps`, CLI **`bml`**.
 - Minecraft reference: **26.3**, protocol **777**.
 - Rust codegen: dependency-free crate (emitter in plan 2).
 - Full protocol-777 packet surface in `schemas/minecraft_26_3.bps` (routes + encodings; fields transcribed per wiki).
@@ -23,13 +23,13 @@
 ### Task 1: Project skeleton and errors
 
 **Files:**
-- Create: `bps/__init__.py`, `bps/errors.py`, `bpsc.py`, `pyproject.toml`
+- Create: `bps/__init__.py`, `bps/errors.py`, `bml.py`, `pyproject.toml`
 - Test: `tests/test_errors.py`
 
 **Interfaces:**
 - Produces: `BpsError`, `ParseError`, `ResolveError`, `DecodeError`, `EncodeError` with `message`, `offset` optional.
 
-- [ ] **Step 1:** Add `pyproject.toml` with `[project.scripts] bpsc = "bps.cli:main"`.
+- [ ] **Step 1:** Add `pyproject.toml` with `[project.scripts] bml = "bps.cli:main"`.
 - [ ] **Step 2:** Implement error hierarchy in `bps/errors.py`.
 - [ ] **Step 3:** `python -m unittest tests.test_errors -v` → PASS.
 - [ ] **Step 4:** Commit.
@@ -94,7 +94,7 @@
 **Files:** `bps/emit_json.py`, `bps/cli.py`, `tests/test_cli.py`
 
 **Interfaces:**
-- Produces: `bpsc check|dump-json|routes|decode|encode`
+- Produces: `bml check|dump-json|routes|decode|encode`
 
 - [ ] CLI smoke tests with hex fixtures.
 - [ ] Commit.

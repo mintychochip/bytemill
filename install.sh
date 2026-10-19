@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install a prebuilt bpsc from this repository's GitHub releases.
+# Install the Bytemill CLI (`bml`) from this repository's GitHub releases.
 #
 #   curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/install.sh | bash
 #   curl -fsSL .../install.sh | bash -s -- --version v1.2.3 --dir /usr/local/bin
@@ -9,9 +9,9 @@
 # musl build; pass --libc gnu if you need the glibc-linked one.
 set -euo pipefail
 
-REPO="${BPS_REPO:-mintychochip/wirecraft}"
-DIR="${BPS_INSTALL_DIR:-$HOME/.local/bin}"
-VERSION="${BPS_VERSION:-latest}"
+REPO="${BML_REPO:-${BPS_REPO:-mintychochip/wirecraft}}"
+DIR="${BML_INSTALL_DIR:-${BPS_INSTALL_DIR:-$HOME/.local/bin}}"
+VERSION="${BML_VERSION:-${BPS_VERSION:-latest}}"
 TARGET=""
 LIBC=""
 
@@ -21,15 +21,17 @@ usage: install.sh [options]
 
 options:
   --version <tag>   release tag to install (default: the latest release)
-  --dir <path>      install directory (default: $BPS_INSTALL_DIR or ~/.local/bin)
+  --dir <path>      install directory (default: $BML_INSTALL_DIR or ~/.local/bin)
   --target <triple> release target to install (e.g. x86_64-unknown-linux-musl)
   --libc <gnu|musl> Linux x86_64 variant (default: musl, the static build)
   -h, --help        show this help
 
 environment:
-  BPS_REPO         GitHub repository (default: mintychochip/wirecraft)
-  BPS_INSTALL_DIR  default install directory
-  BPS_VERSION      default release tag
+  BML_REPO         GitHub repository (default: mintychochip/wirecraft)
+  BML_INSTALL_DIR  default install directory
+  BML_VERSION      default release tag
+
+The legacy BPS_REPO/BPS_INSTALL_DIR/BPS_VERSION names are still honored.
 
 Windows is not supported by this script; download the .zip from the release.
 EOF
@@ -157,7 +159,7 @@ if [ -z "$TARGET" ]; then
     Linux) os=linux ;;
     Darwin) os=darwin ;;
     *)
-      die "unsupported OS '$os'; Windows users: download bpsc-x86_64-pc-windows-msvc.zip from https://github.com/${REPO}/releases"
+      die "unsupported OS '$os'; Windows users: download bml-x86_64-pc-windows-msvc.zip from https://github.com/${REPO}/releases"
       ;;
   esac
   case "$arch" in
@@ -174,9 +176,9 @@ if [ -z "$TARGET" ]; then
   esac
 fi
 
-ASSET="bpsc-${TARGET}.tar.gz"
+ASSET="bml-${TARGET}.tar.gz"
 BASE="https://github.com/${REPO}/releases/download/${VERSION}"
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/bpsc-install.XXXXXX")
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/bml-install.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 
 note "downloading ${ASSET} (${VERSION})"
@@ -198,18 +200,21 @@ else
 fi
 note "checksum ok"
 
-tar -xzf "${tmp}/${ASSET}" -C "$tmp" bpsc ||
-  die "archive does not contain bpsc"
+tar -xzf "${tmp}/${ASSET}" -C "$tmp" bml ||
+  die "archive does not contain bml"
 
 mkdir -p "$DIR"
-staged="${DIR}/.bpsc.new.$$"
-cp "${tmp}/bpsc" "$staged"
+staged="${DIR}/.bml.new.$$"
+cp "${tmp}/bml" "$staged"
 chmod 0755 "$staged"
-mv -f "$staged" "${DIR}/bpsc"
-printf '%s\n' "$VERSION" >"${DIR}/bpsc.version"
+mv -f "$staged" "${DIR}/bml"
+printf '%s\n' "$VERSION" >"${DIR}/bml.version"
 
-note "installed bpsc ${VERSION} to ${DIR}/bpsc"
+note "installed bml ${VERSION} to ${DIR}/bml"
+if [ -e "${DIR}/bpsc" ]; then
+  note "legacy ${DIR}/bpsc is still present; bml is the supported command"
+fi
 case ":${PATH}:" in
   *":${DIR}:"*) ;;
-  *) note "add ${DIR} to PATH to run 'bpsc' directly" ;;
+  *) note "add ${DIR} to PATH to run 'bml' directly" ;;
 esac

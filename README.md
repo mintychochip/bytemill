@@ -1,8 +1,8 @@
-# Wirecraft
+# Bytemill
 
 A schema language (BPS) and compiler for binary wire formats that Protobuf cannot express: variable-length integers, bit-packed fields, tagged unions, conditional layouts, and stateful packet routing.
 
-Wirecraft compiles schemas to idiomatic, zero-allocation decoders and encoders across nine languages: **Rust, Go, Python, Java, C#, C, C++, TypeScript, and Zig**.
+Bytemill compiles schemas to idiomatic, zero-allocation decoders and encoders across nine languages: **Rust, Go, Python, Java, C#, C, C++, TypeScript, and Zig**.
 
 ---
 
@@ -65,14 +65,14 @@ import "minecraft_core.bps"    // string, uuid, position, nbt, slot
 ## Use Cases
 
 - **Game Network Protocols & Emulators**: Multiplayer protocols (e.g., Minecraft, Hytale) rely on variable-length integers (`varint`), bitfields, dynamic length prefixes, compression framing, and stateful direction tables that Protobuf cannot express. BPS specifies the entire packet hierarchy in one schema and emits typed codecs for clients, proxies, and servers.
-- **Embedded, IoT, & Network Telemetry**: Binary telemetry streams, CAN bus frames, and network appliances use bit-packed fields, non-standard integer widths (12-bit signed coordinates, 3-byte ints), and explicit endianness. Wirecraft maps these directly to native C, C++, Rust, or Zig structs without heap allocation or parsing overhead.
-- **High-Throughput Polyglot Services**: When gRPC / Protobuf serialization overhead or dynamic reflection is a bottleneck, Wirecraft produces zero-copy, zero-reflection decoders in nine languages (Go, Rust, C++, C, Python, Java, C#, TypeScript, Zig) from a single protocol definition, keeping cross-language services byte-compatible.
+- **Embedded, IoT, & Network Telemetry**: Binary telemetry streams, CAN bus frames, and network appliances use bit-packed fields, non-standard integer widths (12-bit signed coordinates, 3-byte ints), and explicit endianness. Bytemill maps these directly to native C, C++, Rust, or Zig structs without heap allocation or parsing overhead.
+- **High-Throughput Polyglot Services**: When gRPC / Protobuf serialization overhead or dynamic reflection is a bottleneck, Bytemill produces zero-copy, zero-reflection decoders in nine languages (Go, Rust, C++, C, Python, Java, C#, TypeScript, Zig) from a single protocol definition, keeping cross-language services byte-compatible.
 - **Protocol Reverse Engineering & Auditing**: Capture packet streams, formalize the wire format in a readable `.bps` specification, and immediately generate decoders and validation test suites across multiple languages, eliminating transcription bugs between reverse-engineered specs and working code.
 ---
 
 ## Quick Start
 
-### Install `bpsc`
+### Install `bml`
 
 Every tagged release ships prebuilt binaries; the installer detects the platform, downloads
 the matching archive, verifies `SHA256SUMS`, and installs to `~/.local/bin`:
@@ -91,7 +91,7 @@ Use `--dir <path>` to install elsewhere or `--version vX.Y.Z` to pin a release, 
 `... | bash -s -- --version v1.2.3 --dir /usr/local/bin`. The scripts need `curl` (or
 `wget`), `tar`, and `sha256sum`/`shasum`.
 
-Windows is not covered by the shell scripts: download `bpsc-x86_64-pc-windows-msvc.zip`
+Windows is not covered by the shell scripts: download `bml-x86_64-pc-windows-msvc.zip`
 from Releases. That page also has the archives and `SHA256SUMS` for manual installs, and
 `gh release download --repo mintychochip/wirecraft` fetches them too.
 
@@ -100,7 +100,7 @@ from Releases. That page also has the archives and `SHA256SUMS` for manual insta
 Requires Rust 1.85 or newer (edition 2024):
 
 ```bash
-cargo build --release   # target/release/bpsc
+cargo build --release   # target/release/bml
 ```
 
 ### Check and Inspect Schemas
@@ -108,26 +108,26 @@ cargo build --release   # target/release/bpsc
 ```bash
 ROOT=schemas/minecraft_26_3_wiki.bps
 
-bpsc check $ROOT     # Parse, resolve, and type-check
-bpsc routes $ROOT    # Print stateful packet routing table (261 routes)
-bpsc dump-json $ROOT # Output AST / IR as JSON
+bml check $ROOT     # Parse, resolve, and type-check
+bml routes $ROOT    # Print stateful packet routing table (261 routes)
+bml dump-json $ROOT # Output AST / IR as JSON
 ```
 
 ### CLI Decode / Encode
 
 Decode a raw hex handshake frame:
 ```bash
-echo '10008906096c6f63616c686f737463dd01' | bpsc decode $ROOT \
+echo '10008906096c6f63616c686f737463dd01' | bml decode $ROOT \
   --state handshaking --direction serverbound --hex
 # {"id": 0, "packet": "handshake", "fields": {"intent": 1, "protocol_version": 777, ...}}
 ```
 
 Round-trip VarInts:
 ```bash
-echo 'ac0202' | bpsc decode schemas/minecraft_26_3_play.bps --packet animate --hex
+echo 'ac0202' | bml decode schemas/minecraft_26_3_play.bps --packet animate --hex
 # {"animation": 2, "entity_id": 300}
 
-bpsc encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
+bml encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
 # ac0202
 ```
 
@@ -138,14 +138,14 @@ bpsc encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300,
 Emit typed, deterministic decoders and encoders for any target:
 
 ```bash
-bpsc emit <target> <schema.bps> --out <out_dir> [--std <standard>]
+bml emit <target> <schema.bps> --out <out_dir> [--std <standard>]
 # or specify standard directly on the target:
-bpsc emit cpp:98 schemas/std/varint.bps --out ./bps_cpp
-bpsc emit go:1.18 schemas/std/varint.bps --out ./bps_go
-bpsc emit python:3.8 schemas/std/varint.bps --out ./bps_py
-bpsc emit c:89 schemas/std/varint.bps --out ./bps_c
-bpsc emit java:17 schemas/std/varint.bps --out ./bps_java
-bpsc emit csharp:10 schemas/std/varint.bps --out ./bps_cs
+bml emit cpp:98 schemas/std/varint.bps --out ./bps_cpp
+bml emit go:1.18 schemas/std/varint.bps --out ./bps_go
+bml emit python:3.8 schemas/std/varint.bps --out ./bps_py
+bml emit c:89 schemas/std/varint.bps --out ./bps_c
+bml emit java:17 schemas/std/varint.bps --out ./bps_java
+bml emit csharp:10 schemas/std/varint.bps --out ./bps_cs
 ```
 
 | Target | Default Standard | Supported Versions | Output Layout | Idiomatic Types | Formatter & Lint Gate |
@@ -174,15 +174,15 @@ Every printer lowers schemas to a shared typed intermediate representation (`ir:
 
 ## Downstream Targets: Minestom / rstom
 
-Wirecraft supports in-tree code generation for the Rust Minestom server (`rstom`):
+Bytemill supports in-tree code generation for the Rust Minestom server (`rstom`):
 
 ```bash
 # Standalone drop-in mirror crate for rstom-packets
-bpsc emit rstom $ROOT --out ../rstom/crates/bps_rstom
+bml emit rstom $ROOT --out ../rstom/crates/bps_rstom
 
 # In-place generation within rstom workspace using AST shape ledgers
-bpsc shapes extract $ROOT --rstom ../rstom-bps --eligible --out targets/rstom/shapes
-bpsc emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
+bml shapes extract $ROOT --rstom ../rstom-bps --eligible --out targets/rstom/shapes
+bml emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
 ```
 
 See `docs/superpowers/specs/2026-10-11-bps-generates-rstom-packets-design.md` for shape ledgers and wire pin gates.
@@ -201,7 +201,7 @@ scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings
 
 `scripts/bps_cargo.sh` wraps `cargo` under a systemd user scope (`MemoryMax=8G`, 4 jobs, 4 test threads) to cap memory usage during large protocol oracle suites.
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bpsc` for every
+Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bml` for every
 supported platform, smoke-tests each binary, writes `SHA256SUMS`, and attaches the archives
 to the GitHub Release. Manually dispatching the workflow builds the same artifacts without
 creating a release.

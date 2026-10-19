@@ -6,9 +6,9 @@ Transcribed from the decompiled `com.hypixel.hytale.protocol` package on
 `crates/bps/tests/test_hytale.rs` are what those `serialize` methods write.
 
 ```bash
-bpsc check  schemas/hytale/2026_02_17.bps
-bpsc routes schemas/hytale/2026_02_17.bps
-bpsc decode schemas/hytale/2026_02_17.bps --packet disconnect --hex <<< '0100026869'
+bml check  schemas/hytale/2026_02_17.bps
+bml routes schemas/hytale/2026_02_17.bps
+bml decode schemas/hytale/2026_02_17.bps --packet disconnect --hex <<< '0100026869'
 ```
 
 Covered so far: `connect` (0, serverbound), `disconnect` (1, both directions),
@@ -32,7 +32,7 @@ is server to client.
   reachable by seeking does not decode here.
 - Zstd applies only when `IS_COMPRESSED` is set. These four packets are not.
 
-`bpsc decode --state` reads the frame block: `payload: bytes(length)` takes
+`bml decode --state` reads the frame block: `payload: bytes(length)` takes
 exactly `length` bytes, so the length here counts the payload only. A
 `payload: rest` frame instead counts everything after the length field (id
 bytes included), which is the Minecraft shape.

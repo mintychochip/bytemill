@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Update an installed bpsc to the latest GitHub release (or a pinned tag).
+# Update an installed Bytemill CLI (`bml`) to the latest release (or a pinned tag).
 #
 #   curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/update.sh | bash
 #   curl -fsSL .../update.sh | bash -s -- --version v1.2.3
 #
-# The install location is taken from --dir, $BPS_INSTALL_DIR, the bpsc found on
-# PATH, or ~/.local/bin. The installer records the version in bpsc.version
+# The install location is taken from --dir, $BML_INSTALL_DIR, the bml found on
+# PATH, or ~/.local/bin. The installer records the version in bml.version
 # next to the binary; if that file matches the target, nothing is downloaded.
 set -euo pipefail
 
-REPO="${BPS_REPO:-mintychochip/wirecraft}"
-DIR="${BPS_INSTALL_DIR:-}"
-VERSION="${BPS_VERSION:-latest}"
+REPO="${BML_REPO:-${BPS_REPO:-mintychochip/wirecraft}}"
+DIR="${BML_INSTALL_DIR:-${BPS_INSTALL_DIR:-}}"
+VERSION="${BML_VERSION:-${BPS_VERSION:-latest}}"
 TARGET=""
 
 usage() {
@@ -20,17 +20,19 @@ usage: update.sh [options]
 
 options:
   --version <tag>   release tag to install (default: the latest release)
-  --dir <path>      install directory (default: $BPS_INSTALL_DIR, the bpsc on
+  --dir <path>      install directory (default: $BML_INSTALL_DIR, the bml on
                     PATH, or ~/.local/bin)
   --target <triple> release target to install (passed to install.sh)
   -h, --help        show this help
 
 environment:
-  BPS_REPO         GitHub repository (default: mintychochip/wirecraft)
-  BPS_INSTALL_DIR  default install directory
-  BPS_VERSION      default release tag
-  BPS_INSTALL_SH   installer path or URL (default: next to this script, else
+  BML_REPO         GitHub repository (default: mintychochip/wirecraft)
+  BML_INSTALL_DIR  default install directory
+  BML_VERSION      default release tag
+  BML_INSTALL_SH   installer path or URL (default: next to this script, else
                    install.sh from master)
+
+The legacy BPS_* names are still honored.
 EOF
 }
 
@@ -113,7 +115,10 @@ latest_tag() {
 }
 
 if [ -z "$DIR" ]; then
-  if on_path=$(command -v bpsc 2>/dev/null); then
+  if on_path=$(command -v bml 2>/dev/null); then
+    DIR=$(cd "$(dirname "$on_path")" && pwd)
+  elif on_path=$(command -v bpsc 2>/dev/null); then
+    # Migrate an old install in place: bml lands beside bpsc.
     DIR=$(cd "$(dirname "$on_path")" && pwd)
   else
     DIR="$HOME/.local/bin"
@@ -121,9 +126,12 @@ if [ -z "$DIR" ]; then
 fi
 
 current=""
-if [ -f "${DIR}/bpsc.version" ]; then
-  current=$(tr -d '[:space:]' <"${DIR}/bpsc.version")
-fi
+for vf in "${DIR}/bml.version" "${DIR}/bpsc.version"; do
+  if [ -f "$vf" ]; then
+    current=$(tr -d '[:space:]' <"$vf")
+    break
+  fi
+done
 
 if [ "$VERSION" = latest ]; then
   VERSION=$(latest_tag)
@@ -134,18 +142,18 @@ case "$VERSION" in
   *) VERSION="v${VERSION}" ;;
 esac
 
-if [ "$current" = "$VERSION" ] && [ -x "${DIR}/bpsc" ]; then
-  note "bpsc ${VERSION} is already installed in ${DIR}"
+if [ "$current" = "$VERSION" ] && [ -x "${DIR}/bml" ]; then
+  note "bml ${VERSION} is already installed in ${DIR}"
   exit 0
 fi
 
 if [ -n "$current" ]; then
-  note "updating bpsc ${current} -> ${VERSION}"
+  note "updating bml ${current} -> ${VERSION}"
 else
-  note "installing bpsc ${VERSION}"
+  note "installing bml ${VERSION}"
 fi
 
-installer="${BPS_INSTALL_SH:-}"
+installer="${BML_INSTALL_SH:-${BPS_INSTALL_SH:-}}"
 if [ -z "$installer" ]; then
   src="${BASH_SOURCE[0]:-}"
   if [ -n "$src" ] && [ -f "$src" ]; then
@@ -158,7 +166,7 @@ fi
 
 tmp=""
 if [ -z "$installer" ]; then
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/bpsc-update.XXXXXX")
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/bml-update.XXXXXX")
   trap 'rm -rf "$tmp"' EXIT
   installer="${tmp}/install.sh"
   fetch "https://raw.githubusercontent.com/${REPO}/master/install.sh" >"$installer" ||

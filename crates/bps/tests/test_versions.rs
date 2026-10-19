@@ -292,7 +292,7 @@ fn committed_schemas_are_what_the_importer_writes() {
     .unwrap();
     assert!(
         report.stale.is_empty(),
-        "stale (run `bpsc import-versions`): {:?}",
+        "stale (run `bml import-versions`): {:?}",
         report.stale
     );
     assert_eq!(report.roots, entries().len());

@@ -32,7 +32,7 @@ function usage (code) {
     '  node oracle.js check --protocol <protocol.json> [--patches <patch.json>] [--stdin | --file f.jsonl]\n' +
     '\n' +
     '--patches applies a schemas/versions/patches/*.json file to the description first, as\n' +
-    '`bpsc import-versions` does, so both sides work from the same corrected types.\n')
+    '`bml import-versions` does, so both sides work from the same corrected types.\n')
   process.exit(code)
 }
 

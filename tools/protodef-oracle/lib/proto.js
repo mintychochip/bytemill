@@ -27,7 +27,7 @@ function loadProtocolJson (file) {
 
 // Apply a BPS patch file (schemas/versions/patches/*.json) to a loaded protocol: each patch
 // replaces or adds named types in `global` or in one `<state>.<toClient|toServer>` scope, exactly
-// as `bpsc import-versions` does, so the oracle compiles the same description BPS imported.
+// as `bml import-versions` does, so the oracle compiles the same description BPS imported.
 function applyPatches (protocolJson, patchFile) {
   const { patches } = JSON.parse(fs.readFileSync(patchFile, 'utf8'))
   for (const patch of patches) {

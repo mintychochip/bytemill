@@ -90,7 +90,7 @@ protocol minecraft @ v26_3 {
 A packet's meaning depends on **state × direction × id**, which the descriptor model cannot
 express.
 
-The frame block is the framing: `bpsc decode --state` reads it, so a second
+The frame block is the framing: `bml decode --state` reads it, so a second
 game is a second frame shape, not a code change. `length`, `id`, and
 `payload` are ordinary typed fields with one rule: `payload: rest` pairs
 with a length that counts everything after the length field (id bytes
@@ -138,8 +138,8 @@ encoding nbt_payload = {
 
 - `schemas/versions/` — protocols 393 (1.13) to 777 (26.3), one thin root each (header, imports,
   routes) plus shared declaration files under `common/`, generated from minecraft-data's ProtoDef
-  descriptions by `bpsc import-versions` (see its README)
+  descriptions by `bml import-versions` (see its README)
 
 Authoring rules and the per-packet workflow live in `docs/AUTHORING_GUIDE.md`.
 
-Run: `bpsc check schemas/minecraft_26_3_wiki.bps`
+Run: `bml check schemas/minecraft_26_3_wiki.bps`

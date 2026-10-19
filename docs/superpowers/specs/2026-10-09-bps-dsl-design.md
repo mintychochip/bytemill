@@ -1,6 +1,6 @@
 # BPS — Binary Protocol Schema: design
 
-**Status:** approved direction (user decisions: Python 3.11+ stdlib-only front-end; `bps`/`bpsc`
+**Status:** approved direction (user decisions: Python 3.11+ stdlib-only front-end; `bps`/`bml`
 naming; full Minecraft 26.3 packet surface; Rust code generation).
 **Date:** 2026-10-09
 
@@ -17,7 +17,7 @@ v1 deliverables:
    analysis, `schema.json` emitter.
 2. **Reference interpreter** (Python): symmetric decode/encode over the resolved AST; powers the
    CLI. The interpreter is the semantic definition.
-3. **Rust emitter** (`bpsc emit rust`): any `.bps` schema compiles to a dependency-free Rust
+3. **Rust emitter** (`bml emit rust`): any `.bps` schema compiles to a dependency-free Rust
    crate with per-encoding read/write functions and a routing dispatcher.
 4. **`schemas/minecraft_26_3.bps`**: the complete protocol-777 surface — every state, both
    directions, every packet, and the encodings they reference (NBT, slots, entity metadata,
@@ -28,7 +28,7 @@ v1 deliverables:
 ## 2. Non-goals (v1)
 
 - Codegen targets other than Rust.
-- Session-level stream decoding that auto-tracks connection state (phase 2; `bpsc decode` takes
+- Session-level stream decoding that auto-tracks connection state (phase 2; `bml decode` takes
   explicit `--state/--direction`).
 - Version overlays/diffing (`@26.2`) — one schema file per version in v1.
 - Crypto/compression codecs. The schema describes the logical stream on one side of encryption
@@ -305,7 +305,7 @@ bps/
     codecs.py      primitive/composite decode+encode
     evalexpr.py    expression evaluator (decode + encode directions)
   emit_rust.py     AST -> dependency-free Rust crate
-  cli.py           bpsc entry point
+  cli.py           bml entry point
 schemas/
   std/                      # integers.bps, varint.bps: scalars built from u8
   minecraft_core.bps        # shared encodings
@@ -339,15 +339,15 @@ variants; repetition → `Vec<T>`; computed fields → struct fields populated a
 write; `require` → `Result::Err` on both paths; expressions → Rust expressions over `i64`/`u64`
 with explicit masks.
 
-## 8. CLI (`bpsc`)
+## 8. CLI (`bml`)
 
 ```
-bpsc check schema.bps ...                 # parse + resolve + report
-bpsc dump-json schema.bps                 # emit schema.json
-bpsc routes schema.bps                    # print routing table
-bpsc decode schema.bps --state play --direction clientbound < packet.hex
-bpsc encode schema.bps --state play --direction clientbound < packet.json
-bpsc emit rust schema.bps --out out/      # generated crate
+bml check schema.bps ...                 # parse + resolve + report
+bml dump-json schema.bps                 # emit schema.json
+bml routes schema.bps                    # print routing table
+bml decode schema.bps --state play --direction clientbound < packet.hex
+bml encode schema.bps --state play --direction clientbound < packet.json
+bml emit rust schema.bps --out out/      # generated crate
 ```
 
 Exit codes: 0 ok, 1 usage, 2 schema errors, 3 decode/encode errors. `decode`/`encode` accept

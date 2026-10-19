@@ -128,7 +128,7 @@ Found by checking packets against vanilla's source and Minestom's recorded bytes
 ## Verification
 
 ```
-bpsc check <your file>
+bml check <your file>
 ```
 
 must print `ok`. If it instead says a name is not declared, it prints the `import`

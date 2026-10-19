@@ -4,7 +4,7 @@
 Both directions, for every entry of schemas/versions/manifest.json:
 
   JS -> BPS   the oracle compiles the version's protocol.json (with the manifest's patches) with
-              ProtoDef and generates random packets; `bpsc wire-check` must decode each strictly
+              ProtoDef and generates random packets; `bml wire-check` must decode each strictly
               and encode it back to the same bytes.
   BPS -> JS   bytes drawn from the generated schema itself (the `write_generated_vectors` test)
               must decode in ProtoDef with every byte consumed and re-serialise identically.
@@ -15,7 +15,7 @@ Both directions, for every entry of schemas/versions/manifest.json:
 `--pin` writes one oracle-generated packet per packet type and version (seed 1) as JSON Lines. The
 cargo test `oracle_vectors_round_trip` decodes and re-encodes them with no Node needed.
 
-Needs `npm ci` in tools/protodef-oracle and a built `target/debug/bpsc` (cargo build -p bps). Node and
+Needs `npm ci` in tools/protodef-oracle and a built `target/debug/bml` (cargo build -p bps). Node and
 cargo run under the same memory cap as scripts/bps_cargo.sh (BPS_MEM_MAX, default 8G).
 """
 import argparse
@@ -30,7 +30,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE = ROOT / "tools/protodef-oracle/oracle.js"
-BPSC = ROOT / "target/debug/bpsc"
+BPSC = ROOT / "target/debug/bml"
 
 # BPS -> JS: random bytes drawn from a BPS schema are valid wire bytes, but ProtoDef's JS value model
 # is lossy for a few shapes, so JS cannot always write back what it read. A packet with one of these

@@ -1,4 +1,4 @@
-# Build the `bpsc` CLI for every supported platform and attach the archives to
+# Build the `bml` CLI for every supported platform and attach the archives to
 # a GitHub Release. Tag `v*` to publish; run the workflow manually to produce
 # artifacts without creating a release.
 #
@@ -32,28 +32,28 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            binary: bpsc
+            binary: bml
             archive: tar.gz
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            binary: bpsc
+            binary: bml
             archive: tar.gz
             musl: true
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            binary: bpsc
+            binary: bml
             archive: tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
-            binary: bpsc
+            binary: bml
             archive: tar.gz
           - os: macos-latest
             target: x86_64-apple-darwin
-            binary: bpsc
+            binary: bml
             archive: tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary: bpsc.exe
+            binary: bml.exe
             archive: zip
     runs-on: ${{ matrix.os }}
     steps:
@@ -75,7 +75,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
-        run: cargo +stable build --release --locked --bin bpsc --target ${{ matrix.target }}
+        run: cargo +stable build --release --locked --bin bml --target ${{ matrix.target }}
 
       - name: Smoke test (Unix)
         if: runner.os != 'Windows'
@@ -98,7 +98,7 @@ jobs:
           mkdir -p "$stage"
           cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$stage/${{ matrix.binary }}"
           cp README.md "$stage/README.md"
-          tar -czf "dist/bpsc-${{ matrix.target }}.tar.gz" \
+          tar -czf "dist/bml-${{ matrix.target }}.tar.gz" \
             -C "$stage" "${{ matrix.binary }}" README.md
 
       - name: Package (Windows)
@@ -108,13 +108,13 @@ jobs:
           New-Item -ItemType Directory -Force dist/stage | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" dist/stage/${{ matrix.binary }}
           Copy-Item README.md dist/stage/README.md
-          Compress-Archive -Path dist/stage/* -DestinationPath "dist/bpsc-${{ matrix.target }}.zip"
+          Compress-Archive -Path dist/stage/* -DestinationPath "dist/bml-${{ matrix.target }}.zip"
 
       - name: Upload the archive
         uses: actions/upload-artifact@v7
         with:
-          name: bpsc-${{ matrix.target }}
-          path: dist/bpsc-${{ matrix.target }}.${{ matrix.archive }}
+          name: bml-${{ matrix.target }}
+          path: dist/bml-${{ matrix.target }}.${{ matrix.archive }}
           if-no-files-found: error
 
   checksums:
@@ -130,7 +130,7 @@ jobs:
 
       - name: Write SHA256SUMS
         working-directory: dist
-        run: sha256sum bpsc-* > SHA256SUMS
+        run: sha256sum bml-* > SHA256SUMS
 
       - name: Upload SHA256SUMS
         uses: actions/upload-artifact@v7
@@ -164,4 +164,4 @@ jobs:
             args+=(--prerelease)
           fi
           gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
-            dist/bpsc-* dist/SHA256SUMS "${args[@]}"
+            dist/bml-* dist/SHA256SUMS "${args[@]}"

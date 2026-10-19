@@ -10,7 +10,7 @@
 // that many payload bytes. Zstd wraps the payload only when the packet's
 // IS_COMPRESSED flag is set; none of these four are compressed.
 //
-// bpsc's frame decoder reads this block: `payload: bytes(length)` takes
+// bml's frame decoder reads this block: `payload: bytes(length)` takes
 // exactly `length` bytes. `--state` takes the whole frame;
 // `--packet` takes the payload after the id.
 

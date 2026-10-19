@@ -145,7 +145,7 @@ fn take_switch(argv: &mut Vec<String>, name: &str) -> bool {
     found
 }
 
-/// `bpsc import-versions` and `bpsc import-protodef`: minecraft-data's ProtoDef descriptions
+/// `bml import-versions` and `bml import-protodef`: minecraft-data's ProtoDef descriptions
 /// as BPS schemas (see `crate::protodef`). Rust-only; the Python CLI has no importer.
 fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
     use crate::protodef::{FileSpec, Protocol, import, import_versions};
@@ -243,7 +243,7 @@ fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
     }
 }
 
-/// `bpsc wire-check <schema>... [--file vectors.jsonl] [--dump decoded.jsonl]`: every vector
+/// `bml wire-check <schema>... [--file vectors.jsonl] [--dump decoded.jsonl]`: every vector
 /// (stdin by default) must decode strictly and re-encode to the same bytes; `--dump` writes the
 /// decoded values. See `crate::wire`.
 fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
@@ -285,7 +285,7 @@ fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
 pub fn main(argv: &[String]) -> Result<i32, String> {
     let mut argv = argv.to_vec();
     if argv.is_empty() {
-        return Err("usage: bpsc <command> ...".to_string());
+        return Err("usage: bml <command> ...".to_string());
     }
     let cmd = argv.remove(0);
     if cmd == "import-versions" || cmd == "import-protodef" {

@@ -1,4 +1,4 @@
-//! `bpsc`, porting `bps/cli.py`'s `main`.
+//! `bml`, porting `bps/cli.py`'s `main`.
 
 use bps::cli;
 use std::process::ExitCode;
