@@ -37,7 +37,7 @@ In scope:
 
 ## 4. IR
 
-The IR is data in `crates/bps/src/ir/`. It is not the ProtoDef import IR (`protodef/ir.rs`); that one only exists to produce `.bps`.
+The IR is data in `crates/bytemill/src/ir/`. It is not the ProtoDef import IR (`protodef/ir.rs`); that one only exists to produce `.bps`.
 
 ### 4.1 Schema
 

@@ -101,16 +101,16 @@ Imports decide what a *schema* may use. Two tool behaviors still depend on a std
 name directly, because they are not generated from the schema:
 
 - The interpreter reads a frame's length and packet id as `varint`
-  (`decode_frame_payload` in `crates/bps/src/interp/engine.rs`), whatever the `frame`
+  (`decode_frame_payload` in `crates/bytemill/src/interp/engine.rs`), whatever the `frame`
   declaration says. It also writes the length of a `string`, `identifier` or
   `nbt_string` given as a string value with `varint` (`u16be` for `nbt_string`).
 - `emit rust` and `emit rstom` recognise the std scalar names (`PRIMITIVES` in
-  `crates/bps/src/emit_rust.rs`, `WIRE_TYPES` in `crates/bps/src/emit_rstom.rs`) and emit hand-written
+  `crates/bytemill/src/emit_rust.rs`, `WIRE_TYPES` in `crates/bytemill/src/emit_rstom.rs`) and emit hand-written
   helpers instead of translating the definition. A scalar encoding outside that
   set is an `EmitError`, not wrong code.
 
 So editing `std/varint.bps` changes the interpreter; emitted Rust follows only
-when its helpers change too. `crates/bps/tests/test_emit_rstom.rs` compares the two.
+when its helpers change too. `crates/bytemill/tests/test_emit_rstom.rs` compares the two.
 
 Rules that bite:
 
@@ -318,7 +318,7 @@ echo '10008906096c6f63616c686f737463dd01' | bml decode schemas/your.bps \
   --state handshaking --direction serverbound --hex
 ```
 
-The gates that must stay green (see `crates/bps/tests/`):
+The gates that must stay green (see `crates/bytemill/tests/`):
 
 | Gate | Asserts |
 | --- | --- |
@@ -338,18 +338,18 @@ A round trip only proves a layout agrees with itself. To check one against a rea
 implementation:
 
 ```bash
-cargo run -q -p bps --bin java_probe_samples                  # packets the schema cannot reproduce
-cargo run -q -p bps --bin java_probe_samples -- set_objective # every recorded sample for a packet
+cargo run -q -p bytemill --bin java_probe_samples                  # packets the schema cannot reproduce
+cargo run -q -p bytemill --bin java_probe_samples -- set_objective # every recorded sample for a packet
 ```
 
 The samples are the bytes Minestom wrote, from rstom's `probes/expected/`. Minestom
 is an implementation, not the protocol: vanilla's decompiled
 `net/minecraft/network/protocol/**` is. Where Minestom's bytes differ from
 vanilla's wire format, follow vanilla and list the packet in `KNOWN_MISMATCHES` in
-`crates/bps/tests/test_java_ground_truth.rs` with the reason. Packets without a recorded
+`crates/bytemill/tests/test_java_ground_truth.rs` with the reason. Packets without a recorded
 sample (96 of 232) are checked only against vanilla's source.
 
-The route table gets the same treatment: `crates/bps/tests/test_vanilla_routes.rs` reads the
+The route table gets the same treatment: `crates/bytemill/tests/test_vanilla_routes.rs` reads the
 packet order out of vanilla's `*Protocols.java` builder chains and requires the
 packet at every id to be the one vanilla registers there. The few names that differ
 (the wiki's `login_start` is vanilla's `hello`) are listed in `ALIASES` with the reason.

@@ -10,13 +10,13 @@ Both directions, for every entry of schemas/versions/manifest.json:
               must decode in ProtoDef with every byte consumed and re-serialise identically.
 
     scripts/verify_versions.py [--count 20] [--seeds 20] [--only 1.20.1] [--keep DIR]
-    scripts/verify_versions.py --pin     # rewrite crates/bps/tests/fixtures/protodef_vectors/
+    scripts/verify_versions.py --pin     # rewrite crates/bytemill/tests/fixtures/protodef_vectors/
 
 `--pin` writes one oracle-generated packet per packet type and version (seed 1) as JSON Lines. The
 cargo test `oracle_vectors_round_trip` decodes and re-encodes them with no Node needed.
 
-Needs `npm ci` in tools/protodef-oracle and a built `target/debug/bml` (cargo build -p bps). Node and
-cargo run under the same memory cap as scripts/bps_cargo.sh (BPS_MEM_MAX, default 8G).
+Needs `npm ci` in tools/protodef-oracle and a built `target/debug/bml` (cargo build -p bytemill). Node and
+cargo run under the same memory cap as scripts/bytemill_cargo.sh (BPS_MEM_MAX, default 8G).
 """
 import argparse
 import atexit
@@ -79,7 +79,7 @@ def main():
     if not entries:
         sys.exit(f"no manifest entry for {args.only!r}")
     if args.pin:
-        pin_dir = ROOT / "crates/bps/tests/fixtures/protodef_vectors"
+        pin_dir = ROOT / "crates/bytemill/tests/fixtures/protodef_vectors"
         pin_dir.mkdir(parents=True, exist_ok=True)
         for e in entries:
             proto = ROOT / "data/minecraft-data" / e["data"] / "protocol.json"
@@ -102,7 +102,7 @@ def main():
     if args.only:
         env["BPS_ONLY"] = args.only
     r = subprocess.run(
-        [str(ROOT / "scripts/bps_cargo.sh"), "test", "-p", "bps", "--test", "test_versions", "--",
+        [str(ROOT / "scripts/bytemill_cargo.sh"), "test", "-p", "bps", "--test", "test_versions", "--",
          "--ignored", "write_generated_vectors"], capture_output=True, text=True, env=env, cwd=ROOT)
     if r.returncode != 0:
         sys.exit(r.stdout + r.stderr)

@@ -3,7 +3,7 @@
 Transcribed from the decompiled `com.hypixel.hytale.protocol` package on
 [soksx/hytale-protocol](https://github.com/soksx/hytale-protocol) branch
 `version/2026.02.17-255364b8e`. The Java is not vendored. The bytes in
-`crates/bps/tests/test_hytale.rs` are what those `serialize` methods write.
+`crates/bytemill/tests/test_hytale.rs` are what those `serialize` methods write.
 
 ```bash
 bml check  schemas/hytale/2026_02_17.bps

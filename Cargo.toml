@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/bps"]
+members = ["crates/bytemill"]
 resolver = "2"
 # `build/` holds emitted example trees (`bml emit ... --out build/26_3/<lang>`); the
 # rust-typed crate there is buildable in place, so keep it out of this workspace.

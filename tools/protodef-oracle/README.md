@@ -169,7 +169,7 @@ one invocation covers a whole protocol file efficiently.
 `scripts/verify_versions.py` runs this for every entry of
 `schemas/versions/manifest.json`, with the entry's patch file, in both directions: JS → BPS is the
 `gen` + `wire-check` pair above; BPS → JS feeds `check` with random packets drawn from the BPS
-schema (`bps::wiregen`, via the `write_generated_vectors` cargo test). A packet the oracle decodes
+schema (`bytemill::wiregen`, via the `write_generated_vectors` cargo test). A packet the oracle decodes
 with every byte consumed but cannot write back (four shapes ProtoDef's JS value model cannot
 represent, named in the script) is counted as `js-lossy`, anything else is a failure.
 

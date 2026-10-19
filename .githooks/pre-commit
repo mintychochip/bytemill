@@ -15,7 +15,7 @@ if ! grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$' <<<"$changed"; then
 fi
 
 echo "pre-commit: cargo clippy --workspace --all-targets -- -D warnings" >&2
-if ! scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings; then
+if ! scripts/bytemill_cargo.sh clippy --workspace --all-targets -- -D warnings; then
   echo "pre-commit: clippy is not clean. Fix the findings above; if one truly cannot be fixed," >&2
   echo "pre-commit: silence it narrowly with #[allow(clippy::lint, reason = \"...\")] and say why." >&2
   exit 1

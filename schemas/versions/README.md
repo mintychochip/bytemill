@@ -74,7 +74,7 @@ The packet layouts are PrismarineJS [minecraft-data](https://github.com/Prismari
 ProtoDef `protocol.json` files, the data behind mineflayer and node-minecraft-protocol, **vendored
 byte for byte** in `data/minecraft-data/` (`sources.json` names the commit, upstream path and
 SHA-256 of each file; `NOTICE.md` has the licence). `bml import-versions` turns them into the
-schemas here: `crates/bps/src/protodef/` is the importer, `docs/superpowers/specs/2026-10-12-bps-protocol-versions-design.md`
+schemas here: `crates/bytemill/src/protodef/` is the importer, `docs/superpowers/specs/2026-10-12-bps-protocol-versions-design.md`
 the design, the translation table and the reasoning.
 
 - **26.1 and earlier** are minecraft-data `master` at commit `dd01127`. Where one file describes
@@ -140,16 +140,16 @@ Python parity run need Node and Python.
 
 | Check | What it shows | Where |
 | --- | --- | --- |
-| Importer, one construct at a time | each protodef construct decodes and re-encodes known bytes, including the scoping hazards (an inner field that shadows a name read from outside, an option read by a later switch) | `crates/bps/tests/test_protodef_import.rs` |
+| Importer, one construct at a time | each protodef construct decodes and re-encodes known bytes, including the scoping hazards (an inner field that shadows a name read from outside, an option read by a later switch) | `crates/bytemill/tests/test_protodef_import.rs` |
 | Route tables | every version's routes equal the (patched) description's id table | `test_versions.rs` |
 | Up to date | `import-versions --check` over the committed files | `test_versions.rs` |
-| Random packets from the schema itself | `bps::wiregen` writes random bytes for every packet of every version, steered to reach the `match` arms and `if` groups; strict decode then encode must give the same bytes (12 seeds per packet in CI; at 300 seeds: 0 failures, 94–99% of all branch sites reached) | `test_versions.rs` |
-| Pinned oracle packets | one packet per packet type and version drawn by the ProtoDef oracle (7 271 packets) decodes strictly and re-encodes byte for byte, with no Node | `test_versions.rs`, `crates/bps/tests/fixtures/protodef_vectors/`; refresh with `scripts/verify_versions.py --pin` |
+| Random packets from the schema itself | `bytemill::wiregen` writes random bytes for every packet of every version, steered to reach the `match` arms and `if` groups; strict decode then encode must give the same bytes (12 seeds per packet in CI; at 300 seeds: 0 failures, 94–99% of all branch sites reached) | `test_versions.rs` |
+| Pinned oracle packets | one packet per packet type and version drawn by the ProtoDef oracle (7 271 packets) decodes strictly and re-encodes byte for byte, with no Node | `test_versions.rs`, `crates/bytemill/tests/fixtures/protodef_vectors/`; refresh with `scripts/verify_versions.py --pin` |
 | **ProtoDef oracle** | the same `protocol.json` (patches applied) is compiled with ProtoDef and node-minecraft-protocol's natives; JS-generated random packets decode strictly in BPS and re-encode byte for byte (JS → BPS), and BPS-generated packets decode in ProtoDef with every byte consumed (BPS → JS) | `scripts/verify_versions.py`, `tools/protodef-oracle/` |
 | Rust ↔ Python | `dump-json` of every generated schema is byte-identical in the Rust and Python implementations, and the same random packets decode to identical JSON in both | `scripts/python_parity_versions.py` |
 | 26.3 vs the hand-written schema | 6 240 packets drawn from the hand-written, Java-probe-validated `schemas/minecraft_26_3*.bps`: 6 069 decode and re-encode unchanged under `v26_3.bps`; the other 171 are 13 packet types where the hand-written schema is deliberately looser (it stops at registry boundaries), each listed with its reason in the test. The comparison found one bug in the hand-written schema (`commands_node`), now fixed | `test_versions_cross.rs` |
 | Vanilla, 26.1 to 26.3 | the corrections in `patches/`, each citing the decompiled vanilla source that decides it | `patches/*.json` |
-| Live game, every version | `game_probe` boots Mojang's dedicated server and speaks status and login from the schema. `--client` also launches that version's real client jar (`net.minecraft.client.main.Main`) through a recording proxy and checks the bytes the client sends and the server sends back | `cargo run -q -p bps --bin game_probe -- --client` |
+| Live game, every version | `game_probe` boots Mojang's dedicated server and speaks status and login from the schema. `--client` also launches that version's real client jar (`net.minecraft.client.main.Main`) through a recording proxy and checks the bytes the client sends and the server sends back | `cargo run -q -p bytemill --bin game_probe -- --client` |
 
 The last full oracle run, `scripts/verify_versions.py --count 100 --seeds 100`:
 

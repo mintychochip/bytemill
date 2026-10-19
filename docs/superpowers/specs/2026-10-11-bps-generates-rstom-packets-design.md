@@ -18,7 +18,7 @@ and for behavior helpers on packet types.
 
 ### Facts this design rests on (verified 2026-10-11)
 
-- `crates/rstom-packets` (Go `packets_gen`) and `crates/bps_rstom` (BPS) are standalone mirrors.
+- `crates/rstom-packets` (Go `packets_gen`) and `crates/bytemill_rstom` (BPS) are standalone mirrors.
   Nothing depends on either. The server runs on the hand tree. `rstom` cannot depend on a
   packets crate: its core network types import `coordinate`, `codec`, `nbt`, `registry`, `text`
   and `crypto`. Generated code therefore lives **inside `crates/rstom`**, at the hand tree's paths.

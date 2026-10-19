@@ -52,7 +52,7 @@ can be graded against an independent schema.
 
 ## 4. Approach
 
-A protodef → BPS **importer** in the existing crate (`crates/bps/src/protodef/`, zero
+A protodef → BPS **importer** in the existing crate (`crates/bytemill/src/protodef/`, zero
 dependencies), exposed as `bml import-protodef` / `bml import-versions`. Output is committed
 (`schemas/versions/`), and `import-versions --check` fails when a committed file is stale, the
 way `emit rstom-tree --check` does.
@@ -74,15 +74,15 @@ schemas/versions/patches/<ver>.json          corrections with their vanilla evid
 schemas/versions/v1_13.bps … v26_3.bps       generated, one per protocol number, named after the
                                              newest release sharing it (v1_20_1 for 763)
 schemas/versions/README.md                   table, value shape, verification record, known limits
-crates/bps/src/protodef/                     model, scope, lower, ir, render, lint, prelude, versions
-crates/bps/src/wire.rs, wiregen.rs           `wire-check` (vectors) and the schema-directed generator
+crates/bytemill/src/protodef/                     model, scope, lower, ir, render, lint, prelude, versions
+crates/bytemill/src/wire.rs, wiregen.rs           `wire-check` (vectors) and the schema-directed generator
 tools/protodef-oracle/                       optional Node differential tool (§7)
 scripts/verify_versions.py                   runs the oracle over every version, both directions
                                              (`--pin` refreshes the committed vectors)
 scripts/python_parity_versions.py            Python reference vs Rust on every generated schema
 scripts/patch_reach.py                       which older descriptions share what the 26.1 audit fixed
 scripts/fetch_vanilla.py                     decompiles the vanilla servers (26.1+) the patches cite
-crates/bps/tests/fixtures/protodef_vectors/  one oracle packet per packet type and version
+crates/bytemill/tests/fixtures/protodef_vectors/  one oracle packet per packet type and version
 ```
 
 Each generated file is self-contained: `import "../std/integers.bps"`, `import "../std/varint.bps"`,
@@ -156,11 +156,11 @@ There is no silent fallback to `rest`.
 2. `import-versions --check` over the committed files.
 3. Per version: the schema loads, declares its protocol number, and its route table equals the
    (patched) description's id table.
-4. Per version: `bps::wiregen` draws random bytes for every packet, steered at the `match` arms and
+4. Per version: `bytemill::wiregen` draws random bytes for every packet, steered at the `match` arms and
    `if` groups; strict decode then encode must reproduce them (12 seeds in CI; 300 seeds reach
    94–99% of the branch sites with no failure).
 5. Pinned vectors: one oracle-generated packet per packet type and version, committed under
-   `crates/bps/tests/fixtures/protodef_vectors/`, decoded and re-encoded without Node.
+   `crates/bytemill/tests/fixtures/protodef_vectors/`, decoded and re-encoded without Node.
 6. 26.3: packets drawn from the hand-written schema decode and re-encode under `v26_3.bps`, except
    for an explicit list of packets where the hand-written schema is deliberately looser (it stops
    at registry boundaries), each with its reason; a stale entry fails.
@@ -173,7 +173,7 @@ added), and compares bytes:
 
 - JS → BPS: random packets generated type-directed from the protodef tree and serialised by JS; BPS
   strictly decodes and re-encodes; the bytes must be identical.
-- BPS → JS: random packets from `bps::wiregen`; JS must decode every byte. Re-serialisation must also
+- BPS → JS: random packets from `bytemill::wiregen`; JS must decode every byte. Re-serialisation must also
   match except for four shapes the ProtoDef JS value model cannot represent (`js-lossy`).
 
 `scripts/verify_versions.py` runs both directions over all 39 versions.
@@ -217,7 +217,7 @@ added), and compares bytes:
 - **Patches** (§3) were not in the first design. They exist because the 26.2 and 26.3 descriptions turned
   out to be wrong against the vanilla jars in many places; a patch layer keeps the vendored bytes pristine
   and each correction reviewable.
-- **`bps::wiregen`** replaced the first plan of reusing `bps::synth` for round trips: `synth` draws values by
+- **`bytemill::wiregen`** replaced the first plan of reusing `bytemill::synth` for round trips: `synth` draws values by
   encoding *name* (a `slot` or `nbt` it knows from the hand-written schema), which clashes with the imported
   encodings of the same names. The generator writes bytes by walking the schema and shares nothing with `encode`.
 - **26.2 source**: #1333 rather than #1298 (the vanilla comparison: both have the right ids, #1298 only adds

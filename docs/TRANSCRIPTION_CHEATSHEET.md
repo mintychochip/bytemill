@@ -8,7 +8,7 @@ The wiki is not the authority: it is wrong in places (see "Where the wiki is wro
 below). What real clients speak is vanilla's own codec, in the decompiled
 `net/minecraft/network/protocol/**` (`StreamCodec.composite(...)` lists a packet's
 fields in wire order). Check a packet there before trusting a wiki row, and
-`cargo run -q -p bps --bin java_probe_samples -- <packet>` for the bytes Minestom writes.
+`cargo run -q -p bytemill --bin java_probe_samples -- <packet>` for the bytes Minestom writes.
 
 Output: a file that starts with the imports below and then contains **only**
 `packet NAME { ... }` declarations. A file can use only names it declares or

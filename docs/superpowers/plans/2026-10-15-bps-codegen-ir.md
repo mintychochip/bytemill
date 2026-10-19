@@ -6,7 +6,7 @@
 
 **Architecture:** `lower` walks `ResolvedSchema` once and produces `IrSchema` (types, decode procs, encode procs, routes, frames). `exec` runs those procs. Printers bind to the signatures Task 2 freezes. Go, typed Rust, Python, and C are Task 9, after the differential in Task 8 is green.
 
-**Tech Stack:** Rust edition 2024, crate `bps`, no new dependencies. Tests are `cargo test -p bps`.
+**Tech Stack:** Rust edition 2024, crate `bytemill`, no new dependencies. Tests are `cargo test -p bytemill`.
 
 **Spec:** `docs/superpowers/specs/2026-10-15-bps-codegen-ir-design.md`
 
@@ -29,10 +29,10 @@
 ### Task 1: Storage classifier
 
 **Files:**
-- Create: `crates/bps/src/ir/width.rs`
-- Create: `crates/bps/src/ir/mod.rs`
-- Modify: `crates/bps/src/lib.rs` (add `pub mod ir;`)
-- Test: `crates/bps/tests/test_ir_width.rs`
+- Create: `crates/bytemill/src/ir/width.rs`
+- Create: `crates/bytemill/src/ir/mod.rs`
+- Modify: `crates/bytemill/src/lib.rs` (add `pub mod ir;`)
+- Test: `crates/bytemill/tests/test_ir_width.rs`
 
 **Interfaces:**
 - Consumes: `crate::ast::Expr`, `analyze`, `parse`, `load_schema`
@@ -40,11 +40,11 @@
 
 `Storage` is `I8 I16 I32 I64 I128 U8 U16 U32 U64 Bool F64 Str Bytes`. `locals` maps a name already classified (`b0` to `U8`) so unsigned assembly can see byte fields.
 
-- [ ] **Step 1: Write the failing test** in `crates/bps/tests/test_ir_width.rs`
+- [ ] **Step 1: Write the failing test** in `crates/bytemill/tests/test_ir_width.rs`
 
 ```rust
-use bps::ast::Expr;
-use bps::ir::{storage_of, Storage};
+use bytemill::ast::Expr;
+use bytemill::ir::{storage_of, Storage};
 use std::collections::HashMap;
 
 fn locals(pairs: &[(&str, Storage)]) -> HashMap<String, Storage> {
@@ -53,7 +53,7 @@ fn locals(pairs: &[(&str, Storage)]) -> HashMap<String, Storage> {
 
 fn parse_expr(src: &str) -> Expr {
     let text = format!("encoding probe = {{ x: u8 }} = {src}\n");
-    let schema = bps::parse(&text).unwrap();
+    let schema = bytemill::parse(&text).unwrap();
     schema.encodings[0].yield_expr.clone().unwrap()
 }
 
@@ -76,7 +76,7 @@ fn comparison_is_bool_and_unsigned_or_is_u16() {
 }
 ```
 
-- [ ] **Step 2:** Run `cargo test -p bps --test test_ir_width -- --test-threads=8`. Expected: compile failure, `storage_of` missing.
+- [ ] **Step 2:** Run `cargo test -p bytemill --test test_ir_width -- --test-threads=8`. Expected: compile failure, `storage_of` missing.
 
 - [ ] **Step 3:** Implement `storage_of` with the four rules in spec section 4.3. A `sign_extend` whose bit count is not an `Expr::Int` returns `I128`. An `|` tree returns `U8`/`U16`/`U32`/`U64` only when every leaf is a local of class `U8` or a shift of one by a constant multiple of 8. Any other shape returns `I128`. Add `pub mod ir;` to `lib.rs`.
 
@@ -89,8 +89,8 @@ fn comparison_is_bool_and_unsigned_or_is_u16() {
 ### Task 2: IR schema types
 
 **Files:**
-- Create: `crates/bps/src/ir/schema.rs`
-- Modify: `crates/bps/src/ir/mod.rs`
+- Create: `crates/bytemill/src/ir/schema.rs`
+- Modify: `crates/bytemill/src/ir/mod.rs`
 
 **Interfaces:**
 - Consumes: `Storage`, `crate::ast::Expr`
@@ -179,14 +179,14 @@ pub struct IrSchema {
 `Utf8` is a `Stmt`, not a `WireOp`. A printer must not treat it as a cursor read.
 
 - [ ] **Step 1:** Add the types. Re-export them from `ir/mod.rs`.
-- [ ] **Step 2:** `cargo check -p bps` passes.
+- [ ] **Step 2:** `cargo check -p bytemill` passes.
 - [ ] **Step 3:** Commit `feat(ir): define the schema IR`.
 
 ### Task 3: Lower scalars and primitives
 
 **Files:**
-- Create: `crates/bps/src/ir/lower.rs`
-- Test: `crates/bps/tests/test_ir_lower.rs`
+- Create: `crates/bytemill/src/ir/lower.rs`
+- Test: `crates/bytemill/tests/test_ir_lower.rs`
 
 **Interfaces:**
 - Consumes: `ResolvedSchema`, Task 2 types, `storage_of`
@@ -194,7 +194,7 @@ pub struct IrSchema {
 
 - [ ] **Step 1: Failing test.** Parse `schemas/std/integers.bps` plus `packet probe { n: i32be }`. `lower` yields type `i32be` as `TypeDef::Scalar(Storage::I32)`. Decode of `i32be` calls `u32be` (or reads through it); it does not inline another scalar's body. `u8` decode is one `Read` of `WireOp::U8`. `u8` encode is one `Write` of `value & 0xFF`.
 
-- [ ] **Step 2:** Run `cargo test -p bps --test test_ir_lower -- --test-threads=8`. Expected: failure.
+- [ ] **Step 2:** Run `cargo test -p bytemill --test test_ir_lower -- --test-threads=8`. Expected: failure.
 
 - [ ] **Step 3: Implement `lower`.**
   - Unknown calls and transforms other than `utf8` are `BpsError::emit`, naming the encoding.
@@ -208,8 +208,8 @@ pub struct IrSchema {
 ### Task 4: Execute scalars
 
 **Files:**
-- Create: `crates/bps/src/ir/exec.rs`
-- Test: extend `crates/bps/tests/test_ir_lower.rs`
+- Create: `crates/bytemill/src/ir/exec.rs`
+- Test: extend `crates/bytemill/tests/test_ir_lower.rs`
 
 **Interfaces:**
 - Consumes: `IrSchema`, `Proc`, `Value`, `interp::eval_expr`
@@ -230,8 +230,8 @@ pub fn exec_encode(ir: &IrSchema, ty: &str, args: &[Value], value: &Value) -> Bp
 ### Task 5: String-shaped encodings
 
 **Files:**
-- Modify: `crates/bps/src/ir/lower.rs`, `crates/bps/src/ir/exec.rs`
-- Test: `crates/bps/tests/test_ir_lower.rs`
+- Modify: `crates/bytemill/src/ir/lower.rs`, `crates/bytemill/src/ir/exec.rs`
+- Test: `crates/bytemill/tests/test_ir_lower.rs`
 
 - [ ] **Step 1: Failing test.** Schema imports std integers and varint, then:
 
@@ -256,7 +256,7 @@ packet probe { s: string(16)  id: identifier }
 
 **Files:**
 - Modify: `lower.rs`, `exec.rs`
-- Test: `crates/bps/tests/test_ir_lower.rs`
+- Test: `crates/bytemill/tests/test_ir_lower.rs`
 
 - [ ] **Step 1: Failing tests.**
   - `position` from `schemas/minecraft_core.bps` is a `Record` with `raw: U64`, `x` and `z` at `I32`, `y` at `I16`. Eight zero bytes decode to a map containing those four names.
@@ -280,7 +280,7 @@ packet probe { s: string(16)  id: identifier }
 
 **Files:**
 - Modify: `lower.rs`, `exec.rs`
-- Test: `crates/bps/tests/test_ir_lower.rs`
+- Test: `crates/bytemill/tests/test_ir_lower.rs`
 
 **Interfaces:**
 - Produces:
@@ -300,13 +300,13 @@ pub fn exec_encode_frame(ir: &IrSchema, state: &str, direction: &str, packet: &s
 ### Task 8: Differential against the interpreter
 
 **Files:**
-- Create: `crates/bps/tests/test_ir_diff.rs`
+- Create: `crates/bytemill/tests/test_ir_diff.rs`
 
 - [ ] **Step 1:** For `schemas/minecraft_26_3_wiki.bps` and `schemas/versions/v1_20_1.bps`, `lower`, then for every packet `synth::synthesize_packet`, `encode_packet`, `exec_decode`, `exec_encode`. Bytes match. Normalize an interpreter string map `{byte_len, value}` to the string. Compare `uuid` and `fixed_bitset` as records. On mismatch print the packet name and the first differing byte.
 
-- [ ] **Step 2:** `cargo test -p bps --test test_ir_diff -- --test-threads=8` passes. Fix the lowerer or exec until it does. Do not weaken the oracle.
+- [ ] **Step 2:** `cargo test -p bytemill --test test_ir_diff -- --test-threads=8` passes. Fix the lowerer or exec until it does. Do not weaken the oracle.
 
-- [ ] **Step 3:** `cargo test -p bps --test test_std_types --test test_emit_rust --test test_emit_rstom -- --test-threads=8` still passes.
+- [ ] **Step 3:** `cargo test -p bytemill --test test_std_types --test test_emit_rust --test test_emit_rstom -- --test-threads=8` still passes.
 
 - [ ] **Step 4:** Commit `test(ir): round-trip the IR against the interpreter`.
 
@@ -315,9 +315,9 @@ pub fn exec_encode_frame(ir: &IrSchema, state: &str, direction: &str, packet: &s
 Start only after Task 8 is green. Each printer reads `IrSchema` and nothing else. The type map is spec section 5. Commands require `--out`.
 
 **Files:**
-- Create: `crates/bps/src/emit_go.rs`, `emit_rust_typed.rs`, `emit_python.rs`, `emit_c.rs`
-- Modify: `crates/bps/src/lib.rs`, `crates/bps/src/cli.rs` (the `emit` target allow-list)
-- Test: `crates/bps/tests/test_emit_go.rs`, `test_emit_rust_typed.rs`, `test_emit_python.rs`, `test_emit_c.rs`
+- Create: `crates/bytemill/src/emit_go.rs`, `emit_rust_typed.rs`, `emit_python.rs`, `emit_c.rs`
+- Modify: `crates/bytemill/src/lib.rs`, `crates/bytemill/src/cli.rs` (the `emit` target allow-list)
+- Test: `crates/bytemill/tests/test_emit_go.rs`, `test_emit_rust_typed.rs`, `test_emit_python.rs`, `test_emit_c.rs`
 
 - [ ] **Step 1:** One failing test per language. Emit std varint plus `packet probe { n: varint }` and assert the output contains encode and decode of `probe`. A driver (`go test`, `cargo test`, `python`, `cc`) round-trips 300 (`ac 02`) and `-1`.
 

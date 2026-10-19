@@ -66,11 +66,11 @@ ResolvedSchema → lower → IrSchema → typed → Program → printers: go | p
 The IR interpreter's differential tests (`test_ir_diff.rs`) and the storage tests
 (`test_ir_width.rs`) stay green; the width tests gain the interval rule and `f32`.
 
-## 4. The typed program (`crates/bps/src/ir/typed/`)
+## 4. The typed program (`crates/bytemill/src/ir/typed/`)
 
-`bps::ir::typed(&ResolvedSchema) -> BpsResult<Program>` lowers and types. The authoritative
+`bytemill::ir::typed(&ResolvedSchema) -> BpsResult<Program>` lowers and types. The authoritative
 description of every construct, its meaning, and its failures is the module documentation of
-`crates/bps/src/ir/typed/mod.rs`; `Program::dump_codec` renders a codec as pseudo-code for
+`crates/bytemill/src/ir/typed/mod.rs`; `Program::dump_codec` renders a codec as pseudo-code for
 inspection. In short:
 
 - **Names.** `Name` holds lowercase words (`snake`, `camel`, `pascal`, `screaming`); printers
@@ -227,8 +227,8 @@ Verification record (all run on the final tree):
 
 | Check | Result |
 |---|---|
-| `scripts/bps_cargo.sh test --no-fail-fast` | 365 passed, 0 failed, exit 0 |
-| `scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings` | clean |
+| `scripts/bytemill_cargo.sh test --no-fail-fast` | 365 passed, 0 failed, exit 0 |
+| `scripts/bytemill_cargo.sh clippy --workspace --all-targets -- -D warnings` | clean |
 | Go: `gofmt -l`, `go vet`, `go test`, round trips (26.3, 1.20.1, Hytale) | clean |
 | Python: `compileall`, ruff format/check, `mypy --strict` (13 files), round trips | clean |
 | C: `cc -Werror`, `clang-format --dry-run --Werror`, round trips | clean |

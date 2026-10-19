@@ -1,0 +1,28 @@
+[package]
+name = "bytemill"
+version = "0.1.0"
+description = "Binary wire protocol schema compiler and code generator"
+edition = "2024"
+
+[lints]
+workspace = true
+
+
+[dependencies]
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+
+[[bin]]
+name = "game_probe"
+path = "src/bin/game_probe.rs"
+
+[[bin]]
+name = "bml"
+path = "src/main.rs"
+
+[[bin]]
+name = "scrape_wiki_routes"
+path = "src/bin/scrape_wiki_routes.rs"
+
+[[bin]]
+name = "java_probe_samples"
+path = "src/bin/java_probe_samples.rs"

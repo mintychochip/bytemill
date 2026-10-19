@@ -1,7 +1,7 @@
 # Bytemill — Project Status and Remaining Goals
 
 **Status date:** 2026-10-19
-**Scope:** the Rust compiler (`crates/bps`, binary `bml`), the shipped schemas, the nine
+**Scope:** the Rust compiler (`crates/bytemill`, binary `bml`), the shipped schemas, the nine
 typed code generators, and the rstom/Minestom downstream.
 
 This file is the project's work queue. A goal is *remaining* until its "done when" has
@@ -32,7 +32,7 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 
 | ID | Goal | Evidence (current tree) | Done when |
 |---|---|---|---|
-| A1 | Run the test suite in CI on every push/PR | `.github/workflows/clippy.yml` is the only test-adjacent workflow and runs only clippy; no `cargo test` anywhere under `.github/workflows/` | A required check runs the suite (`scripts/bps_cargo.sh test --no-fail-fast`, or plain cargo with the same memory cap) and a failure blocks merge |
+| A1 | Run the test suite in CI on every push/PR | `.github/workflows/clippy.yml` is the only test-adjacent workflow and runs only clippy; no `cargo test` anywhere under `.github/workflows/` | A required check runs the suite (`scripts/bytemill_cargo.sh test --no-fail-fast`, or plain cargo with the same memory cap) and a failure blocks merge |
 | A2 | Run every printer's language gate in CI | `docs/superpowers/specs/2026-10-15-bps-idiomatic-printers-design.md` §5 lists gofmt/go vet, ruff/mypy, javac+roundtrip, dotnet build, cc/clang-format, g++/clang-format, node/tsc/prettier, zig fmt/test, rustfmt/clippy — no workflow installs or runs them | A matrix job installs the toolchains and runs `test_emit_*` with every gate enabled; once enforced, a missing toolchain fails instead of skipping |
 | A3 | Enforce formatting of the compiler itself | No `.rustfmt.toml`, no fmt workflow, no fmt in `.githooks/pre-commit`; the baseline tree is not `cargo fmt --check` clean, and the only fmt gates are for *emitted* code | A pinned rustfmt config + normalized tree (or an explicitly scoped check) runs as a required check |
 | A4 | Schedule the ProtoDef oracle | `scripts/verify_versions.py` is manual, needs `npm ci` in `tools/protodef-oracle` and `write_generated_vectors --ignored` | A scheduled (and manually dispatchable) job runs both directions, refreshes pinned vectors only via reviewed PRs, and reports drift |

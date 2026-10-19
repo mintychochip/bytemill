@@ -178,7 +178,7 @@ Bytemill supports in-tree code generation for the Rust Minestom server (`rstom`)
 
 ```bash
 # Standalone drop-in mirror crate for rstom-packets
-bml emit rstom $ROOT --out ../rstom/crates/bps_rstom
+bml emit rstom $ROOT --out ../rstom/crates/bytemill_rstom
 
 # In-place generation within rstom workspace using AST shape ledgers
 bml shapes extract $ROOT --rstom ../rstom-bps --eligible --out targets/rstom/shapes
@@ -193,13 +193,13 @@ See `docs/superpowers/specs/2026-10-11-bps-generates-rstom-packets-design.md` fo
 
 ```bash
 # Run test suite
-scripts/bps_cargo.sh test --no-fail-fast
+scripts/bytemill_cargo.sh test --no-fail-fast
 
 # Run workspace linter gate (hard gate in CI)
-scripts/bps_cargo.sh clippy --workspace --all-targets -- -D warnings
+scripts/bytemill_cargo.sh clippy --workspace --all-targets -- -D warnings
 ```
 
-`scripts/bps_cargo.sh` wraps `cargo` under a systemd user scope (`MemoryMax=8G`, 4 jobs, 4 test threads) to cap memory usage during large protocol oracle suites.
+`scripts/bytemill_cargo.sh` wraps `cargo` under a systemd user scope (`MemoryMax=8G`, 4 jobs, 4 test threads) to cap memory usage during large protocol oracle suites.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bml` for every
 supported platform, smoke-tests each binary, writes `SHA256SUMS`, and attaches the archives
