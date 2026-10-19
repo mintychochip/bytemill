@@ -13,6 +13,23 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// The fetched minecraft-data tree (`data/minecraft-data/pc`): untracked and
+/// possibly absent on a fresh clone. Tests that read it skip otherwise.
+const MISSING_DATA_MSG: &str =
+    "skipped: data/minecraft-data not fetched; run scripts/fetch_minecraft_data.py";
+
+/// True when every manifest entry's `protocol.json` is present under
+/// `data/minecraft-data/`, so the importer tests can run.
+fn minecraft_data_present() -> bool {
+    let dir = root().join("data/minecraft-data");
+    if !dir.join("pc").is_dir() {
+        return false;
+    }
+    entries()
+        .iter()
+        .all(|e| dir.join(&e.data).join("protocol.json").is_file())
+}
+
 fn entries() -> Vec<VersionEntry> {
     let text = std::fs::read_to_string(root().join("schemas/versions/manifest.json")).unwrap();
     parse_manifest(&text).unwrap()
@@ -108,6 +125,10 @@ fn source_routes(entry: &VersionEntry) -> BTreeMap<(String, String, i128), Strin
 
 #[test]
 fn route_tables_are_the_sources() {
+    if !minecraft_data_present() {
+        eprintln!("{MISSING_DATA_MSG}");
+        return;
+    }
     for entry in entries() {
         let resolved = load(&entry);
         let want = source_routes(&entry);
@@ -283,6 +304,10 @@ fn write_generated_vectors() {
 
 #[test]
 fn committed_schemas_are_what_the_importer_writes() {
+    if !minecraft_data_present() {
+        eprintln!("{MISSING_DATA_MSG}");
+        return;
+    }
     let report = import_versions(
         &root().join("schemas/versions/manifest.json"),
         &root().join("data/minecraft-data"),
@@ -360,6 +385,10 @@ fn compare_maps<V: PartialEq + std::fmt::Debug>(
 /// protocol block included. Built fresh in a scratch directory, never the committed tree.
 #[test]
 fn shared_layout_means_what_the_single_file_means() {
+    if !minecraft_data_present() {
+        eprintln!("{MISSING_DATA_MSG}");
+        return;
+    }
     struct TempRoot(std::path::PathBuf);
     impl TempRoot {
         fn new(tag: &str) -> Self {

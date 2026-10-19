@@ -790,6 +790,10 @@ fn eligible_packets_extract_and_match_bps() {
         eprintln!("rstom worktree packet sources not present; skipping");
         return;
     }
+    if !common::committed_shapes_present() {
+        eprintln!("{}", common::MISSING_SHAPES_MSG);
+        return;
+    }
     let rstom = common::rstom_tables::rstom_dir();
     let resolved = common::load_minecraft().unwrap();
     let table = common::rstom_tables::real_table().unwrap();
@@ -918,6 +922,10 @@ fn run_cli(args: &[String]) -> (i32, String) {
 fn shapes_extract_eligible_keeps_committed_packets_with_worktree() {
     if !worktree_present() {
         eprintln!("rstom worktree absent; skipping");
+        return;
+    }
+    if !common::committed_shapes_present() {
+        eprintln!("{}", common::MISSING_SHAPES_MSG);
         return;
     }
     let out = std::env::temp_dir().join(format!("bps-shapes-{}", std::process::id()));

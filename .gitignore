@@ -5,3 +5,7 @@ __pycache__/
 target/
 tools/protodef-oracle/node_modules/
 .worktrees/
+# Generated inputs: fetch/extract instead of committing.
+build/
+data/minecraft-data/pc/
+targets/rstom/shapes/

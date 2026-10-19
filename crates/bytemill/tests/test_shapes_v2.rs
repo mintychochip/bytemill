@@ -175,6 +175,10 @@ fn temp_dir(tag: &str) -> PathBuf {
 
 #[test]
 fn every_committed_ledger_file_reserialises_byte_for_byte() {
+    if !common::committed_shapes_present() {
+        eprintln!("{}", common::MISSING_SHAPES_MSG);
+        return;
+    }
     let ledger =
         bytemill::shapes::load_ledger(&common::repo_root().join("targets/rstom/shapes")).unwrap();
     assert_eq!(ledger.len(), 64);

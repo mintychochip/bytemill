@@ -83,6 +83,10 @@ fn emit_all_sixty_four_eligible_packets() {
         eprintln!("skipped: rstom packets.json not present");
         return;
     };
+    if !common::committed_shapes_present() {
+        eprintln!("{}", common::MISSING_SHAPES_MSG);
+        return;
+    }
     let resolved = common::load_minecraft().unwrap();
     let units = build_units(&resolved, &table).unwrap();
     let committed: std::collections::BTreeSet<String> =

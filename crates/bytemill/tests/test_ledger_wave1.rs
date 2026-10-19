@@ -23,12 +23,23 @@ const WAVE1_READ_VIA_NEW_PACKETS: &[&str] = &[
     "WorldBorderWarningReachPacket",
 ];
 
+fn ledger_present() -> bool {
+    if common::committed_shapes_present() {
+        return true;
+    }
+    eprintln!("{}", common::MISSING_SHAPES_MSG);
+    false
+}
+
 fn ledger() -> Vec<(String, bytemill::shapes::Shape)> {
     bytemill::shapes::load_ledger(&common::repo_root().join("targets/rstom/shapes")).unwrap()
 }
 
 #[test]
 fn non_trivial_new_body_packets() {
+    if !ledger_present() {
+        return;
+    }
     let mut found: Vec<String> = ledger()
         .into_iter()
         .filter(|(_, s)| !s.new.body.is_empty())
@@ -42,6 +53,9 @@ fn non_trivial_new_body_packets() {
 
 #[test]
 fn read_via_new_packets() {
+    if !ledger_present() {
+        return;
+    }
     let mut found: Vec<String> = ledger()
         .into_iter()
         .filter(|(_, s)| s.serializer.read_via_new)
@@ -55,5 +69,8 @@ fn read_via_new_packets() {
 
 #[test]
 fn exactly_sixty_four_shapes() {
+    if !ledger_present() {
+        return;
+    }
     assert_eq!(ledger().len(), 64);
 }

@@ -71,9 +71,10 @@ lists.
 ## Where the packets come from
 
 The packet layouts are PrismarineJS [minecraft-data](https://github.com/PrismarineJS/minecraft-data)'s
-ProtoDef `protocol.json` files, the data behind mineflayer and node-minecraft-protocol, **vendored
-byte for byte** in `data/minecraft-data/` (`sources.json` names the commit, upstream path and
-SHA-256 of each file; `NOTICE.md` has the licence). `bml import-versions` turns them into the
+ProtoDef `protocol.json` files, the data behind mineflayer and node-minecraft-protocol. They are
+**not committed**: `data/minecraft-data/sources.json` pins the repository, commit, upstream path and
+SHA-256 of each file (`NOTICE.md` has the licence), and `scripts/fetch_minecraft_data.py` downloads
+them byte for byte into `data/minecraft-data/` on demand. `bml import-versions` turns them into the
 schemas here: `crates/bytemill/src/protodef/` is the importer, `docs/superpowers/specs/2026-10-12-bps-protocol-versions-design.md`
 the design, the translation table and the reasoning.
 
@@ -82,7 +83,7 @@ the design, the translation table and the reasoning.
   from the protocol number. 1.14.2 (485) has no description of its own: `pc/1.14.1` is used, since
   the next one, `pc/1.14.3`, adds only `can_restock` to `trade_list`, a field that arrived with the
   1.14.3 pre-releases (486–490) *[inferred, not checked against a 1.14.2 jar]*.
-- **26.2 and 26.3** are not on minecraft-data `master`: the vendored files are the heads of open pull
+- **26.2 and 26.3** are not on minecraft-data `master`: the fetched files are the heads of open pull
   requests (#1333 and #1301).
 - **26.1, 26.2 and 26.3 have patch files** (`patches/26.1.json`, `patches/26.2.json`,
   `patches/26.3.json`: 10, 12 and 21 corrections). A patch replaces one named type of one scope
@@ -119,6 +120,7 @@ A packet whose name exists in several states or directions is suffixed `_<state>
 ## Regenerate and check
 
 ```bash
+scripts/fetch_minecraft_data.py # download the pinned protocol.json files (once per checkout)
 bml import-versions            # rewrite schemas/versions/*.bps + common/ from manifest.json + data/
 bml import-versions --check    # exit 3 listing any committed file that differs (also a cargo test)
 bml import-protodef data/minecraft-data/pc/1.20/protocol.json --protocol 763 --release 1.20.1 | less

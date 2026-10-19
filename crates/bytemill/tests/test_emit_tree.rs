@@ -216,6 +216,10 @@ fn golden_keep_alive() {
 #[test]
 fn unit_packet_uses_constant_serializer_and_has_no_new() {
     let clear = common::repo_root().join("targets/rstom/shapes/server/common/clear_dialog_packet.json");
+    if !clear.is_file() && !common::committed_shapes_present() {
+        eprintln!("{}", common::MISSING_SHAPES_MSG);
+        return;
+    }
     let shape: Shape = if clear.is_file() {
         let text = std::fs::read_to_string(&clear).unwrap();
         bytemill::shapes::shape_from_json(&text).unwrap()

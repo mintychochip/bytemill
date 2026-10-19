@@ -140,12 +140,12 @@ Emit typed, deterministic decoders and encoders for any target:
 ```bash
 bml emit <target> <schema.bps> --out <out_dir> [--std <standard>]
 # or specify standard directly on the target:
-bml emit cpp:98 schemas/std/varint.bps --out ./bps_cpp
-bml emit go:1.18 schemas/std/varint.bps --out ./bps_go
-bml emit python:3.8 schemas/std/varint.bps --out ./bps_py
-bml emit c:89 schemas/std/varint.bps --out ./bps_c
-bml emit java:17 schemas/std/varint.bps --out ./bps_java
-bml emit csharp:10 schemas/std/varint.bps --out ./bps_cs
+bml emit cpp:98 schemas/std/varint.bps --out ./bml_cpp
+bml emit go:1.18 schemas/std/varint.bps --out ./bml_go
+bml emit python:3.8 schemas/std/varint.bps --out ./bml_py
+bml emit c:89 schemas/std/varint.bps --out ./bml_c
+bml emit java:17 schemas/std/varint.bps --out ./bml_java
+bml emit csharp:10 schemas/std/varint.bps --out ./bml_cs
 ```
 
 | Target | Default Standard | Supported Versions | Output Layout | Idiomatic Types | Formatter & Lint Gate |
@@ -166,7 +166,7 @@ Every printer lowers schemas to a shared typed intermediate representation (`ir:
 ## Shipped Schemas
 
 - **Minecraft Java 26.3 (Protocol 777)**: Full reference target in `schemas/`. 232 packets, 261 routes, zero `body: rest` stubs. All vanilla registries (particles, slot displays, recipes, command argument types) fully modeled.
-- **Protocol Versions (1.13 → 26.3)**: 39 protocols across 51 releases in `schemas/versions/`. Shared declarations deduplicated in `schemas/versions/common/`. Validated against independent ProtoDef oracle.
+- **Protocol Versions (1.13 → 26.3)**: 39 protocols across 51 releases in `schemas/versions/`. Shared declarations deduplicated in `schemas/versions/common/`. Validated against an independent ProtoDef oracle; the oracle input (`data/minecraft-data/`) is fetched from pinned commits, not committed.
 - **Hytale**: Connection and handshake packets in `schemas/hytale/`.
 - **Standard Library**: Reusable fixed-width integers and variable-length integer layouts in `schemas/std/`.
 
@@ -200,6 +200,16 @@ scripts/bytemill_cargo.sh clippy --workspace --all-targets -- -D warnings
 ```
 
 `scripts/bytemill_cargo.sh` wraps `cargo` under a systemd user scope (`MemoryMax=8G`, 4 jobs, 4 test threads) to cap memory usage during large protocol oracle suites.
+
+Generated inputs are not stored in the repository:
+
+```bash
+scripts/fetch_minecraft_data.py   # pinned ProtoDef protocol.json files (data/minecraft-data/pc)
+scripts/extract_rstom_shapes.sh   # rstom shape ledger (targets/rstom/shapes)
+```
+
+Tests that need them skip with the matching command in the message when they are absent.
+`build/` and `target/` are build output and stay untracked.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bml` for every
 supported platform, smoke-tests each binary, writes `SHA256SUMS`, and attaches the archives

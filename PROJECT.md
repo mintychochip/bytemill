@@ -19,6 +19,7 @@ current-tree evidence (code, test, workflow, or committed report). Design ration
 | Language versions | C++98–26, Go 1.16–1.24, Python 3.8–3.14, C89–C23, Rust 2015–2024, TS ES2015–ESNext, Zig 0.11–0.14, Java 8–21, C# 8–12 via `--std`/`<target>:<version>` |
 | Protocol coverage | 39 version roots / 51 releases (1.13 → 26.3), hand-written 26.3, Hytale connection packets |
 | Binaries | `.github/workflows/release.yml` publishes `bml` for Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), Windows x86_64, with `SHA256SUMS` |
+| Generated inputs | `data/minecraft-data/pc/` is fetched (`scripts/fetch_minecraft_data.py`); `targets/rstom/shapes/` is extracted (`scripts/extract_rstom_shapes.sh`); both are git-ignored, as are `build/` and `target/` |
 | Gates run locally | full `cargo test` suite green, `clippy -D warnings` clean, per-printer compile/roundtrip tests |
 
 **Not** in CI today: tests, formatters, oracle, protocol roundtrips, or any emitted-language
@@ -67,7 +68,7 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 |---|---|---|---|
 | D1 | Shape the remaining hand-written packets | `targets/rstom/shapes` holds 64 shapes; specs describe 172 remaining (direct 46, enum/cast 29, byte arrays 4, domain 19, record lists 16, combined/other 9, arity 47, no hand file 1) | Waves 2–5 land with per-wave tests, and `test_emit_tree_real_tree` asserts the new eligible count |
 | D2 | Add the `frames` module or a scoped fallback | 48 packets render `crate::frames::<walker>(…)`, but rstom has no `frames` module; `tree_packet::guard_frames_walkers` refuses to emit them | Those 48 packets emit and compile in rstom, or the refusal lists a dated, owned fallback |
-| D3 | Complete the cutover | `targets/rstom` has only `shapes/` + `.gitkeep`; no `bindings.json`; class table still external (`tools/packets_gen/schema/packets.json`); `bps_rstom`, `rstom-packets`, and `packets_gen` remain load-bearing | `ported.rs`/`mod.rs`/id tables are generated; bindings and class table live in-tree; the three legacy packages are retired with the workspace green |
+| D3 | Complete the cutover | `targets/rstom` holds only its generated-ledger README (shapes are git-ignored); no `bindings.json`; class table still external (`tools/packets_gen/schema/packets.json`); `bps_rstom`, `rstom-packets`, and `packets_gen` remain load-bearing | `ported.rs`/`mod.rs`/id tables are generated; bindings and class table live in-tree; the three legacy packages are retired with the workspace green |
 | D4 | Make `--check` and the pin gate complete | `--check` covers generated files only, not callers/tests/plugins; pin gate has 260 id-table rows vs 261 routes — `legacy_server_list_ping` (`0xfe`) is omitted (`emit_rstom.rs:1611-1612`) | `--check` reports drift outside generated files too, and every route is either pinned or documented as unroutable |
 | D5 | Document the downstream surface | No workspace registry of targets; `README.md` Downstream cites only the waves-0-1 spec; Code Generation table omits `rstom`/`rstom-tree` | `targets/` has a README/registry; README links the waves 2–5 spec and lists both rstom targets with their gates |
 

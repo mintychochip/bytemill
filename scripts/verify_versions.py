@@ -30,6 +30,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE = ROOT / "tools/protodef-oracle/oracle.js"
+DATA = ROOT / "data/minecraft-data/pc"
+if not DATA.is_dir():
+    sys.exit("minecraft-data not fetched; run scripts/fetch_minecraft_data.py")
 BPSC = ROOT / "target/debug/bml"
 
 # BPS -> JS: random bytes drawn from a BPS schema are valid wire bytes, but ProtoDef's JS value model

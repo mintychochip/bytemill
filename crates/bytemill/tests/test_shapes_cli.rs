@@ -138,6 +138,10 @@ fn worktree_extract_matches_committed_ledger_bytes() {
         eprintln!("skipped: rstom worktree not present");
         return;
     }
+    if !common::committed_shapes_present() {
+        eprintln!("{}", common::MISSING_SHAPES_MSG);
+        return;
+    }
     let shapes_dir = common::repo_root().join("targets/rstom/shapes");
     let ledger = bytemill::shapes::load_ledger(&shapes_dir).unwrap();
     assert_eq!(ledger.len(), 64);

@@ -79,6 +79,35 @@ pub fn env_of(v: &bytemill::Value) -> &bytemill::Env {
     }
 }
 
+/// The generated shape ledger (`targets/rstom/shapes`): git-ignored and
+/// possibly absent on a fresh clone. True when the directory holds at least
+/// one `*.json` file; tests that need the ledger skip otherwise.
+pub fn committed_shapes_present() -> bool {
+    let dir = repo_root().join("targets/rstom/shapes");
+    if !dir.is_dir() {
+        return false;
+    }
+    let mut stack = vec![dir];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "json") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Message printed when a test skips for lack of the generated ledger.
+pub const MISSING_SHAPES_MSG: &str =
+    "skipped: targets/rstom/shapes not generated; run scripts/extract_rstom_shapes.sh";
+
 /// `probe_source` for the shared emit-tree fixtures (they cannot import this
 /// module because they are `include!`d into two different test crates).
 pub fn probe_source_for(body: &str) -> String {
