@@ -98,8 +98,9 @@ curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/updat
 curl -fsSL .../install.sh | bash -s -- --version v1.2.3 --dir /usr/local/bin
 ```
 
-The scripts need `curl` (or `wget`), `tar`, and `sha256sum`/`shasum`. Windows uses the zip
-below.
+On Linux x86_64 the installer prefers the static musl build; pass `--libc gnu` for the
+glibc-linked one. The scripts need `curl` (or `wget`), `tar`, and `sha256sum`/`shasum`.
+Windows uses the zip below.
 
 #### Manual download
 

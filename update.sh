@@ -96,7 +96,7 @@ latest_tag() {
   local url="https://github.com/${REPO}/releases/latest"
   local effective tag
   if command -v curl >/dev/null 2>&1; then
-    effective=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$url") ||
+    effective=$(curl -fsSIL -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null) ||
       die "cannot reach $url (no published release yet?)"
     tag="${effective##*/tag/}"
     if [ "$tag" = "$effective" ] || [ "${tag#v}" = "$tag" ]; then
