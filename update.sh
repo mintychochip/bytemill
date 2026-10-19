@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Update an installed Bytemill CLI (`bml`) to the latest release (or a pinned tag).
 #
-#   curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/update.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/update.sh | bash
 #   curl -fsSL .../update.sh | bash -s -- --version v1.2.3
 #
 # The install location is taken from --dir, $BML_INSTALL_DIR, the bml found on
@@ -9,7 +9,7 @@
 # next to the binary; if that file matches the target, nothing is downloaded.
 set -euo pipefail
 
-REPO="${BML_REPO:-${BPS_REPO:-mintychochip/wirecraft}}"
+REPO="${BML_REPO:-${BPS_REPO:-mintychochip/bytemill}}"
 DIR="${BML_INSTALL_DIR:-${BPS_INSTALL_DIR:-}}"
 VERSION="${BML_VERSION:-${BPS_VERSION:-latest}}"
 TARGET=""
@@ -26,7 +26,7 @@ options:
   -h, --help        show this help
 
 environment:
-  BML_REPO         GitHub repository (default: mintychochip/wirecraft)
+  BML_REPO         GitHub repository (default: mintychochip/bytemill)
   BML_INSTALL_DIR  default install directory
   BML_VERSION      default release tag
   BML_INSTALL_SH   installer path or URL (default: next to this script, else

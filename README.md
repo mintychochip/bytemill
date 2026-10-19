@@ -78,13 +78,13 @@ Every tagged release ships prebuilt binaries; the installer detects the platform
 the matching archive, verifies `SHA256SUMS`, and installs to `~/.local/bin`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/install.sh | bash
 ```
 
 Upgrade later with `update.sh` (a no-op when already current):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/update.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/update.sh | bash
 ```
 
 Use `--dir <path>` to install elsewhere or `--version vX.Y.Z` to pin a release, e.g.
@@ -93,7 +93,7 @@ Use `--dir <path>` to install elsewhere or `--version vX.Y.Z` to pin a release, 
 
 Windows is not covered by the shell scripts: download `bml-x86_64-pc-windows-msvc.zip`
 from Releases. That page also has the archives and `SHA256SUMS` for manual installs, and
-`gh release download --repo mintychochip/wirecraft` fetches them too.
+`gh release download --repo mintychochip/bytemill` fetches them too.
 
 ### Build from source
 

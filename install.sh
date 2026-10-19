@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the Bytemill CLI (`bml`) from this repository's GitHub releases.
 #
-#   curl -fsSL https://raw.githubusercontent.com/mintychochip/wirecraft/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/install.sh | bash
 #   curl -fsSL .../install.sh | bash -s -- --version v1.2.3 --dir /usr/local/bin
 #
 # The archive and SHA256SUMS are downloaded from the same release; the binary
@@ -9,7 +9,7 @@
 # musl build; pass --libc gnu if you need the glibc-linked one.
 set -euo pipefail
 
-REPO="${BML_REPO:-${BPS_REPO:-mintychochip/wirecraft}}"
+REPO="${BML_REPO:-${BPS_REPO:-mintychochip/bytemill}}"
 DIR="${BML_INSTALL_DIR:-${BPS_INSTALL_DIR:-$HOME/.local/bin}}"
 VERSION="${BML_VERSION:-${BPS_VERSION:-latest}}"
 TARGET=""
@@ -27,7 +27,7 @@ options:
   -h, --help        show this help
 
 environment:
-  BML_REPO         GitHub repository (default: mintychochip/wirecraft)
+  BML_REPO         GitHub repository (default: mintychochip/bytemill)
   BML_INSTALL_DIR  default install directory
   BML_VERSION      default release tag
 
