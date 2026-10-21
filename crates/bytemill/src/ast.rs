@@ -32,7 +32,14 @@ impl Expr {
     /// `Expr(kind='binop', value='==', left=Expr(...), right=Expr(...), args=(), name=None)`.
     pub fn py_repr(&self) -> String {
         const NONE: &str = "None";
-        fn node(kind: &str, value: &str, left: &str, right: &str, args: &str, name: &str) -> String {
+        fn node(
+            kind: &str,
+            value: &str,
+            left: &str,
+            right: &str,
+            args: &str,
+            name: &str,
+        ) -> String {
             format!(
                 "Expr(kind='{kind}', value={value}, left={left}, right={right}, args={args}, name={name})"
             )
@@ -47,13 +54,25 @@ impl Expr {
         }
         match self {
             Expr::Int(v) => node("int", &v.to_string(), NONE, NONE, "()", NONE),
-            Expr::Bool(b) => node("bool", if *b { "True" } else { "False" }, NONE, NONE, "()", NONE),
+            Expr::Bool(b) => node(
+                "bool",
+                if *b { "True" } else { "False" },
+                NONE,
+                NONE,
+                "()",
+                NONE,
+            ),
             Expr::Str(s) => node("string", &py_repr_str(s), NONE, NONE, "()", NONE),
             Expr::Ident(name) => node("ident", NONE, NONE, NONE, "()", &py_repr_str(name)),
             Expr::Path(path) => node("path", &py_repr_str(path), NONE, NONE, "()", NONE),
-            Expr::Unop(op, operand) => {
-                node("unop", &py_repr_str(op), &operand.py_repr(), NONE, "()", NONE)
-            }
+            Expr::Unop(op, operand) => node(
+                "unop",
+                &py_repr_str(op),
+                &operand.py_repr(),
+                NONE,
+                "()",
+                NONE,
+            ),
             Expr::Binop(op, left, right) => node(
                 "binop",
                 &py_repr_str(op),
@@ -154,10 +173,19 @@ pub struct MatchType {
 pub enum BlockItem {
     /// Boxed: a wire field is several times larger than any other item.
     Field(Box<WireField>),
-    Computed { name: String, expr: Expr },
+    Computed {
+        name: String,
+        expr: Expr,
+    },
     Require(Expr),
-    Spread { name: String, args: Vec<Expr> },
-    Group { cond: Option<Expr>, items: Vec<BlockItem> },
+    Spread {
+        name: String,
+        args: Vec<Expr>,
+    },
+    Group {
+        cond: Option<Expr>,
+        items: Vec<BlockItem>,
+    },
     /// Statement `match`/`switch`: arms are blocks whose fields splice in.
     MatchStmt(MatchType),
 }
@@ -239,9 +267,7 @@ pub struct ResolvedSchema {
     /// The emit_rstom port's cached frame plan. Python stashes the same thing on
     /// the object as `resolved._bps_frames`; the field lives here because the
     /// resolved schema is the only value threaded through every emitter helper.
-    pub frames_cache: std::cell::RefCell<
-        Option<std::rc::Rc<crate::emit_rstom::FramesPlan>>,
-    >,
+    pub frames_cache: std::cell::RefCell<Option<std::rc::Rc<crate::emit_rstom::FramesPlan>>>,
 }
 
 impl ResolvedSchema {

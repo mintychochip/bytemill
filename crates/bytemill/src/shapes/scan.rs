@@ -5,7 +5,7 @@
 //! positions are identical for ASCII sources. Character-level checks
 //! (`isalnum`, char literals) decode code points, matching Python.
 
-use crate::errors::{shape, BpsResult};
+use crate::errors::{BpsResult, shape};
 
 /// Substring `s[a..b]` with Python slice clamping; never panics.
 pub(crate) fn sub(s: &str, a: usize, b: usize) -> &str {
@@ -18,7 +18,9 @@ pub(crate) fn sub(s: &str, a: usize, b: usize) -> &str {
 
 /// `src.startswith(p, pos)`.
 pub(crate) fn sw(s: &str, pos: usize, p: &str) -> bool {
-    s.as_bytes().get(pos..).is_some_and(|x| x.starts_with(p.as_bytes()))
+    s.as_bytes()
+        .get(pos..)
+        .is_some_and(|x| x.starts_with(p.as_bytes()))
 }
 
 /// `src.find(needle, pos)` as an option (Python `-1` maps to `None`).

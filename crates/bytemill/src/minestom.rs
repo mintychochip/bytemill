@@ -6,7 +6,7 @@
 //! class of the route with id N.
 
 use crate::ast::{PacketDecl, ResolvedSchema, RouteDecl};
-use crate::errors::{emit, BpsResult};
+use crate::errors::{BpsResult, emit};
 use crate::json::loads;
 use crate::ordmap::OrderedMap;
 use crate::value::Value;
@@ -24,11 +24,7 @@ pub const PACKAGE_PREFIX: &str = "net.minestom.server.network.packet";
 
 pub fn package_of(state: &str) -> &str {
     let (bps_state, package) = PACKAGE_HANDSHAKING;
-    if state == bps_state {
-        package
-    } else {
-        state
-    }
+    if state == bps_state { package } else { state }
 }
 
 /// `SpawnEntityPacket` -> `spawn_entity_packet`, as the generator names the file.
@@ -43,7 +39,8 @@ pub fn module_stem(name: &str) -> String {
         if i > 0 {
             let prev = chars[i - 1];
             let next = chars.get(i + 1).copied();
-            let boundary = (prev.is_ascii_lowercase() || prev.is_ascii_digit()) && c.is_ascii_uppercase()
+            let boundary = (prev.is_ascii_lowercase() || prev.is_ascii_digit())
+                && c.is_ascii_uppercase()
                 || (prev.is_ascii_uppercase()
                     && c.is_ascii_uppercase()
                     && next.is_some_and(|n| n.is_ascii_lowercase()));
@@ -94,7 +91,13 @@ impl ClassTable {
                     )));
                 }
             }
-            let cls = MinestomClass { name: name.clone(), java, group, package, stem };
+            let cls = MinestomClass {
+                name: name.clone(),
+                java,
+                group,
+                package,
+                stem,
+            };
             classes.insert(&name, cls);
         }
         let mut tables = Vec::new();
@@ -133,7 +136,11 @@ impl ClassTable {
 
     /// The class Minestom registers at an id, or `None` past that table's end.
     pub fn at(&self, state: &str, direction: &str, packet_id: i128) -> Option<&MinestomClass> {
-        let side = if direction == "serverbound" { "CLIENT" } else { "SERVER" };
+        let side = if direction == "serverbound" {
+            "CLIENT"
+        } else {
+            "SERVER"
+        };
         let key = (package_of(state).to_string(), side.to_string());
         let table = self
             .tables
@@ -197,8 +204,10 @@ pub fn class_name(packet: &str) -> String {
 /// The class an extra wire form of a shared class becomes: same name, its own
 /// state's package.
 fn extra_form(cls: &MinestomClass, packet: &str, routes: &[RouteDecl]) -> BpsResult<MinestomClass> {
-    let mut states: Vec<String> =
-        routes.iter().map(|r| package_of(&r.state).to_string()).collect();
+    let mut states: Vec<String> = routes
+        .iter()
+        .map(|r| package_of(&r.state).to_string())
+        .collect();
     states.sort();
     states.dedup();
     if states.len() != 1 {
@@ -263,7 +272,10 @@ pub fn build_units(resolved: &ResolvedSchema, classes: &ClassTable) -> BpsResult
 
     for name in resolved.packets.keys() {
         if !found.iter().any(|((n, _), _)| n == name) {
-            return Err(emit(format!("packet {} has no route, so no Minestom class", pyq(name))));
+            return Err(emit(format!(
+                "packet {} has no route, so no Minestom class",
+                pyq(name)
+            )));
         }
     }
 
@@ -281,7 +293,11 @@ pub fn build_units(resolved: &ResolvedSchema, classes: &ClassTable) -> BpsResult
         }
     }
     for ((_, class_name), packets) in &claims {
-        if packets.len() > 1 && !SHARED_CLASSES.iter().any(|(c, k)| c == class_name && packets.iter().any(|p| p == k)) {
+        if packets.len() > 1
+            && !SHARED_CLASSES
+                .iter()
+                .any(|(c, k)| c == class_name && packets.iter().any(|p| p == k))
+        {
             let joined = packets
                 .iter()
                 .map(|p| pyq(p))
@@ -306,26 +322,49 @@ pub fn build_units(resolved: &ResolvedSchema, classes: &ClassTable) -> BpsResult
             .map(|(_, v)| v.len())
             .unwrap_or(0);
         let cls = if claim_count > 1
-            && !SHARED_CLASSES.iter().any(|(c, k)| c == &cls.name && k == name)
+            && !SHARED_CLASSES
+                .iter()
+                .any(|(c, k)| c == &cls.name && k == name)
         {
             extra_form(cls, name, &routes)?
         } else {
             cls.clone()
         };
-        let pkt = resolved.packets.get(name).cloned().ok_or_else(|| {
-            emit(format!("packet {} has no declaration", pyq(name)))
-        })?;
-        units.push(Unit { pkt, direction: direction.clone(), cls, routes });
+        let pkt = resolved
+            .packets
+            .get(name)
+            .cloned()
+            .ok_or_else(|| emit(format!("packet {} has no declaration", pyq(name))))?;
+        units.push(Unit {
+            pkt,
+            direction: direction.clone(),
+            cls,
+            routes,
+        });
     }
     units.sort_by(|a, b| {
-        (a.cls.group.as_str(), a.cls.package.as_str(), a.cls.stem.as_str())
-            .cmp(&(b.cls.group.as_str(), b.cls.package.as_str(), b.cls.stem.as_str()))
+        (
+            a.cls.group.as_str(),
+            a.cls.package.as_str(),
+            a.cls.stem.as_str(),
+        )
+            .cmp(&(
+                b.cls.group.as_str(),
+                b.cls.package.as_str(),
+                b.cls.stem.as_str(),
+            ))
     });
     for pair in units.windows(2) {
         let (a, b) = (&pair[0], &pair[1]);
-        if (a.cls.group.as_str(), a.cls.package.as_str(), a.cls.stem.as_str())
-            == (b.cls.group.as_str(), b.cls.package.as_str(), b.cls.stem.as_str())
-        {
+        if (
+            a.cls.group.as_str(),
+            a.cls.package.as_str(),
+            a.cls.stem.as_str(),
+        ) == (
+            b.cls.group.as_str(),
+            b.cls.package.as_str(),
+            b.cls.stem.as_str(),
+        ) {
             return Err(emit(format!(
                 "{} and {} are both {}",
                 pyq(&a.pkt.name),

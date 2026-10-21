@@ -26,20 +26,30 @@ pub fn references(schema: &Schema) -> Vec<Ref> {
         out.extend(type_refs_enc(&enc.body, &format!("encoding {}", enc.name)));
     }
     for e in &schema.enums {
-        out.push(Ref { kind: RefKind::Type, name: e.base.clone(), where_: format!("enum {}", e.name) });
+        out.push(Ref {
+            kind: RefKind::Type,
+            name: e.base.clone(),
+            where_: format!("enum {}", e.name),
+        });
     }
     for pkt in &schema.packets {
         out.extend(item_refs(&pkt.items, &format!("packet {}", pkt.name)));
     }
     for proto in &schema.protocols {
         for frame in &proto.frames {
-            out.extend(item_refs(&frame.items, &format!("protocol {} frame {}", proto.name, frame.name)));
+            out.extend(item_refs(
+                &frame.items,
+                &format!("protocol {} frame {}", proto.name, frame.name),
+            ));
         }
         for route in &proto.routes {
             out.push(Ref {
                 kind: RefKind::Packet,
                 name: route.packet_name.clone(),
-                where_: format!("route {}.{} 0x{:x}", route.state, route.direction, route.packet_id),
+                where_: format!(
+                    "route {}.{} 0x{:x}",
+                    route.state, route.direction, route.packet_id
+                ),
             });
         }
     }
@@ -55,7 +65,11 @@ fn type_refs_enc(body: &EncBody, where_: &str) -> Vec<Ref> {
 
 pub fn type_refs(t: &FieldType, where_: &str) -> Vec<Ref> {
     match t {
-        FieldType::Ref(r) => vec![Ref { kind: RefKind::Type, name: r.name.clone(), where_: where_.to_string() }],
+        FieldType::Ref(r) => vec![Ref {
+            kind: RefKind::Type,
+            name: r.name.clone(),
+            where_: where_.to_string(),
+        }],
         FieldType::Block(b) => item_refs(&b.items, where_),
         FieldType::Match(m) => {
             let mut out = Vec::new();
@@ -75,7 +89,11 @@ pub fn item_refs(items: &[BlockItem], where_: &str) -> Vec<Ref> {
         match item {
             BlockItem::Field(wf) => out.extend(type_refs(&wf.type_ref, where_)),
             BlockItem::Spread { name, .. } => {
-                out.push(Ref { kind: RefKind::Spread, name: name.clone(), where_: where_.to_string() });
+                out.push(Ref {
+                    kind: RefKind::Spread,
+                    name: name.clone(),
+                    where_: where_.to_string(),
+                });
             }
             BlockItem::Group { items, .. } => out.extend(item_refs(items, where_)),
             BlockItem::MatchStmt(m) => out.extend(type_refs(&FieldType::Match(m.clone()), where_)),

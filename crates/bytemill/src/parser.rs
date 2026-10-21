@@ -5,7 +5,7 @@
 //! produces.
 
 use crate::ast::*;
-use crate::errors::{parse_at, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, parse_at, py_repr_str};
 use crate::lexer::{TokKind, TokValue, Token, tokenize};
 
 pub struct Parser {
@@ -109,7 +109,10 @@ impl Parser {
                 _ => {
                     let tok = self.cur();
                     return Err(parse_at(
-                        format!("expected top-level declaration, got {}", tok.py_repr_value()),
+                        format!(
+                            "expected top-level declaration, got {}",
+                            tok.py_repr_value()
+                        ),
                         tok.pos,
                     ));
                 }
@@ -131,9 +134,19 @@ impl Parser {
             if self.try_eat(TokKind::Eq).is_some() {
                 yield_expr = Some(self.parse_expr()?);
             }
-            return Ok(EncodingDecl { name, params, body: EncBody::Block(body), yield_expr });
+            return Ok(EncodingDecl {
+                name,
+                params,
+                body: EncBody::Block(body),
+                yield_expr,
+            });
         }
-        Ok(EncodingDecl { name, params, body: EncBody::Ref(self.parse_type_ref()?), yield_expr: None })
+        Ok(EncodingDecl {
+            name,
+            params,
+            body: EncBody::Ref(self.parse_type_ref()?),
+            yield_expr: None,
+        })
     }
 
     fn parse_params(&mut self) -> BpsResult<Vec<Param>> {
@@ -150,7 +163,10 @@ impl Parser {
                     let tok = self.eat(TokKind::Int, None)?;
                     default = Some(tok.as_int()?);
                 }
-                params.push(Param { name: pname, default });
+                params.push(Param {
+                    name: pname,
+                    default,
+                });
                 if self.try_eat(TokKind::Comma).is_none() {
                     break;
                 }
@@ -171,11 +187,18 @@ impl Parser {
             let mname = self.eat_ident_value()?;
             self.eat(TokKind::Eq, None)?;
             let tok = self.eat(TokKind::Int, None)?;
-            members.push(EnumMember { name: mname, value: tok.as_int()? });
+            members.push(EnumMember {
+                name: mname,
+                value: tok.as_int()?,
+            });
             self.try_eat(TokKind::Comma);
         }
         self.eat(TokKind::RBrace, None)?;
-        Ok(EnumDecl { name, base, members })
+        Ok(EnumDecl {
+            name,
+            base,
+            members,
+        })
     }
 
     fn parse_packet(&mut self) -> BpsResult<PacketDecl> {
@@ -241,7 +264,13 @@ impl Parser {
             }
         }
         self.eat(TokKind::RBrace, None)?;
-        Ok(ProtocolDecl { name, version, protocol_id, frames, routes })
+        Ok(ProtocolDecl {
+            name,
+            version,
+            protocol_id,
+            frames,
+            routes,
+        })
     }
 
     fn parse_block_items(&mut self) -> BpsResult<Vec<BlockItem>> {
@@ -267,7 +296,10 @@ impl Parser {
                 self.pos += 1;
                 let cond = self.parse_expr()?;
                 let group_items = self.parse_block_type()?.items;
-                items.push(BlockItem::Group { cond: Some(cond), items: group_items });
+                items.push(BlockItem::Group {
+                    cond: Some(cond),
+                    items: group_items,
+                });
                 continue;
             }
             // `match:` / `match =` are a field and a computed value. A statement
@@ -280,7 +312,10 @@ impl Parser {
             }
             let name = self.eat_ident_value()?;
             if self.try_eat(TokKind::Eq).is_some() {
-                items.push(BlockItem::Computed { name, expr: self.parse_expr()? });
+                items.push(BlockItem::Computed {
+                    name,
+                    expr: self.parse_expr()?,
+                });
                 continue;
             }
             self.eat(TokKind::Colon, None)?;
@@ -332,18 +367,30 @@ impl Parser {
         self.eat(TokKind::RBracket, None)?;
         if self.text() == Some("until_end") {
             self.pos += 1;
-            return Ok(Repeat { mode: RepeatMode::UntilEnd, expr: None });
+            return Ok(Repeat {
+                mode: RepeatMode::UntilEnd,
+                expr: None,
+            });
         }
         if self.text() == Some("until") {
             self.pos += 1;
-            return Ok(Repeat { mode: RepeatMode::Until, expr: Some(self.parse_expr()?) });
+            return Ok(Repeat {
+                mode: RepeatMode::Until,
+                expr: Some(self.parse_expr()?),
+            });
         }
         if self.text() == Some("count") {
             self.pos += 1;
             self.eat(TokKind::Eq, None)?;
-            return Ok(Repeat { mode: RepeatMode::Count, expr: Some(self.parse_expr()?) });
+            return Ok(Repeat {
+                mode: RepeatMode::Count,
+                expr: Some(self.parse_expr()?),
+            });
         }
-        Err(parse_at("expected until, until_end, or count", self.cur().pos))
+        Err(parse_at(
+            "expected until, until_end, or count",
+            self.cur().pos,
+        ))
     }
 
     fn parse_field_type(&mut self) -> BpsResult<FieldType> {
@@ -382,11 +429,18 @@ impl Parser {
             } else {
                 FieldType::Ref(self.parse_type_ref()?)
             };
-            arms.push(MatchArm { tag: tag_val, type_ref: Some(body), tags });
+            arms.push(MatchArm {
+                tag: tag_val,
+                type_ref: Some(body),
+                tags,
+            });
             self.try_eat(TokKind::Comma);
         }
         self.eat(TokKind::RBrace, None)?;
-        Ok(MatchType { tag_expr: tag, arms })
+        Ok(MatchType {
+            tag_expr: tag,
+            arms,
+        })
     }
 
     fn parse_arm_tags(&mut self) -> BpsResult<(Option<Tag>, Vec<Tag>)> {
@@ -415,7 +469,10 @@ impl Parser {
 
     fn parse_one_arm_tag(&mut self) -> BpsResult<Tag> {
         if self.text() == Some("_") {
-            return Err(parse_at("'_' cannot be combined with other tags", self.cur().pos));
+            return Err(parse_at(
+                "'_' cannot be combined with other tags",
+                self.cur().pos,
+            ));
         }
         if self.at(TokKind::Int) {
             let tok = self.eat(TokKind::Int, None)?;
@@ -425,12 +482,17 @@ impl Parser {
     }
 
     fn parse_block_type(&mut self) -> BpsResult<BlockType> {
-        Ok(BlockType { items: self.parse_block_items()? })
+        Ok(BlockType {
+            items: self.parse_block_items()?,
+        })
     }
 
     fn parse_conditional_group_item(&mut self) -> BpsResult<BlockItem> {
         let (cond, items) = self.parse_conditional_group()?;
-        Ok(BlockItem::Group { cond: Some(cond), items })
+        Ok(BlockItem::Group {
+            cond: Some(cond),
+            items,
+        })
     }
 
     fn parse_conditional_group(&mut self) -> BpsResult<(Expr, Vec<BlockItem>)> {
@@ -451,7 +513,11 @@ impl Parser {
             self.pos += 1;
             transforms.push(self.parse_transform()?);
         }
-        Ok(TypeRef { name, args, transforms })
+        Ok(TypeRef {
+            name,
+            args,
+            transforms,
+        })
     }
 
     fn parse_transform(&mut self) -> BpsResult<String> {
@@ -467,7 +533,11 @@ impl Parser {
             self.eat(TokKind::Op, None)?; // /
             let den = self.parse_expr()?;
             self.eat(TokKind::RParen, None)?;
-            return Ok(format!("fixed({}/{})", Self::expr_src(&num), Self::expr_src(&den)));
+            return Ok(format!(
+                "fixed({}/{})",
+                Self::expr_src(&num),
+                Self::expr_src(&den)
+            ));
         }
         Err(parse_at("expected transform", self.cur().pos))
     }

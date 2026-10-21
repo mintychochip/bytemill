@@ -44,12 +44,27 @@ const MANUAL_PACKETS: [&str; 9] = [
 /// collides with a clientbound one (the hand-transcribed declarations use a `_serverbound`
 /// suffix), and packets whose wire form differs between states.
 const SERVERBOUND_ALIASES: [((&str, &str, &str), &str); 5] = [
-    (("play", "serverbound", "change_difficulty"), "change_difficulty_serverbound"),
-    (("play", "serverbound", "container_close"), "container_close_serverbound"),
-    (("play", "serverbound", "move_vehicle"), "move_vehicle_serverbound"),
-    (("play", "serverbound", "player_abilities"), "player_abilities_serverbound"),
+    (
+        ("play", "serverbound", "change_difficulty"),
+        "change_difficulty_serverbound",
+    ),
+    (
+        ("play", "serverbound", "container_close"),
+        "container_close_serverbound",
+    ),
+    (
+        ("play", "serverbound", "move_vehicle"),
+        "move_vehicle_serverbound",
+    ),
+    (
+        ("play", "serverbound", "player_abilities"),
+        "player_abilities_serverbound",
+    ),
     // Vanilla's configuration codec writes the dialog without the holder id play uses.
-    (("configuration", "clientbound", "show_dialog"), "show_dialog_configuration"),
+    (
+        ("configuration", "clientbound", "show_dialog"),
+        "show_dialog_configuration",
+    ),
 ];
 
 /// One row of a wiki packet table.
@@ -85,7 +100,10 @@ fn is_py_space(c: char) -> bool {
 
 /// `from` or the first position after it where `keep` fails.
 fn skip_while(s: &str, from: usize, keep: impl Fn(char) -> bool) -> usize {
-    s[from..].char_indices().find(|&(_, c)| !keep(c)).map_or(s.len(), |(i, _)| from + i)
+    s[from..]
+        .char_indices()
+        .find(|&(_, c)| !keep(c))
+        .map_or(s.len(), |(i, _)| from + i)
 }
 
 /// The position after `literal` when `s` has it at `at`.
@@ -116,7 +134,9 @@ fn find_heading(html: &str, lower: &str, from: usize) -> Option<Heading> {
             && let Some(after_space) = lower[word_end..].strip_prefix(' ')
         {
             for direction in ["clientbound", "serverbound"] {
-                let Some(tail) = after_space.strip_prefix(direction) else { continue };
+                let Some(tail) = after_space.strip_prefix(direction) else {
+                    continue;
+                };
                 if tail.starts_with(SUFFIX) {
                     let word = &html[word_start..word_end];
                     let state = STATE_MAP
@@ -124,7 +144,12 @@ fn find_heading(html: &str, lower: &str, from: usize) -> Option<Heading> {
                         .find(|(name, _)| *name == word)
                         .map_or_else(|| word.to_lowercase(), |(_, state)| (*state).to_string());
                     let end = word_end + 1 + direction.len() + SUFFIX.len();
-                    return Some(Heading { start, end, state, direction });
+                    return Some(Heading {
+                        start,
+                        end,
+                        state,
+                        direction,
+                    });
                 }
             }
         }
@@ -139,9 +164,13 @@ fn row_bodies(lower: &str) -> Vec<(usize, usize)> {
     let mut at = 0;
     while let Some(rel) = lower[at..].find("<tr") {
         let tag_end = at + rel + "<tr".len();
-        let Some(gt) = lower[tag_end..].find('>') else { break };
+        let Some(gt) = lower[tag_end..].find('>') else {
+            break;
+        };
         let body_start = tag_end + gt + 1;
-        let Some(close) = lower[body_start..].find("</tr>") else { break };
+        let Some(close) = lower[body_start..].find("</tr>") else {
+            break;
+        };
         out.push((body_start, body_start + close));
         at = body_start + close + "</tr>".len();
     }
@@ -171,7 +200,12 @@ fn row_at(body: &str, lower: &str, from: usize) -> Option<(u64, String)> {
         let name_start = at + rel + "<td><code>".len();
         let name_end = skip_while(lower, name_start, |c| c != '<');
         if name_end > name_start && lower[name_end..].starts_with("</code>") {
-            return Some((packet_id, body[name_start..name_end].trim_matches(is_py_space).to_string()));
+            return Some((
+                packet_id,
+                body[name_start..name_end]
+                    .trim_matches(is_py_space)
+                    .to_string(),
+            ));
         }
         at += rel + 1;
     }
@@ -201,7 +235,9 @@ pub fn parse_tables(html: &str) -> Vec<RouteRow> {
         let end = find_heading(html, &lower, start).map_or(html.len(), |next| next.start);
         let (chunk, chunk_lower) = (&html[start..end], &lower[start..end]);
         for (from, to) in row_bodies(chunk_lower) {
-            if let Some((packet_id, official_name)) = match_row(&chunk[from..to], &chunk_lower[from..to]) {
+            if let Some((packet_id, official_name)) =
+                match_row(&chunk[from..to], &chunk_lower[from..to])
+            {
                 rows.push(RouteRow {
                     state: heading.state.clone(),
                     direction: heading.direction.to_string(),
@@ -347,7 +383,10 @@ struct Args {
 /// `None` for `--help`.
 fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
     let usage_error = |message: String| format!("{USAGE}\nscrape_wiki_routes: error: {message}");
-    let mut args = Args { out: None, manual_replace: Vec::new() };
+    let mut args = Args {
+        out: None,
+        manual_replace: Vec::new(),
+    };
     let mut i = 0;
     while i < argv.len() {
         let arg = argv[i].as_str();
@@ -413,7 +452,8 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
             packet_files.push(path.clone());
         }
     }
-    let extra = vec!["    route handshaking.serverbound 0xfe => legacy_server_list_ping".to_string()];
+    let extra =
+        vec!["    route handshaking.serverbound 0xfe => legacy_server_list_ping".to_string()];
     let out_dir = match &args.out {
         Some(out) => resolve(out.parent().unwrap_or(Path::new(""))),
         None => resolve(Path::new("")),
@@ -422,7 +462,11 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
     let imports: Vec<String> = packet_files
         .iter()
         .chain(std::iter::once(&std_varint))
-        .map(|path| relative_to(&resolve(path), &out_dir).to_string_lossy().into_owned())
+        .map(|path| {
+            relative_to(&resolve(path), &out_dir)
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     let text = emit_bps(&rows, &extra, &manual, &imports);
     eprintln!("parsed {} wiki routes", rows.len());

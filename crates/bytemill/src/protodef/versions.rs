@@ -136,8 +136,7 @@ pub fn import_versions(
         }
         splits.push(s);
     }
-    let versions: Vec<Vec<super::share::Decl>> =
-        splits.iter().map(|s| s.decls.clone()).collect();
+    let versions: Vec<Vec<super::share::Decl>> = splits.iter().map(|s| s.decls.clone()).collect();
     let ids = super::share::identity(&versions)?;
     let layout = super::share::share(&entries, &splits, &ids)?;
     let mut report = write_layout(&layout, out_dir, check)?;

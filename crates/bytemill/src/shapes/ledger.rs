@@ -3,10 +3,10 @@
 
 use crate::ast::{PacketDecl, ResolvedSchema};
 use crate::emit_rstom::packet_fields;
-use crate::errors::{shape, BpsResult};
+use crate::errors::{BpsResult, shape};
 use crate::minestom::Unit;
-use crate::shapes::extract::{extract_shape, PACKET_ROOT};
-use crate::shapes::model::{shape_from_json, Shape};
+use crate::shapes::extract::{PACKET_ROOT, extract_shape};
+use crate::shapes::model::{Shape, shape_from_json};
 use std::path::{Path, PathBuf};
 
 pub fn hand_packet_path(workspace: &Path, unit: &Unit) -> PathBuf {
@@ -21,7 +21,10 @@ pub fn module_path(unit: &Unit) -> String {
     format!("{}/{}/{}", unit.cls.group, unit.cls.package, unit.cls.stem)
 }
 
-pub fn bps_field_pairs(pkt: &PacketDecl, resolved: &ResolvedSchema) -> BpsResult<Vec<(String, String)>> {
+pub fn bps_field_pairs(
+    pkt: &PacketDecl,
+    resolved: &ResolvedSchema,
+) -> BpsResult<Vec<(String, String)>> {
     let (fields, _types) = packet_fields(pkt, resolved)?;
     let mut out = Vec::with_capacity(fields.len());
     for f in &fields {
@@ -101,7 +104,11 @@ pub fn load_ledger(dir: &Path) -> BpsResult<Vec<(String, Shape)>> {
     Ok(out)
 }
 
-pub fn packet_report(unit: &Unit, resolved: &ResolvedSchema, workspace: &Path) -> BpsResult<String> {
+pub fn packet_report(
+    unit: &Unit,
+    resolved: &ResolvedSchema,
+    workspace: &Path,
+) -> BpsResult<String> {
     let path = hand_packet_path(workspace, unit);
     if !path.is_file() {
         return Ok(format!("missing hand file {}", path.display()));

@@ -2,7 +2,7 @@
 
 use crate::ast::ResolvedSchema;
 use crate::emit_rstom::{packet_fields, parity_args, registry_entries};
-use crate::errors::{emit, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, emit, py_repr_str};
 use crate::json::write_json_string;
 use crate::minestom::Unit;
 

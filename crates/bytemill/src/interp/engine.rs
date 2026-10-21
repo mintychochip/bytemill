@@ -6,12 +6,12 @@
 //! owned scope snapshot where Python rides a `_param_env` tag on frozen
 //! dataclasses.
 
+use crate::ResolvedSchema;
 use crate::ast::*;
-use crate::errors::{decode, decode_at, encode, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, decode, decode_at, encode, py_repr_str};
 use crate::interp::cursor::{Cursor, WriteCursor};
 use crate::interp::expr::{eval_expr, int_of};
 use crate::value::{Env, Value};
-use crate::ResolvedSchema;
 
 // ---------------------------------------------------------------------------
 // Entry points
@@ -143,12 +143,19 @@ pub fn decode_frame_payload(
                 return Err(decode("frame payload cannot be conditional"));
             }
             match &wf.type_ref {
-                FieldType::Ref(tr) if tr.name == "rest" && tr.args.is_empty() && tr.transforms.is_empty() => {
+                FieldType::Ref(tr)
+                    if tr.name == "rest" && tr.args.is_empty() && tr.transforms.is_empty() =>
+                {
                     let n = match (length_val, pos_after_length) {
                         (Some(len), Some(pos)) => {
-                            let ulen = usize::try_from(len).map_err(|_| decode("negative frame length"))?;
-                            let frame_end = pos.checked_add(ulen).ok_or_else(|| decode("frame length overflow"))?;
-                            frame_end.checked_sub(cur.pos).ok_or_else(|| decode("frame length shorter than header"))?
+                            let ulen = usize::try_from(len)
+                                .map_err(|_| decode("negative frame length"))?;
+                            let frame_end = pos
+                                .checked_add(ulen)
+                                .ok_or_else(|| decode("frame length overflow"))?;
+                            frame_end
+                                .checked_sub(cur.pos)
+                                .ok_or_else(|| decode("frame length shorter than header"))?
                         }
                         _ => cur.remaining(),
                     };
@@ -156,9 +163,12 @@ pub fn decode_frame_payload(
                     payload_bytes = Some(bytes.clone());
                     env.insert("payload", Value::bytes(bytes));
                 }
-                FieldType::Ref(tr) if tr.name == "bytes" && tr.args.len() == 1 && tr.transforms.is_empty() => {
+                FieldType::Ref(tr)
+                    if tr.name == "bytes" && tr.args.len() == 1 && tr.transforms.is_empty() =>
+                {
                     let n_val = eval_expr(&tr.args[0], &env)?;
-                    let n = usize::try_from(int_of(&n_val)?).map_err(|_| decode("negative payload length"))?;
+                    let n = usize::try_from(int_of(&n_val)?)
+                        .map_err(|_| decode("negative payload length"))?;
                     let bytes = cur.read(n)?.to_vec();
                     payload_bytes = Some(bytes.clone());
                     env.insert("payload", Value::bytes(bytes));
@@ -174,7 +184,9 @@ pub fn decode_frame_payload(
             env.insert(k, v.clone());
         }
         if is_length {
-            let v = env.get("length").ok_or_else(|| decode("frame length missing"))?;
+            let v = env
+                .get("length")
+                .ok_or_else(|| decode("frame length missing"))?;
             length_val = Some(int_of(v)?);
             pos_after_length = Some(cur.pos);
         }
@@ -194,7 +206,9 @@ pub fn decode_frame_payload(
             return Ok((packet_id, out));
         }
     }
-    Err(decode(format!("no route for id 0x{packet_id:x} in {state}.{direction}")))
+    Err(decode(format!(
+        "no route for id 0x{packet_id:x} in {state}.{direction}"
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -218,19 +232,31 @@ struct ExpandedArm {
 /// Python interpreter attaches as `_param_env`; `None` means "no scope"
 /// (Python's falsy empty dict).
 enum ExpandedItem {
-    Require { expr: Expr, tag: Option<Env> },
-    Group { cond: Option<Expr>, items: Vec<ExpandedItem>, tag: Option<Env> },
-    Computed { name: String, expr: Expr },
-    Match { tag_expr: Expr, arms: Vec<ExpandedArm>, tag: Option<Env> },
-    Field { wf: WireField },
+    Require {
+        expr: Expr,
+        tag: Option<Env>,
+    },
+    Group {
+        cond: Option<Expr>,
+        items: Vec<ExpandedItem>,
+        tag: Option<Env>,
+    },
+    Computed {
+        name: String,
+        expr: Expr,
+    },
+    Match {
+        tag_expr: Expr,
+        arms: Vec<ExpandedArm>,
+        tag: Option<Env>,
+    },
+    Field {
+        wf: WireField,
+    },
 }
 
 fn non_empty(env: Env) -> Option<Env> {
-    if env.is_empty() {
-        None
-    } else {
-        Some(env)
-    }
+    if env.is_empty() { None } else { Some(env) }
 }
 
 /// `{**env, **tag}`: the tag's scope wins, in place.
@@ -273,7 +299,11 @@ fn expand_items(
                 match &enc.body {
                     EncBody::Block(body) => {
                         let inner = expand_items(&body.items, resolved, &bind)?;
-                        out.push(ExpandedItem::Group { cond: None, items: inner, tag: non_empty(bind) });
+                        out.push(ExpandedItem::Group {
+                            cond: None,
+                            items: inner,
+                            tag: non_empty(bind),
+                        });
                     }
                     EncBody::Ref(t) => {
                         out.push(ExpandedItem::Field {
@@ -300,9 +330,9 @@ fn expand_items(
                 let mut arms = Vec::with_capacity(m.arms.len());
                 for arm in &m.arms {
                     let body = match &arm.type_ref {
-                        Some(FieldType::Block(b)) => Some(ExpandedArmBody::Block(
-                            expand_items(&b.items, resolved, param_env)?,
-                        )),
+                        Some(FieldType::Block(b)) => Some(ExpandedArmBody::Block(expand_items(
+                            &b.items, resolved, param_env,
+                        )?)),
                         Some(FieldType::Ref(_)) => Some(ExpandedArmBody::Ref),
                         Some(FieldType::Match(_)) | None => None,
                     };
@@ -322,10 +352,16 @@ fn expand_items(
                 out.push(ExpandedItem::Field { wf: (**wf).clone() });
             }
             BlockItem::Computed { name, expr } => {
-                out.push(ExpandedItem::Computed { name: name.clone(), expr: expr.clone() });
+                out.push(ExpandedItem::Computed {
+                    name: name.clone(),
+                    expr: expr.clone(),
+                });
             }
             BlockItem::Require(expr) => {
-                out.push(ExpandedItem::Require { expr: expr.clone(), tag: non_empty(param_env.clone()) });
+                out.push(ExpandedItem::Require {
+                    expr: expr.clone(),
+                    tag: non_empty(param_env.clone()),
+                });
             }
         }
     }
@@ -551,7 +587,11 @@ pub fn decode_type_ref(
     if let Some(enc) = resolved.encodings.get(&ref_.name) {
         // Parameters only: a parameterless encoding must not inherit the
         // caller's whole scope, or its field names collide with the caller's.
-        let scope = if enc.params.is_empty() { Env::new() } else { env.clone() };
+        let scope = if enc.params.is_empty() {
+            Env::new()
+        } else {
+            env.clone()
+        };
         let bind = bind_params(&enc.params, &ref_.args, &scope)?;
         if let EncBody::Block(body) = &enc.body {
             if let Some(yield_expr) = &enc.yield_expr {
@@ -567,13 +607,17 @@ pub fn decode_type_ref(
             }
             return Ok(Value::map(decoded));
         }
-        let EncBody::Ref(inner) = &enc.body else { unreachable!() };
+        let EncBody::Ref(inner) = &enc.body else {
+            unreachable!()
+        };
         return decode_type_ref(inner, cur, resolved, &bind);
     }
     match ref_.name.as_str() {
         "bytes" => {
             let n = eval_expr(
-                ref_.args.first().ok_or_else(|| decode("bytes() needs a size"))?,
+                ref_.args
+                    .first()
+                    .ok_or_else(|| decode("bytes() needs a size"))?,
                 env,
             )?;
             let n = int_of(&n)?;
@@ -600,7 +644,9 @@ pub fn decode_type_ref(
         }
         "f32be" => {
             let raw = cur.read(4)?;
-            Ok(Value::Float(f32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as f64))
+            Ok(Value::Float(
+                f32::from_be_bytes([raw[0], raw[1], raw[2], raw[3]]) as f64,
+            ))
         }
         "f64be" => {
             let raw = cur.read(8)?;
@@ -608,7 +654,10 @@ pub fn decode_type_ref(
             b.copy_from_slice(raw);
             Ok(Value::Float(f64::from_be_bytes(b)))
         }
-        _ => Err(decode(format!("cannot decode type {}", py_repr_str(&ref_.name)))),
+        _ => Err(decode(format!(
+            "cannot decode type {}",
+            py_repr_str(&ref_.name)
+        ))),
     }
 }
 
@@ -698,15 +747,17 @@ fn encode_expanded(
                     encode_expanded(items, w, resolved, value)?;
                 }
             }
-            ExpandedItem::Match { tag_expr, arms, tag } => {
+            ExpandedItem::Match {
+                tag_expr,
+                arms,
+                tag,
+            } => {
                 let scope = merge_tag(value, tag);
                 let tag_value = int_of(&eval_expr(tag_expr, &scope)?)?;
                 let arm = select_match_arm_tags(arms, tag_value)
                     .ok_or_else(|| encode(format!("no match arm for tag {tag_value}")))?;
                 match &arm.body {
-                    Some(ExpandedArmBody::Block(b)) => {
-                        encode_expanded(b, w, resolved, &scope)?
-                    }
+                    Some(ExpandedArmBody::Block(b)) => encode_expanded(b, w, resolved, &scope)?,
                     Some(ExpandedArmBody::Ref) => {
                         return Err(encode("statement match arm must be a block"));
                     }
@@ -826,10 +877,16 @@ fn encode_type_ref(
     if let Some(enc) = resolved.encodings.get(&ref_.name) {
         // Parameters only: a parameterless encoding must not inherit the
         // caller's whole scope, or its field names collide with the caller's.
-        let scope = if enc.params.is_empty() { Env::new() } else { env.clone() };
+        let scope = if enc.params.is_empty() {
+            Env::new()
+        } else {
+            env.clone()
+        };
         let bind = bind_params(&enc.params, &ref_.args, &scope)?;
         let EncBody::Block(body) = &enc.body else {
-            let EncBody::Ref(inner) = &enc.body else { unreachable!() };
+            let EncBody::Ref(inner) = &enc.body else {
+                unreachable!()
+            };
             return encode_type_ref(inner, w, resolved, &bind, val);
         };
 
@@ -840,13 +897,23 @@ fn encode_type_ref(
             && matches!(enc.name.as_str(), "string" | "identifier" | "nbt_string")
         {
             let raw = s.as_bytes();
-            let len_name = if enc.name == "nbt_string" { "u16be" } else { "varint" };
+            let len_name = if enc.name == "nbt_string" {
+                "u16be"
+            } else {
+                "varint"
+            };
             let len = TypeRef {
                 name: len_name.to_string(),
                 args: Vec::new(),
                 transforms: Vec::new(),
             };
-            encode_type_ref(&len, w, resolved, &Env::new(), &Value::Int(raw.len() as i128))?;
+            encode_type_ref(
+                &len,
+                w,
+                resolved,
+                &Env::new(),
+                &Value::Int(raw.len() as i128),
+            )?;
             w.emit(raw);
             return Ok(());
         }
@@ -855,17 +922,15 @@ fn encode_type_ref(
         {
             let msb = m.get("msb").ok_or_else(|| encode("uuid needs msb"))?;
             let lsb = m.get("lsb").ok_or_else(|| encode("uuid needs lsb"))?;
-            let msb = u64::try_from(int_of(msb)?)
-                .map_err(|_| encode("uuid msb out of range"))?;
-            let lsb = u64::try_from(int_of(lsb)?)
-                .map_err(|_| encode("uuid lsb out of range"))?;
+            let msb = u64::try_from(int_of(msb)?).map_err(|_| encode("uuid msb out of range"))?;
+            let lsb = u64::try_from(int_of(lsb)?).map_err(|_| encode("uuid lsb out of range"))?;
             w.emit(&msb.to_be_bytes());
             w.emit(&lsb.to_be_bytes());
             return Ok(());
         }
         if enc.name == "fixed_bitset" {
-            let raw = raw_bytes(val)
-                .ok_or_else(|| encode(format!("expected dict for {}", enc.name)))?;
+            let raw =
+                raw_bytes(val).ok_or_else(|| encode(format!("expected dict for {}", enc.name)))?;
             w.emit(&raw);
             return Ok(());
         }
@@ -892,7 +957,9 @@ fn encode_type_ref(
     match ref_.name.as_str() {
         "bytes" => {
             let n = eval_expr(
-                ref_.args.first().ok_or_else(|| encode("bytes() needs a size"))?,
+                ref_.args
+                    .first()
+                    .ok_or_else(|| encode("bytes() needs a size"))?,
                 env,
             )?;
             let n = int_of(&n)?;
@@ -908,9 +975,7 @@ fn encode_type_ref(
                             Value::Int(i) if (0..=255).contains(i) => out.push(*i as u8),
                             Value::Bool(b) => out.push(u8::from(*b)),
                             _ => {
-                                return Err(encode(format!(
-                                    "bytes({n}) got a non-byte list item"
-                                )))
+                                return Err(encode(format!("bytes({n}) got a non-byte list item")));
                             }
                         }
                     }
@@ -930,8 +995,9 @@ fn encode_type_ref(
             Ok(())
         }
         "rest" => {
-            let raw = raw_bytes(val)
-                .ok_or_else(|| encode(format!("expected bytes for rest, got {}", val.type_name())))?;
+            let raw = raw_bytes(val).ok_or_else(|| {
+                encode(format!("expected bytes for rest, got {}", val.type_name()))
+            })?;
             w.emit(&raw);
             Ok(())
         }
@@ -950,7 +1016,10 @@ fn encode_type_ref(
             w.emit(&[(v & 0xFF) as u8]);
             Ok(())
         }
-        _ => Err(encode(format!("cannot encode type {}", py_repr_str(&ref_.name)))),
+        _ => Err(encode(format!(
+            "cannot encode type {}",
+            py_repr_str(&ref_.name)
+        ))),
     }
 }
 
@@ -959,10 +1028,16 @@ fn as_f64(val: &Value) -> BpsResult<f64> {
         Value::Int(i) => Ok(*i as f64),
         Value::Bool(b) => Ok(i128::from(*b) as f64),
         Value::Float(f) => Ok(*f),
-        Value::Str(s) => s
-            .parse::<f64>()
-            .map_err(|_| encode(format!("could not convert string to float: {}", py_repr_str(s)))),
-        _ => Err(encode(format!("must be real number, not {}", val.type_name()))),
+        Value::Str(s) => s.parse::<f64>().map_err(|_| {
+            encode(format!(
+                "could not convert string to float: {}",
+                py_repr_str(s)
+            ))
+        }),
+        _ => Err(encode(format!(
+            "must be real number, not {}",
+            val.type_name()
+        ))),
     }
 }
 

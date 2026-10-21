@@ -44,7 +44,11 @@ pub fn float_to_int(f: f64) -> Result<i128, String> {
     let shift = ((bits >> 52) & 0x7ff) as i32 - 1075; // value = mantissa * 2^shift, shift >= 75
     let low = if shift >= 128 { 0 } else { mantissa << shift };
     let value = low as i128;
-    Ok(if truncated < 0.0 { value.wrapping_neg() } else { value })
+    Ok(if truncated < 0.0 {
+        value.wrapping_neg()
+    } else {
+        value
+    })
 }
 
 impl Value {
@@ -132,8 +136,7 @@ impl Value {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.py_eq(y))
             }
             (Value::Map(a), Value::Map(b)) => {
-                a.len() == b.len()
-                    && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| v.py_eq(w)))
+                a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| v.py_eq(w)))
             }
             (
                 Value::Int(_) | Value::Float(_) | Value::Bool(_),

@@ -14,7 +14,10 @@ pub struct OrderedMap<V> {
 
 impl<V> OrderedMap<V> {
     pub fn new() -> Self {
-        OrderedMap { entries: Vec::new(), index: HashMap::new() }
+        OrderedMap {
+            entries: Vec::new(),
+            index: HashMap::new(),
+        }
     }
 
     pub fn len(&self) -> usize {

@@ -36,8 +36,10 @@ pub fn dumps_pretty(v: &Value) -> String {
 
 fn sorted_pairs(v: &Value) -> Vec<(String, Value)> {
     let Value::Map(m) = v else { return Vec::new() };
-    let mut pairs: Vec<(String, Value)> =
-        m.iter().map(|(k, val)| (k.to_string(), val.clone())).collect();
+    let mut pairs: Vec<(String, Value)> = m
+        .iter()
+        .map(|(k, val)| (k.to_string(), val.clone()))
+        .collect();
     pairs.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
     pairs
 }
@@ -101,7 +103,9 @@ fn write_value(out: &mut String, v: &Value, indent: Option<usize>, sort_keys: bo
             let pairs: Vec<(String, Value)> = if sort_keys {
                 sorted_pairs(v)
             } else {
-                m.iter().map(|(k, val)| (k.to_string(), val.clone())).collect()
+                m.iter()
+                    .map(|(k, val)| (k.to_string(), val.clone()))
+                    .collect()
             };
             if pairs.is_empty() {
                 out.push_str("{}");
@@ -201,7 +205,10 @@ fn python_shortest(a: f64, digits: String, e: i32) -> (String, i32) {
         return (digits, e); // an integer: its expansion is its shortest form
     }
     let k = (-e2) as u32;
-    let Some(product) = 5u128.checked_pow(k).and_then(|p| p.checked_mul(u128::from(m))) else {
+    let Some(product) = 5u128
+        .checked_pow(k)
+        .and_then(|p| p.checked_mul(u128::from(m)))
+    else {
         return (digits, e);
     };
     let exact = product.to_string();
@@ -247,10 +254,18 @@ pub fn float_repr(f: f64) -> String {
         return "NaN".to_string();
     }
     if f.is_infinite() {
-        return if f < 0.0 { "-Infinity".to_string() } else { "Infinity".to_string() };
+        return if f < 0.0 {
+            "-Infinity".to_string()
+        } else {
+            "Infinity".to_string()
+        };
     }
     if f == 0.0 {
-        return if f.is_sign_negative() { "-0.0".to_string() } else { "0.0".to_string() };
+        return if f.is_sign_negative() {
+            "-0.0".to_string()
+        } else {
+            "0.0".to_string()
+        };
     }
     let neg = f < 0.0;
     let a = f.abs();
@@ -303,7 +318,10 @@ pub fn float_repr(f: f64) -> String {
 // ---------------------------------------------------------------------------
 
 pub fn loads(text: &str) -> BpsResult<Value> {
-    let mut p = JsonParser { chars: text.chars().collect(), pos: 0 };
+    let mut p = JsonParser {
+        chars: text.chars().collect(),
+        pos: 0,
+    };
     p.skip_ws();
     let v = p.parse_value()?;
     p.skip_ws();
@@ -314,7 +332,10 @@ pub fn loads(text: &str) -> BpsResult<Value> {
 }
 
 fn json_err(msg: &str) -> BpsError {
-    BpsError::new(crate::errors::ErrorKind::Shape, format!("json error: {msg}"))
+    BpsError::new(
+        crate::errors::ErrorKind::Shape,
+        format!("json error: {msg}"),
+    )
 }
 
 /// An integer literal that does not fit `i128`, reduced modulo 2^128 (two's complement). Python's
@@ -330,7 +351,11 @@ fn wrap_to_i128(literal: &str) -> i128 {
         acc = acc.wrapping_mul(10).wrapping_add(u128::from(byte - b'0'));
     }
     let value = acc as i128;
-    if negative { value.wrapping_neg() } else { value }
+    if negative {
+        value.wrapping_neg()
+    } else {
+        value
+    }
 }
 
 struct JsonParser {
@@ -487,7 +512,8 @@ impl JsonParser {
                                 return Err(json_err("lone surrogate"));
                             }
                             out.push(
-                                char::from_u32(cp).ok_or_else(|| json_err("Invalid \\uXXXX escape"))?,
+                                char::from_u32(cp)
+                                    .ok_or_else(|| json_err("Invalid \\uXXXX escape"))?,
                             );
                         }
                         _ => return Err(json_err("Invalid \\escape")),
@@ -505,8 +531,12 @@ impl JsonParser {
     fn parse_hex4(&mut self) -> BpsResult<u32> {
         let mut v: u32 = 0;
         for _ in 0..4 {
-            let c = self.bump().ok_or_else(|| json_err("Invalid \\uXXXX escape"))?;
-            let d = c.to_digit(16).ok_or_else(|| json_err("Invalid \\uXXXX escape"))?;
+            let c = self
+                .bump()
+                .ok_or_else(|| json_err("Invalid \\uXXXX escape"))?;
+            let d = c
+                .to_digit(16)
+                .ok_or_else(|| json_err("Invalid \\uXXXX escape"))?;
             v = v * 16 + d;
         }
         Ok(v)

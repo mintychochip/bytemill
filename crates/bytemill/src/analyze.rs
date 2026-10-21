@@ -1,10 +1,10 @@
 //! Schema resolution, porting `bps/analyze.py`.
 
 use crate::ast::*;
-use crate::errors::{emit, resolve, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, emit, py_repr_str, resolve};
 use crate::ordmap::OrderedMap;
 use crate::primitives::is_bare_primitive;
-use crate::refs::{item_refs, references, type_refs, Ref, RefKind};
+use crate::refs::{Ref, RefKind, item_refs, references, type_refs};
 use std::collections::HashSet;
 
 fn dedupe<V>(kind: &str, decls: &[V], name_of: impl Fn(&V) -> &str) -> BpsResult<OrderedMap<V>>
@@ -61,7 +61,10 @@ pub fn analyze(schema: &Schema) -> BpsResult<ResolvedSchema> {
 }
 
 fn ref_where_route(route: &RouteDecl) -> String {
-    format!("route {}.{} 0x{:x}", route.state, route.direction, route.packet_id)
+    format!(
+        "route {}.{} 0x{:x}",
+        route.state, route.direction, route.packet_id
+    )
 }
 
 /// Raise `EmitError` when a packet reaches a scalar encoding `target` cannot
@@ -97,7 +100,10 @@ pub fn reject_unlowered_scalars(
             }
             let inner = match &enc.body {
                 EncBody::Block(b) => item_refs(&b.items, &format!("encoding {}", enc.name)),
-                EncBody::Ref(t) => type_refs(&FieldType::Ref(t.clone()), &format!("encoding {}", enc.name)),
+                EncBody::Ref(t) => type_refs(
+                    &FieldType::Ref(t.clone()),
+                    &format!("encoding {}", enc.name),
+                ),
             };
             visit(inner, resolved, lowered, seen, unlowered);
         }

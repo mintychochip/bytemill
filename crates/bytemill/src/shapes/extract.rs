@@ -8,12 +8,12 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::errors::BpsResult;
-use crate::shapes::items::{impl_body_bounds, scan_items, Item};
-use crate::shapes::model::{shape_error, FieldShape, NewShape, SerializerShape, Shape};
+use crate::shapes::items::{Item, impl_body_bounds, scan_items};
+use crate::shapes::model::{FieldShape, NewShape, SerializerShape, Shape, shape_error};
 use crate::shapes::scan::{
-    advance_item_start, collect_attrs_before, docs_and_attrs_before, find_fn_body_start,
+    advance_item_start, at, collect_attrs_before, docs_and_attrs_before, find_fn_body_start,
     find_from, leading_module_docs, matching_brace, parse_struct_attrs, read_ident, read_type,
-    skip_balanced, skip_item, skip_trivia, sub, sw, at,
+    skip_balanced, skip_item, skip_trivia, sub, sw,
 };
 
 /// `crates/rstom/src/network/packet`
@@ -71,7 +71,13 @@ fn is_word(c: char) -> bool {
 /// `\s*` at `i`: offset after the whitespace run (possibly `i`).
 fn skip_ws(s: &str, i: usize) -> usize {
     match s.get(i..) {
-        Some(rest) => i + rest.chars().take_while(|c| c.is_whitespace()).map(char::len_utf8).sum::<usize>(),
+        Some(rest) => {
+            i + rest
+                .chars()
+                .take_while(|c| c.is_whitespace())
+                .map(char::len_utf8)
+                .sum::<usize>()
+        }
         None => i,
     }
 }
@@ -79,22 +85,18 @@ fn skip_ws(s: &str, i: usize) -> usize {
 /// `\s+` at `i`: offset after the whitespace run, or `None` when empty.
 fn ws_end(s: &str, i: usize) -> Option<usize> {
     let e = skip_ws(s, i);
-    if e > i {
-        Some(e)
-    } else {
-        None
-    }
+    if e > i { Some(e) } else { None }
 }
 
 /// `\w+` at `i`: offset after the word run, or `None` when empty.
 fn word_end(s: &str, i: usize) -> Option<usize> {
     let rest = s.get(i..)?;
-    let n: usize = rest.chars().take_while(|c| is_word(*c)).map(char::len_utf8).sum();
-    if n == 0 {
-        None
-    } else {
-        Some(i + n)
-    }
+    let n: usize = rest
+        .chars()
+        .take_while(|c| is_word(*c))
+        .map(char::len_utf8)
+        .sum();
+    if n == 0 { None } else { Some(i + n) }
 }
 
 /// `kw\s+` at `i`: offset after the whitespace following the keyword.
@@ -148,7 +150,11 @@ fn struct_head(text: &str) -> Option<Head> {
 fn use_head(text: &str) -> Option<usize> {
     line_starts(text).find(|&p| {
         let k = skip_pub(text, p);
-        sw(text, k, "use") && text[k + 3..].chars().next().is_some_and(char::is_whitespace)
+        sw(text, k, "use")
+            && text[k + 3..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
     })
 }
 
@@ -288,9 +294,9 @@ fn has_word(needed: &str, bound: &str) -> bool {
     if bound.is_empty() {
         let mut positions: Vec<usize> = needed.char_indices().map(|(i, _)| i).collect();
         positions.push(needed.len());
-        return positions.into_iter().any(|p| {
-            boundary(needed[..p].chars().next_back(), needed[p..].chars().next())
-        });
+        return positions
+            .into_iter()
+            .any(|p| boundary(needed[..p].chars().next_back(), needed[p..].chars().next()));
     }
     let first = bound.chars().next();
     let last = bound.chars().next_back();
@@ -535,7 +541,8 @@ fn parse_serializer_body(body: &str) -> BpsResult<(String, String)> {
 
 /// `_raw_params`: the `fn new(...)` parameter list, whitespace collapsed, no trailing comma.
 fn raw_params(body: &str, after_name: usize) -> BpsResult<String> {
-    let open = find_from(body, after_name, "(").ok_or_else(|| shape_error("substring not found"))?;
+    let open =
+        find_from(body, after_name, "(").ok_or_else(|| shape_error("substring not found"))?;
     let close = skip_balanced(body, open, b'(', b')').saturating_sub(1);
     let inner = sub(body, open + 1, close);
     let joined = inner.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -572,9 +579,10 @@ fn is_trivial_new_body(inner: &str, field_names: &[String]) -> bool {
     if parts.len() != field_names.len() {
         return false;
     }
-    parts.iter().zip(field_names).all(|(part, name)| {
-        *part == name.as_str() || *part == format!("{name}: {name}")
-    })
+    parts
+        .iter()
+        .zip(field_names)
+        .all(|(part, name)| *part == name.as_str() || *part == format!("{name}: {name}"))
 }
 
 /// `_verbatim_new_body_lines`.
@@ -667,7 +675,8 @@ fn parse_inherent_impl(body: &str, field_names: &[String]) -> BpsResult<Inherent
         match name.as_str() {
             "new" => {
                 let must_use = attrs.iter().any(|a| is_must_use(a));
-                let other: Vec<String> = attrs.iter().filter(|a| !is_must_use(a)).cloned().collect();
+                let other: Vec<String> =
+                    attrs.iter().filter(|a| !is_must_use(a)).cloned().collect();
                 let braced = if sig_end > 0 {
                     sub(body, sig_end - 1, body_end + 1)
                 } else {
@@ -747,7 +756,8 @@ pub fn extract_shape(
             "use" => use_texts.push(&item.text),
             "struct" if name_is_cls => {}
             "struct" if name_str.ends_with("Serializer") => {
-                let head = struct_head(&item.text).ok_or_else(|| shape_error("malformed struct"))?;
+                let head =
+                    struct_head(&item.text).ok_or_else(|| shape_error("malformed struct"))?;
                 let (docs, _) = docs_and_attrs_before(&item.text, head.start)?;
                 serializer_structs.push(SerializerShape {
                     style: "struct".to_string(),
@@ -807,20 +817,21 @@ pub fn extract_shape(
         }
     }
 
-    let (mut serializer_struct, chosen_len): (Option<SerializerShape>, usize) = if ser_style
-        == "struct"
-    {
-        let chosen: Vec<&SerializerShape> =
-            serializer_structs.iter().filter(|s| s.name == ser_name).collect();
-        if chosen.is_empty() {
-            return Err(shape_error(format!("missing serializer struct for {cls}")));
-        }
-        (Some(chosen[0].clone()), chosen.len())
-    } else {
-        let first = serializer_structs.first().cloned();
-        let n = usize::from(first.is_some());
-        (first, n)
-    };
+    let (mut serializer_struct, chosen_len): (Option<SerializerShape>, usize) =
+        if ser_style == "struct" {
+            let chosen: Vec<&SerializerShape> = serializer_structs
+                .iter()
+                .filter(|s| s.name == ser_name)
+                .collect();
+            if chosen.is_empty() {
+                return Err(shape_error(format!("missing serializer struct for {cls}")));
+            }
+            (Some(chosen[0].clone()), chosen.len())
+        } else {
+            let first = serializer_structs.first().cloned();
+            let n = usize::from(first.is_some());
+            (first, n)
+        };
     module_extra = module_extra || serializer_structs.len() > chosen_len;
     for (target, body) in &serializer_impls {
         match serializer_struct.as_mut() {

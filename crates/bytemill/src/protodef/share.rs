@@ -76,7 +76,10 @@ fn classify(line: &str) -> Line<'_> {
             return Line::DeclStart(keyword, rest);
         }
     }
-    if let Some(path) = line.strip_prefix("import \"").and_then(|r| r.strip_suffix('"')) {
+    if let Some(path) = line
+        .strip_prefix("import \"")
+        .and_then(|r| r.strip_suffix('"'))
+    {
         return Line::Import(path);
     }
     if line.starts_with("protocol ") {
@@ -145,9 +148,12 @@ pub fn split(text: &str) -> Res<Split> {
                 // Consume lines until braces balance, outside comments and string literals.
                 let mut depth = brace_delta(line);
                 while depth > 0 {
-                    let next = lines
-                        .next()
-                        .ok_or_else(|| format!("{} {name} ends before its closing brace", kind.keyword().trim()))?;
+                    let next = lines.next().ok_or_else(|| {
+                        format!(
+                            "{} {name} ends before its closing brace",
+                            kind.keyword().trim()
+                        )
+                    })?;
                     depth += brace_delta(next);
                     piece.push_str(next);
                     piece.push('\n');
@@ -274,9 +280,7 @@ fn check_pieces(text: &str, s: &Split) -> Res<()> {
         };
         let (kind_word, same) = match d.kind {
             Kind::Encoding => match parsed.encodings.first() {
-                Some(e) if e.name == d.name && e == seen[d.name.as_str()] => {
-                    ("encoding", true)
-                }
+                Some(e) if e.name == d.name && e == seen[d.name.as_str()] => ("encoding", true),
                 _ => ("encoding", false),
             },
             Kind::Packet => match parsed.packets.first() {
@@ -495,11 +499,7 @@ pub fn identity(versions: &[Vec<Decl>]) -> Res<Vec<BTreeMap<(Kind, String), Id>>
                 });
                 for &v in comp {
                     let d = &decls[v];
-                    let key = format!(
-                        "m\x1f{cid}\x1f{}\x1f{}",
-                        d.kind.keyword().trim(),
-                        d.name
-                    );
+                    let key = format!("m\x1f{cid}\x1f{}\x1f{}", d.kind.keyword().trim(), d.name);
                     let id = *intern.entry(key).or_insert_with(|| {
                         let id = next;
                         next += 1;
@@ -562,13 +562,21 @@ fn run_name(run: (usize, usize), releases: &[&str], last_index: usize) -> String
 /// The file name of a version set: its runs' names joined with `+`.
 fn set_name(set: &[usize], releases: &[&str], last_index: usize) -> String {
     let runs = runs_of(set, last_index);
-    let names: Vec<String> = runs.iter().map(|&r| run_name(r, releases, last_index)).collect();
+    let names: Vec<String> = runs
+        .iter()
+        .map(|&r| run_name(r, releases, last_index))
+        .collect();
     names.join("+")
 }
 
 /// The `// Shared by: …` header line: each run reads `X (protocol N) onwards`, `X (protocol
 /// N) only` or `X (protocol N) to Y (protocol M)`, joined with `, `.
-fn shared_by_line(set: &[usize], releases: &[&str], protocols: &[u32], last_index: usize) -> String {
+fn shared_by_line(
+    set: &[usize],
+    releases: &[&str],
+    protocols: &[u32],
+    last_index: usize,
+) -> String {
     let one = |i: usize| format!("{} (protocol {})", releases[i], protocols[i]);
     let parts: Vec<String> = runs_of(set, last_index)
         .iter()
@@ -628,10 +636,7 @@ pub fn share(
                     set.push(vi);
                 }
                 None => {
-                    by_id.insert(
-                        *id,
-                        (d.kind, d.name.clone(), d.text.clone(), vec![vi]),
-                    );
+                    by_id.insert(*id, (d.kind, d.name.clone(), d.text.clone(), vec![vi]));
                 }
             }
         }
@@ -779,9 +784,7 @@ pub fn share(
         }
         root.push('\n');
         root.push_str(&s.protocol_block);
-        layout
-            .files
-            .insert(entries[vi].file_name(), root);
+        layout.files.insert(entries[vi].file_name(), root);
     }
 
     Ok(layout)
@@ -862,7 +865,9 @@ pub fn write_layout(layout: &Layout, out_dir: &Path, check: bool) -> Res<WriteRe
             }
             let rel = format!(
                 "common/{}",
-                path.file_name().and_then(|n| n.to_str()).unwrap_or_default()
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
             );
             if !layout.files.contains_key(&rel) {
                 orphans.push(path);
@@ -912,7 +917,11 @@ mod tests {
             ),
         ];
         let v1 = vec![
-            decl(Kind::Encoding, "inner", "encoding inner = {\n    a: u16be\n}"),
+            decl(
+                Kind::Encoding,
+                "inner",
+                "encoding inner = {\n    a: u16be\n}",
+            ),
             decl(
                 Kind::Encoding,
                 "wrapper",
@@ -1054,7 +1063,9 @@ protocol minecraft @ v1_13 {
         assert_eq!(s.decls[0].name, "uuid");
         // The doc comment above the declaration travels with it; the `// ---` divider does not.
         assert!(
-            s.decls[0].text.starts_with("// 128-bit UUID, big endian.\nencoding uuid = {"),
+            s.decls[0]
+                .text
+                .starts_with("// 128-bit UUID, big endian.\nencoding uuid = {"),
             "{:?}",
             s.decls[0].text
         );
@@ -1089,7 +1100,13 @@ protocol minecraft @ v1_13 {
             decls: s
                 .decls
                 .iter()
-                .map(|d| if d.name == "uuid" { doctored.clone() } else { d.clone() })
+                .map(|d| {
+                    if d.name == "uuid" {
+                        doctored.clone()
+                    } else {
+                        d.clone()
+                    }
+                })
                 .collect(),
             protocol_block: s.protocol_block.clone(),
         };
@@ -1145,7 +1162,10 @@ protocol minecraft @ v1_13 {
         out
     }
 
-    fn layout_for(entries: &[super::super::versions::VersionEntry], versions: &[Vec<Decl>]) -> super::Layout {
+    fn layout_for(
+        entries: &[super::super::versions::VersionEntry],
+        versions: &[Vec<Decl>],
+    ) -> super::Layout {
         let mut splits = Vec::new();
         for (i, v) in versions.iter().enumerate() {
             let text = render_of(v, &entries[i].release, entries[i].protocol);
@@ -1165,11 +1185,23 @@ protocol minecraft @ v1_13 {
         let mk = |a: u8, b: u8| -> Vec<Decl> {
             let width = |w: u8| if w == 0 { "u8" } else { "u16be" };
             vec![
-                decl(Kind::Encoding, "a", &format!("encoding a = {{\n    x: {}\n}}", width(a))),
-                decl(Kind::Encoding, "b", &format!("encoding b = {{\n    x: {}\n}}", width(b))),
+                decl(
+                    Kind::Encoding,
+                    "a",
+                    &format!("encoding a = {{\n    x: {}\n}}", width(a)),
+                ),
+                decl(
+                    Kind::Encoding,
+                    "b",
+                    &format!("encoding b = {{\n    x: {}\n}}", width(b)),
+                ),
             ]
         };
-        let entries = vec![entry("1.13", 393), entry("1.13.1", 401), entry("1.13.2", 404)];
+        let entries = vec![
+            entry("1.13", 393),
+            entry("1.13.1", 401),
+            entry("1.13.2", 404),
+        ];
         let versions = vec![mk(0, 0), mk(0, 1), mk(1, 0)];
         let layout = layout_for(&entries, &versions);
         // `a` occurs in versions {0,1}: one run -> `1_13_to_1_13_1.bps`.
@@ -1204,10 +1236,18 @@ protocol minecraft @ v1_13 {
                 &format!("encoding a = {{\n    x: {width}\n}}"),
             )]
         };
-        let entries3 = vec![entry("1.13", 393), entry("1.13.1", 401), entry("1.13.2", 404)];
+        let entries3 = vec![
+            entry("1.13", 393),
+            entry("1.13.1", 401),
+            entry("1.13.2", 404),
+        ];
         let versions3 = vec![mk(0), mk(0), mk(0)];
         let l3 = layout_for(&entries3, &versions3);
-        assert!(l3.files.contains_key("common/from_1_13.bps"), "{:?}", l3.files.keys().collect::<Vec<_>>());
+        assert!(
+            l3.files.contains_key("common/from_1_13.bps"),
+            "{:?}",
+            l3.files.keys().collect::<Vec<_>>()
+        );
         let entries4 = vec![
             entry("1.13", 393),
             entry("1.13.1", 401),
@@ -1216,7 +1256,11 @@ protocol minecraft @ v1_13 {
         ];
         let versions4 = vec![mk(0), mk(0), mk(0), mk(0)];
         let l4 = layout_for(&entries4, &versions4);
-        assert!(l4.files.contains_key("common/from_1_13.bps"), "{:?}", l4.files.keys().collect::<Vec<_>>());
+        assert!(
+            l4.files.contains_key("common/from_1_13.bps"),
+            "{:?}",
+            l4.files.keys().collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1225,11 +1269,7 @@ protocol minecraft @ v1_13 {
         let mk = |a: u8| -> Vec<Decl> {
             let width = if a == 0 { "u8" } else { "u16be" };
             vec![
-                decl(
-                    Kind::Encoding,
-                    "b",
-                    "encoding b = {\n    x: u8\n}",
-                ),
+                decl(Kind::Encoding, "b", "encoding b = {\n    x: u8\n}"),
                 decl(
                     Kind::Encoding,
                     "a",
@@ -1252,10 +1292,7 @@ protocol minecraft @ v1_13 {
         assert!(a_file.contains("import \"../../std/integers.bps\""));
         assert!(a_file.contains("import \"../../std/varint.bps\""));
         // a references b: the shared file holding b is imported.
-        assert!(
-            a_file.contains("import \"from_1_13.bps\""),
-            "{a_file}"
-        );
+        assert!(a_file.contains("import \"from_1_13.bps\""), "{a_file}");
         let b_file = layout
             .files
             .get("common/from_1_13.bps")
@@ -1273,7 +1310,11 @@ protocol minecraft @ v1_13 {
             let width = |w: u8| if w == 0 { "u8" } else { "u16be" };
             vec![
                 decl(Kind::Encoding, "a", "encoding a = {\n    x: u8\n}"),
-                decl(Kind::Encoding, "b", &format!("encoding b = {{\n    x: {}\n}}", width(b))),
+                decl(
+                    Kind::Encoding,
+                    "b",
+                    &format!("encoding b = {{\n    x: {}\n}}", width(b)),
+                ),
             ]
         };
         let entries = vec![entry("1.13", 393), entry("1.13.1", 401)];
@@ -1336,7 +1377,11 @@ protocol minecraft @ v1_13 {
                 ),
             ]
         };
-        let entries = vec![entry("1.13", 393), entry("1.13.1", 401), entry("1.13.2", 404)];
+        let entries = vec![
+            entry("1.13", 393),
+            entry("1.13.1", 401),
+            entry("1.13.2", 404),
+        ];
         let versions = vec![mk(false), mk(false), mk(true)];
         let layout = layout_for(&entries, &versions);
         let shared = layout
@@ -1418,7 +1463,11 @@ protocol minecraft @ v1_13 {
         let err = write_layout(&layout, &tmp.0, false).unwrap_err();
         assert!(err.contains("refusing to touch"), "{err}");
         // The file is untouched.
-        assert!(std::fs::read_to_string(&mine).unwrap().starts_with("// my own work"));
+        assert!(
+            std::fs::read_to_string(&mine)
+                .unwrap()
+                .starts_with("// my own work")
+        );
     }
 
     #[test]

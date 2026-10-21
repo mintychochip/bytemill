@@ -48,11 +48,7 @@ fn ws_run(s: &str, i: usize) -> Option<usize> {
         .take_while(|c| c.is_whitespace())
         .map(char::len_utf8)
         .sum();
-    if n == 0 {
-        None
-    } else {
-        Some(i + n)
-    }
+    if n == 0 { None } else { Some(i + n) }
 }
 
 /// `\w+` at `i`: end offset after the word run, or `None` if empty.
@@ -63,11 +59,7 @@ fn word_run(s: &str, i: usize) -> Option<usize> {
         .take_while(|c| is_word(*c))
         .map(char::len_utf8)
         .sum();
-    if n == 0 {
-        None
-    } else {
-        Some(i + n)
-    }
+    if n == 0 { None } else { Some(i + n) }
 }
 
 /// `kw\s+` at `i`: end offset after the whitespace following the keyword.
@@ -219,7 +211,12 @@ fn impl_names(head: &str) -> (Option<String>, String) {
     if let Some(brace) = text.find('{') {
         text.truncate(brace);
     }
-    let text = text.split(" where ").next().unwrap_or("").trim().to_string();
+    let text = text
+        .split(" where ")
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     let last_seg = |s: &str| -> String {
         without_generics(s)
             .rsplit("::")
@@ -319,9 +316,14 @@ fn entries(
         };
         let line = sub(src, pos, eol);
         let has_indent = line.starts_with(indent);
-        let stripped = if has_indent { &line[indent.len()..] } else { line };
+        let stripped = if has_indent {
+            &line[indent.len()..]
+        } else {
+            line
+        };
         let first = pos + if has_indent { indent.len() } else { 0 };
-        if stripped.trim().is_empty() || (stripped.starts_with("//") && !stripped.starts_with("///"))
+        if stripped.trim().is_empty()
+            || (stripped.starts_with("//") && !stripped.starts_with("///"))
         {
             pos = eol + 1;
             continue;

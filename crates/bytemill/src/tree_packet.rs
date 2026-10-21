@@ -2,7 +2,7 @@
 //! Ports `bps/tree_packet.py`.
 
 use crate::emit_rstom::PacketBody;
-use crate::errors::{emit, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, emit, py_repr_str};
 use crate::minestom::Unit;
 use crate::shapes::model::{FieldShape, Shape};
 
@@ -37,7 +37,10 @@ fn guard_frames_walkers(module: &str, body: &PacketBody) -> BpsResult<()> {
 /// `_validate_shape`.
 pub fn validate_shape(shape: &Shape) -> BpsResult<()> {
     if shape.form == "unit" && !shape.fields.is_empty() {
-        return Err(emit(format!("{}: unit shape must have no fields", shape.module)));
+        return Err(emit(format!(
+            "{}: unit shape must have no fields",
+            shape.module
+        )));
     }
     if shape.serializer.style == "constant" && shape.form != "unit" {
         return Err(emit(format!(
@@ -124,7 +127,14 @@ fn banner(unit: &Unit) -> String {
     let routes = unit
         .routes
         .iter()
-        .map(|r| format!("{}.{} 0x{}", r.state, r.direction, hex_padded(r.packet_id, 2)))
+        .map(|r| {
+            format!(
+                "{}.{} 0x{}",
+                r.state,
+                r.direction,
+                hex_padded(r.packet_id, 2)
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     format!(

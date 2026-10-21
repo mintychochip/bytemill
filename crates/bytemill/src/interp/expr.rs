@@ -1,7 +1,7 @@
 //! Expression evaluation, porting `bps/interp/evalexpr.py`.
 
 use crate::ast::Expr;
-use crate::errors::{decode, py_repr_str, BpsError, BpsResult};
+use crate::errors::{BpsError, BpsResult, decode, py_repr_str};
 use crate::value::{Env, Value};
 
 pub fn eval_expr(expr: &Expr, env: &Env) -> BpsResult<Value> {
@@ -17,10 +17,9 @@ pub fn eval_expr(expr: &Expr, env: &Env) -> BpsResult<Value> {
             let mut cur: Value = Value::Null;
             for (i, part) in dotted.split('.').enumerate() {
                 if i == 0 {
-                    cur = env
-                        .get(part)
-                        .cloned()
-                        .ok_or_else(|| decode(format!("unknown identifier {}", py_repr_str(part))))?;
+                    cur = env.get(part).cloned().ok_or_else(|| {
+                        decode(format!("unknown identifier {}", py_repr_str(part)))
+                    })?;
                     continue;
                 }
                 match &cur {
@@ -114,7 +113,11 @@ fn floor_div(a: i128, b: i128) -> BpsResult<i128> {
     }
     let q = a / b;
     let r = a % b;
-    Ok(if r != 0 && ((r < 0) != (b < 0)) { q - 1 } else { q })
+    Ok(if r != 0 && ((r < 0) != (b < 0)) {
+        q - 1
+    } else {
+        q
+    })
 }
 
 /// Python `%`: the result takes the divisor's sign.
@@ -123,7 +126,11 @@ fn py_mod(a: i128, b: i128) -> BpsResult<i128> {
         return Err(decode("integer division or modulo by zero"));
     }
     let r = a % b;
-    Ok(if r != 0 && ((r < 0) != (b < 0)) { r + b } else { r })
+    Ok(if r != 0 && ((r < 0) != (b < 0)) {
+        r + b
+    } else {
+        r
+    })
 }
 
 /// Python `<<` with unbounded integers; saturates beyond i128 (never reached by
@@ -133,7 +140,13 @@ fn py_shl(a: i128, n: i128) -> i128 {
         return if n == 0 { a } else { py_shr(a, -n) };
     }
     if n >= 127 {
-        return if a == 0 { 0 } else if a > 0 { i128::MAX } else { i128::MIN };
+        return if a == 0 {
+            0
+        } else if a > 0 {
+            i128::MAX
+        } else {
+            i128::MIN
+        };
     }
     a.wrapping_shl(n as u32)
 }
@@ -158,11 +171,18 @@ fn eval_call(name: &str, args: &[Value]) -> BpsResult<Value> {
                 return Err(decode(format!("sign_extend bits out of range: {bits}")));
             }
             let mask: i128 = 1i128 << (bits as u32 - 1);
-            Ok(Value::Int(if v & mask != 0 { (v ^ mask) - mask } else { v }))
+            Ok(Value::Int(if v & mask != 0 {
+                (v ^ mask) - mask
+            } else {
+                v
+            }))
         }
         "utf16_units" => {
             let s = as_str(&args[0])?;
-            let units: usize = s.chars().map(|c| if (c as u32) > 0xffff { 2 } else { 1 }).sum();
+            let units: usize = s
+                .chars()
+                .map(|c| if (c as u32) > 0xffff { 2 } else { 1 })
+                .sum();
             Ok(Value::Int(units as i128))
         }
         "len" => {
@@ -195,8 +215,9 @@ fn as_str(v: &Value) -> BpsResult<String> {
         Value::Float(f) => Ok(crate::json::float_repr(*f)),
         Value::Null => Ok("None".into()),
         Value::Bytes(b) => Ok(String::from_utf8_lossy(b).into_owned()),
-        Value::List(_) | Value::Map(_) => {
-            Err(BpsError::new(crate::errors::ErrorKind::Decode, "str() on container"))
-        }
+        Value::List(_) | Value::Map(_) => Err(BpsError::new(
+            crate::errors::ErrorKind::Decode,
+            "str() on container",
+        )),
     }
 }

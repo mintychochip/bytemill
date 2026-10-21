@@ -7,10 +7,10 @@
 use std::collections::HashSet;
 
 use crate::ast::{
-    arm_tag_list, select_match_arm, BlockItem, EncBody, Expr, FieldType, MatchArm, MatchType,
-    PacketDecl, RepeatMode, ResolvedSchema, Tag, TypeRef, WireField,
+    BlockItem, EncBody, Expr, FieldType, MatchArm, MatchType, PacketDecl, RepeatMode,
+    ResolvedSchema, Tag, TypeRef, WireField, arm_tag_list, select_match_arm,
 };
-use crate::errors::{py_repr_str, BpsError, BpsResult};
+use crate::errors::{BpsError, BpsResult, py_repr_str};
 use crate::interp::eval_expr;
 use crate::ordmap::OrderedMap;
 use crate::value::{Env, Value};
@@ -115,7 +115,10 @@ fn prim(name: &str) -> Option<Value> {
             ("tag_type", Value::Int(10)),
             ("value", obj(vec![("entries", Value::list(vec![]))])),
         ]),
-        "text_component" => obj(vec![("tag_type", Value::Int(8)), ("value", Value::str("abc"))]),
+        "text_component" => obj(vec![
+            ("tag_type", Value::Int(8)),
+            ("value", Value::str("abc")),
+        ]),
         "slot" => obj(vec![("item_count", Value::Int(0))]),
         "hashed_slot" => obj(vec![("has_item", Value::Bool(false))]),
         "id_or_sound_event" => obj(vec![("id", Value::Int(1))]),
@@ -125,9 +128,7 @@ fn prim(name: &str) -> Option<Value> {
             ("properties_count", Value::Int(0)),
             ("properties", Value::list(vec![])),
         ]),
-        "entity_metadata" | "nbt_compound_body" => {
-            obj(vec![("entries", Value::list(vec![]))])
-        }
+        "entity_metadata" | "nbt_compound_body" => obj(vec![("entries", Value::list(vec![]))]),
         "meta_entry" => Value::Null,
         "nbt_nothing" => obj(vec![]),
         "nbt_tag" => obj(vec![("tag_type", Value::Int(0)), ("value", Value::Null)]),
@@ -137,7 +138,10 @@ fn prim(name: &str) -> Option<Value> {
             ("packed_high_4", Value::Int(0)),
         ]),
         // angry_villager (id 0): SimpleParticleType with no payload (ParticleTypes.java).
-        "particle_data" => obj(vec![("particle_type", Value::Int(0)), ("value", obj(vec![]))]),
+        "particle_data" => obj(vec![
+            ("particle_type", Value::Int(0)),
+            ("value", obj(vec![])),
+        ]),
         // An empty slot display, and a stonecutter recipe display of three empty ones.
         "slot_display" => slot0(),
         "recipe_display" => obj(vec![
@@ -163,15 +167,19 @@ fn prim(name: &str) -> Option<Value> {
         ]),
         "power" => obj(vec![("power", Value::Float(1.5))]),
         "dust_color" => obj(vec![("color", Value::Int(300))]),
-        "dust_color_scale" => {
-            obj(vec![("color", Value::Int(300)), ("scale", Value::Float(1.5))])
-        }
+        "dust_color_scale" => obj(vec![
+            ("color", Value::Int(300)),
+            ("scale", Value::Float(1.5)),
+        ]),
         "dust_color_transition" => obj(vec![
             ("from_color", Value::Int(300)),
             ("to_color", Value::Int(300)),
             ("scale", Value::Float(1.5)),
         ]),
-        "spell_particle" => obj(vec![("color", Value::Int(300)), ("power", Value::Float(1.5))]),
+        "spell_particle" => obj(vec![
+            ("color", Value::Int(300)),
+            ("power", Value::Float(1.5)),
+        ]),
         "sculk_charge_roll" => obj(vec![("roll", Value::Float(1.5))]),
         "shriek_delay" => obj(vec![("delay", Value::Int(300))]),
         "trail_data" => obj(vec![
@@ -217,14 +225,14 @@ fn ref_value(tr: &TypeRef, env: &Env, scope: &SynthScope<'_>) -> BpsResult<Value
                 ("item_count", Value::Int(1)),
                 ("component_added", Value::Int(0)),
                 ("component_removed", Value::Int(0)),
-            ]))
+            ]));
         }
         "item_cost" => {
             return Ok(obj(vec![
                 ("item_id", Value::Int(1)),
                 ("count", Value::Int(1)),
                 ("predicate_count", Value::Int(0)),
-            ]))
+            ]));
         }
         _ => {}
     }

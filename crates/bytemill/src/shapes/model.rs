@@ -2,7 +2,7 @@
 //! Ports `bps/shapes/model.py`.
 
 use crate::errors::{BpsError, BpsResult, ErrorKind};
-use crate::json::{dumps_pretty, loads, Value};
+use crate::json::{Value, dumps_pretty, loads};
 use crate::ordmap::OrderedMap;
 
 pub type ShapeError = BpsError;
@@ -82,7 +82,10 @@ pub fn shape_to_json(s: &Shape) -> String {
         "docs",
         Value::list(s.struct_docs.iter().cloned().map(Value::str).collect()),
     );
-    struct_obj.insert("derives", Value::list(s.derives.iter().cloned().map(Value::str).collect()));
+    struct_obj.insert(
+        "derives",
+        Value::list(s.derives.iter().cloned().map(Value::str).collect()),
+    );
     struct_obj.insert("form", Value::str(s.form.clone()));
     root.insert("struct", Value::map(struct_obj));
 
@@ -93,7 +96,10 @@ pub fn shape_to_json(s: &Shape) -> String {
             let mut obj = OrderedMap::new();
             obj.insert("name", Value::str(f.name.clone()));
             obj.insert("type", Value::str(f.type_.clone()));
-            obj.insert("docs", Value::list(f.docs.iter().cloned().map(Value::str).collect()));
+            obj.insert(
+                "docs",
+                Value::list(f.docs.iter().cloned().map(Value::str).collect()),
+            );
             if let Some(wire) = &f.wire {
                 obj.insert("wire", Value::str(wire.clone()));
             }
@@ -106,9 +112,18 @@ pub fn shape_to_json(s: &Shape) -> String {
     new_obj.insert("present", Value::Bool(s.new.present));
     new_obj.insert("must_use", Value::Bool(s.new.must_use));
     new_obj.insert("const", Value::Bool(s.new.const_));
-    new_obj.insert("attrs", Value::list(s.new.attrs.iter().cloned().map(Value::str).collect()));
-    new_obj.insert("docs", Value::list(s.new.docs.iter().cloned().map(Value::str).collect()));
-    new_obj.insert("body", Value::list(s.new.body.iter().cloned().map(Value::str).collect()));
+    new_obj.insert(
+        "attrs",
+        Value::list(s.new.attrs.iter().cloned().map(Value::str).collect()),
+    );
+    new_obj.insert(
+        "docs",
+        Value::list(s.new.docs.iter().cloned().map(Value::str).collect()),
+    );
+    new_obj.insert(
+        "body",
+        Value::list(s.new.body.iter().cloned().map(Value::str).collect()),
+    );
     if let Some(p) = &s.new.params {
         new_obj.insert("params", Value::str(p.clone()));
     }
@@ -117,7 +132,13 @@ pub fn shape_to_json(s: &Shape) -> String {
     let mut ser_fn = OrderedMap::new();
     ser_fn.insert(
         "docs",
-        Value::list(s.serializer_fn_docs.iter().cloned().map(Value::str).collect()),
+        Value::list(
+            s.serializer_fn_docs
+                .iter()
+                .cloned()
+                .map(Value::str)
+                .collect(),
+        ),
     );
     ser_fn.insert("must_use", Value::Bool(s.serializer_fn_must_use));
     root.insert("serializer_fn", Value::map(ser_fn));
@@ -126,7 +147,10 @@ pub fn shape_to_json(s: &Shape) -> String {
     ser.insert("style", Value::str(s.serializer.style.clone()));
     ser.insert("name", Value::str(s.serializer.name.clone()));
     ser.insert("pub", Value::Bool(s.serializer.public));
-    ser.insert("docs", Value::list(s.serializer.docs.iter().cloned().map(Value::str).collect()));
+    ser.insert(
+        "docs",
+        Value::list(s.serializer.docs.iter().cloned().map(Value::str).collect()),
+    );
     ser.insert("read_via_new", Value::Bool(s.serializer.read_via_new));
     root.insert("serializer_struct", Value::map(ser));
 
@@ -138,7 +162,10 @@ pub fn shape_to_json(s: &Shape) -> String {
         },
     );
     if !s.imports.is_empty() {
-        root.insert("imports", Value::list(s.imports.iter().cloned().map(Value::str).collect()));
+        root.insert(
+            "imports",
+            Value::list(s.imports.iter().cloned().map(Value::str).collect()),
+        );
     }
     if let Some(t) = &s.tests {
         root.insert("tests", Value::str(t.clone()));
@@ -164,7 +191,10 @@ pub fn shape_to_json(s: &Shape) -> String {
         root.insert("accepted", Value::list(items));
     }
     if !s.drops.is_empty() {
-        root.insert("drops", Value::list(s.drops.iter().cloned().map(Value::str).collect()));
+        root.insert(
+            "drops",
+            Value::list(s.drops.iter().cloned().map(Value::str).collect()),
+        );
     }
     let mut out = dumps_pretty(&Value::map(root));
     out.push('\n');
@@ -246,7 +276,11 @@ pub fn shape_from_json(text: &str) -> BpsResult<Shape> {
     };
     let serializer_fn_docs = str_list(ser_fn.get("docs"));
     let serializer_fn_must_use = matches!(ser_fn.get("must_use"), Some(Value::Bool(true)));
-    let Value::Map(ser) = root.get("serializer_struct").cloned().unwrap_or(Value::Null) else {
+    let Value::Map(ser) = root
+        .get("serializer_struct")
+        .cloned()
+        .unwrap_or(Value::Null)
+    else {
         return Err(shape_error("shape json: missing serializer_struct"));
     };
     let serializer = SerializerShape {

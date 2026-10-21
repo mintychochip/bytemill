@@ -5,10 +5,10 @@
 //! imports *directly*; imports are not transitive (the `.proto` rule).
 
 use crate::ast::Schema;
-use crate::errors::{parse, py_repr_str, resolve, BpsResult};
+use crate::errors::{BpsResult, parse, py_repr_str, resolve};
 use crate::parser::parse as parse_text;
 use crate::primitives::is_bare_primitive;
-use crate::refs::{references, Ref, RefKind};
+use crate::refs::{Ref, RefKind, references};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -35,7 +35,10 @@ struct ModuleTable {
 
 impl ModuleTable {
     fn new() -> Self {
-        ModuleTable { order: Vec::new(), index: HashMap::new() }
+        ModuleTable {
+            order: Vec::new(),
+            index: HashMap::new(),
+        }
     }
 
     fn contains(&self, path: &Path) -> bool {
@@ -86,7 +89,11 @@ fn load_modules(paths: &[impl AsRef<Path>]) -> BpsResult<ModuleTable> {
         }
         loading.pop();
         modules.index.insert(path.clone(), modules.order.len());
-        modules.order.push(Module { path, schema, imports });
+        modules.order.push(Module {
+            path,
+            schema,
+            imports,
+        });
         Ok(())
     }
 
@@ -124,29 +131,38 @@ impl Providers {
         let mut packets = HashMap::new();
         for module in modules {
             for enc in &module.schema.encodings {
-                types_.entry(enc.name.clone()).or_insert_with(Vec::new).push(module.path.clone());
+                types_
+                    .entry(enc.name.clone())
+                    .or_insert_with(Vec::new)
+                    .push(module.path.clone());
             }
             for e in &module.schema.enums {
-                types_.entry(e.name.clone()).or_insert_with(Vec::new).push(module.path.clone());
+                types_
+                    .entry(e.name.clone())
+                    .or_insert_with(Vec::new)
+                    .push(module.path.clone());
             }
             for pkt in &module.schema.packets {
-                packets.entry(pkt.name.clone()).or_insert_with(Vec::new).push(module.path.clone());
+                packets
+                    .entry(pkt.name.clone())
+                    .or_insert_with(Vec::new)
+                    .push(module.path.clone());
             }
         }
         Providers { types_, packets }
     }
 
     fn of(&self, ref_: &Ref) -> &[PathBuf] {
-        let table = if ref_.kind == RefKind::Packet { &self.packets } else { &self.types_ };
+        let table = if ref_.kind == RefKind::Packet {
+            &self.packets
+        } else {
+            &self.types_
+        };
         table.get(&ref_.name).map(|v| v.as_slice()).unwrap_or(&[])
     }
 }
 
-fn check_imports(
-    module: &Module,
-    modules: &ModuleTable,
-    providers: &Providers,
-) -> BpsResult<()> {
+fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) -> BpsResult<()> {
     let mut visible: Vec<PathBuf> = vec![module.path.clone()];
     visible.extend(module.imports.iter().cloned());
     // file to import -> names it provides (insertion-ordered like Python's dict)
@@ -217,7 +233,10 @@ fn check_imports(
     )];
     for (provider, names) in &missing {
         let target = rel_path(provider, &module.path);
-        lines.push(format!("  add  import \"{target}\"  for {}", names.join(", ")));
+        lines.push(format!(
+            "  add  import \"{target}\"  for {}",
+            names.join(", ")
+        ));
     }
     for (name, ref_) in &nowhere {
         lines.push(format!(
@@ -236,13 +255,19 @@ fn bps_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
         vec![dir.to_path_buf()]
     } else {
         match std::fs::read_dir(dir) {
-            Ok(entries) => entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect(),
+            Ok(entries) => entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect(),
             Err(_) => Vec::new(),
         }
     };
     let mut out = Vec::new();
     for folder in folders {
-        let Ok(entries) = std::fs::read_dir(&folder) else { continue };
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
         for entry in entries.flatten() {
             if entry.file_name().to_string_lossy().ends_with(".bps") && entry.path().is_file() {
                 out.push(entry.path());
@@ -267,9 +292,17 @@ fn nearby_providers(module: &Module, loaded: &ModuleTable) -> Providers {
             if loaded.contains(&resolved) {
                 continue;
             }
-            let Ok(text) = crate::text::read_text(&resolved) else { continue };
-            let Ok(schema) = parse_text(&text) else { continue };
-            found.push(Module { path: resolved, schema, imports: Vec::new() });
+            let Ok(text) = crate::text::read_text(&resolved) else {
+                continue;
+            };
+            let Ok(schema) = parse_text(&text) else {
+                continue;
+            };
+            found.push(Module {
+                path: resolved,
+                schema,
+                imports: Vec::new(),
+            });
         }
     }
     Providers::new(found.iter())

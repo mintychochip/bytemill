@@ -1,8 +1,11 @@
 //! `emit rstom`: a drop-in mirror crate for rstom's `rstom-packets`.
 //! Port of `bps/emit_rstom.py`.
 
-use crate::ast::{self, BlockItem, EncBody, EncodingDecl, Expr, FieldType, PacketDecl, ResolvedSchema, RouteDecl, TypeRef, WireField};
-use crate::errors::{emit, py_repr_str, BpsError, BpsResult};
+use crate::ast::{
+    self, BlockItem, EncBody, EncodingDecl, Expr, FieldType, PacketDecl, ResolvedSchema, RouteDecl,
+    TypeRef, WireField,
+};
+use crate::errors::{BpsError, BpsResult, emit, py_repr_str};
 use crate::minestom::{ClassTable, Unit};
 use crate::ordmap::OrderedMap;
 use std::collections::BTreeSet;
@@ -72,7 +75,10 @@ pub const GENERATED_FRAMES: &[&str] = &[
 ];
 
 fn wire_entry(name: &str) -> Option<(&'static str, &'static str)> {
-    WIRE_TYPES.iter().find(|(n, _, _)| *n == name).map(|(_, w, r)| (*w, *r))
+    WIRE_TYPES
+        .iter()
+        .find(|(n, _, _)| *n == name)
+        .map(|(_, w, r)| (*w, *r))
 }
 
 fn is_wire(name: &str) -> bool {
@@ -84,11 +90,17 @@ fn is_opaque(name: &str) -> bool {
 }
 
 fn self_delimiting(name: &str) -> Option<&'static str> {
-    SELF_DELIMITING.iter().find(|(n, _)| *n == name).map(|(_, w)| *w)
+    SELF_DELIMITING
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, w)| *w)
 }
 
 fn self_delimiting_default(name: &str) -> Option<&'static [u8]> {
-    SELF_DELIMITING_DEFAULT.iter().find(|(n, _)| *n == name).map(|(_, b)| *b)
+    SELF_DELIMITING_DEFAULT
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, b)| *b)
 }
 
 /// Python `re.split(r"[^a-zA-Z0-9]+", s)` capitalised, joined.
@@ -108,7 +120,13 @@ fn pascal(s: &str) -> String {
 /// Python `re.sub(r"[^a-zA-Z0-9_]", "_", s)`.
 fn snake(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -129,7 +147,11 @@ fn eval_len_expr(expr: &Expr, bind: &OrderedMap<i128>) -> Option<i128> {
                         None
                     } else {
                         let q = left / right;
-                        Some(if left % right != 0 && ((left < 0) != (right < 0)) { q - 1 } else { q })
+                        Some(if left % right != 0 && ((left < 0) != (right < 0)) {
+                            q - 1
+                        } else {
+                            q
+                        })
                     }
                 }
                 "%" => {
@@ -137,7 +159,11 @@ fn eval_len_expr(expr: &Expr, bind: &OrderedMap<i128>) -> Option<i128> {
                         None
                     } else {
                         let m = left % right;
-                        Some(if m != 0 && ((m < 0) != (right < 0)) { m + right } else { m })
+                        Some(if m != 0 && ((m < 0) != (right < 0)) {
+                            m + right
+                        } else {
+                            m
+                        })
                     }
                 }
                 _ => None,
@@ -157,7 +183,11 @@ fn arg_value(arg: &Expr) -> i128 {
 
 /// Parameter bindings of an encoding reference: declared defaults, then
 /// positional reference arguments.
-fn bind_params(enc: &EncodingDecl, args: &[Expr], base: Option<&OrderedMap<i128>>) -> OrderedMap<i128> {
+fn bind_params(
+    enc: &EncodingDecl,
+    args: &[Expr],
+    base: Option<&OrderedMap<i128>>,
+) -> OrderedMap<i128> {
     let mut bind: OrderedMap<i128> = OrderedMap::new();
     for p in &enc.params {
         bind.insert(&p.name, p.default.unwrap_or(0));
@@ -176,7 +206,11 @@ fn bind_params(enc: &EncodingDecl, args: &[Expr], base: Option<&OrderedMap<i128>
 }
 
 /// Byte length of a payload's frame, when the schema declares one (`_opaque_len`).
-fn opaque_len(r: Option<&TypeRef>, resolved: Option<&ResolvedSchema>, params: Option<&OrderedMap<i128>>) -> Option<String> {
+fn opaque_len(
+    r: Option<&TypeRef>,
+    resolved: Option<&ResolvedSchema>,
+    params: Option<&OrderedMap<i128>>,
+) -> Option<String> {
     let empty = OrderedMap::new();
     let params = params.unwrap_or(&empty);
     let r = r?;
@@ -233,7 +267,7 @@ fn field_rust(r: &TypeRef) -> (String, String) {
 
 use crate::analyze::reject_unlowered_scalars;
 use crate::interp::encode_packet;
-use crate::minestom::{build_units, package_of, PACKAGE_PREFIX};
+use crate::minestom::{PACKAGE_PREFIX, build_units, package_of};
 use crate::synth::synthesize_packet;
 use crate::value::{Env, Value};
 use std::collections::HashSet;
@@ -259,13 +293,19 @@ pub fn frames(resolved: &ResolvedSchema) -> BpsResult<Rc<FramesPlan>> {
         .collect();
     let recursive = crate::frames_gen::recursive_encodings(resolved);
     let mut framed: Vec<String> = Vec::new();
-    for name in GENERATED_FRAMES.iter().map(|s| s.to_string()).chain(recursive) {
+    for name in GENERATED_FRAMES
+        .iter()
+        .map(|s| s.to_string())
+        .chain(recursive)
+    {
         if resolved.encodings.contains_key(&name) && !framed.contains(&name) {
             framed.push(name);
         }
     }
     framed.sort();
-    let mut roots: BTreeSet<String> = crate::frames_gen::element_encodings(resolved).into_iter().collect();
+    let mut roots: BTreeSet<String> = crate::frames_gen::element_encodings(resolved)
+        .into_iter()
+        .collect();
     roots.extend(framed.iter().cloned());
     let roots: Vec<String> = roots.into_iter().filter(|n| !lowered.contains(n)).collect();
     let mut known: OrderedMap<String> = OrderedMap::new();
@@ -282,9 +322,18 @@ pub fn frames(resolved: &ResolvedSchema) -> BpsResult<Rc<FramesPlan>> {
     if !broken.is_empty() {
         let parts: Vec<String> = broken
             .iter()
-            .map(|n| format!("{} ({})", n, walkers.unsupported.get(n).cloned().unwrap_or_default()))
+            .map(|n| {
+                format!(
+                    "{} ({})",
+                    n,
+                    walkers.unsupported.get(n).cloned().unwrap_or_default()
+                )
+            })
             .collect();
-        return Err(emit(format!("no frame walker can be compiled for {}", parts.join(", "))));
+        return Err(emit(format!(
+            "no frame walker can be compiled for {}",
+            parts.join(", ")
+        )));
     }
     let plan = Rc::new(FramesPlan { framed, walkers });
     *resolved.frames_cache.borrow_mut() = Some(plan.clone());
@@ -318,7 +367,11 @@ fn frame_default(name: &str, resolved: Option<&ResolvedSchema>) -> BpsResult<Opt
     if !plan.walkers.names.contains_key(name) {
         return Ok(None);
     }
-    let r = TypeRef { name: name.to_string(), args: Vec::new(), transforms: Vec::new() };
+    let r = TypeRef {
+        name: name.to_string(),
+        args: Vec::new(),
+        transforms: Vec::new(),
+    };
     let env: crate::value::Env = OrderedMap::new();
     let scope = crate::synth::SynthScope { resolved: res };
     let value = crate::synth::value_for(&FieldType::Ref(r.clone()), &env, &scope)?;
@@ -356,7 +409,11 @@ fn len_field(f: &PacketShape) -> Option<String> {
 /// The Rust expression for the length a `bytes(<ident>)` payload reads (`_len_value`).
 fn len_value(f: &PacketShape, types: &OrderedMap<String>) -> String {
     let ident = ident(&len_field(f).unwrap_or_default());
-    if types.get(&ident).map(|t| t.starts_with("Option<")).unwrap_or(false) {
+    if types
+        .get(&ident)
+        .map(|t| t.starts_with("Option<"))
+        .unwrap_or(false)
+    {
         format!("{ident}.unwrap_or(0)")
     } else {
         ident
@@ -372,7 +429,9 @@ fn prefix_write(ident: &str, indent: &str) -> Vec<String> {
     vec![
         format!("{indent}buffer.write(VAR_INT, {ident}.len() as i32);"),
         format!("{indent}if !{ident}.is_empty() {{"),
-        format!("{indent}    buffer.write(fixed_raw_bytes({ident}.len() as i32), {ident}.clone());"),
+        format!(
+            "{indent}    buffer.write(fixed_raw_bytes({ident}.len() as i32), {ident}.clone());"
+        ),
         format!("{indent}}}"),
     ]
 }
@@ -381,7 +440,9 @@ fn prefix_read(ident: &str, indent: &str) -> Vec<String> {
     vec![
         format!("{indent}let {ident} = {{"),
         format!("{indent}    let len = buffer.read(VAR_INT) as usize;"),
-        format!("{indent}    if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len as i32)) }}"),
+        format!(
+            "{indent}    if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len as i32)) }}"
+        ),
         format!("{indent}}};"),
     ]
 }
@@ -391,7 +452,9 @@ fn len_read(ident: &str, length: &str, indent: &str) -> Vec<String> {
     vec![
         format!("{indent}let {ident} = {{"),
         format!("{indent}    let n = {length} as usize;"),
-        format!("{indent}    if n == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(n as i32)) }}"),
+        format!(
+            "{indent}    if n == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(n as i32)) }}"
+        ),
         format!("{indent}}};"),
     ]
 }
@@ -403,7 +466,9 @@ fn scan_read(ident: &str, walker: &str, indent: &str) -> Vec<String> {
         format!("{indent}    let mut raw = vec![0u8; buffer.readable_bytes() as usize];"),
         format!("{indent}    buffer.copy_to(buffer.read_index(), &mut raw);"),
         format!("{indent}    let len = crate::frames::{walker}(&raw) as i32;"),
-        format!("{indent}    if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len)) }}"),
+        format!(
+            "{indent}    if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len)) }}"
+        ),
         format!("{indent}}};"),
     ]
 }
@@ -445,7 +510,11 @@ fn scope_types(f: &PacketShape, top: Option<&[PacketShape]>) -> OrderedMap<Strin
             Some(_) => format!("Vec<{}>", outer.rtype),
             None => outer.rtype.clone(),
         };
-        let mapped = if outer.guard.is_some() { format!("Option<{base}>") } else { base };
+        let mapped = if outer.guard.is_some() {
+            format!("Option<{base}>")
+        } else {
+            base
+        };
         if !types.contains_key(&outer.ident) {
             types.insert(&outer.ident, mapped);
         }
@@ -464,12 +533,28 @@ fn elem_writes(
     let mut out = Vec::new();
     for (name, expr) in &f.elem_computed {
         let operand = rust_operand(expr, &scope_types(f, top), "read")?;
-        out.push(format!("            let {name} = {};", strip_outer_parens(&operand)));
+        out.push(format!(
+            "            let {name} = {};",
+            strip_outer_parens(&operand)
+        ));
     }
     for e in &f.element {
         if e.repeat_mode.is_some() {
-            let iterable = if e.guard.is_some() { Some("items") } else { None };
-            let inner = repeat_write(e, resolved, "                ", var, true, top, false, iterable)?;
+            let iterable = if e.guard.is_some() {
+                Some("items")
+            } else {
+                None
+            };
+            let inner = repeat_write(
+                e,
+                resolved,
+                "                ",
+                var,
+                true,
+                top,
+                false,
+                iterable,
+            )?;
             if let Some(g) = &e.guard {
                 let cond = rust_cond(g, &types, "read")?;
                 out.push(format!(
@@ -482,14 +567,22 @@ fn elem_writes(
             continue;
         }
         let mode = elem_frame_mode(e, resolved)?;
-        let write_var = if e.guard.is_some() { "v".to_string() } else { e.ident.clone() };
+        let write_var = if e.guard.is_some() {
+            "v".to_string()
+        } else {
+            e.ident.clone()
+        };
         let body: Vec<String> = if mode == "prefix" {
             prefix_write(&write_var, "                ")
         } else if mode != "plain" {
-            vec![format!("                buffer.write(RAW_BYTES, {write_var}.clone());")]
+            vec![format!(
+                "                buffer.write(RAW_BYTES, {write_var}.clone());"
+            )]
         } else {
             let frame = frame_expr(e, resolved)?.unwrap_or_else(|| e.wire.clone());
-            vec![format!("                buffer.write({frame}, {write_var}.clone());")]
+            vec![format!(
+                "                buffer.write({frame}, {write_var}.clone());"
+            )]
         };
         if let Some(g) = &e.guard {
             let cond = rust_cond(g, &types, "read")?;
@@ -528,11 +621,16 @@ fn elem_reads(
     ) -> BpsResult<()> {
         let mut i = 0;
         while i < computed.len() {
-            let ready = expr_idents(&computed[i].1).iter().all(|n| bound.contains(n));
+            let ready = expr_idents(&computed[i].1)
+                .iter()
+                .all(|n| bound.contains(n));
             if ready {
                 let (name, expr) = computed.remove(i);
                 let operand = rust_operand(&expr, types, "read")?;
-                out.push(format!("            let {name} = {};", strip_outer_parens(&operand)));
+                out.push(format!(
+                    "            let {name} = {};",
+                    strip_outer_parens(&operand)
+                ));
             } else {
                 i += 1;
             }
@@ -574,7 +672,10 @@ fn elem_reads(
             scan_read(&e.ident, &mode, "                ")
         } else {
             let frame = frame_expr(e, resolved)?.unwrap_or_else(|| e.wire.clone());
-            vec![format!("                let {} = buffer.read({frame});", e.ident)]
+            vec![format!(
+                "                let {} = buffer.read({frame});",
+                e.ident
+            )]
         };
         if let Some(g) = &e.guard {
             let cond = rust_cond(g, &types, "read")?;
@@ -592,7 +693,10 @@ fn elem_reads(
     }
     for (name, expr) in &computed {
         let operand = rust_operand(expr, &types, "read")?;
-        out.push(format!("            let {name} = {};", strip_outer_parens(&operand)));
+        out.push(format!(
+            "            let {name} = {};",
+            strip_outer_parens(&operand)
+        ));
     }
     Ok(out)
 }
@@ -643,7 +747,9 @@ fn repeat_write(
         if nested {
             let mut loop_head = String::new();
 
-            let it = iterable.map(|s| s.to_string()).unwrap_or_else(|| format!("&{}.clone()", f.ident));
+            let it = iterable
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("&{}.clone()", f.ident));
             loop_head.push_str(&format!("{indent}for {var}_item in {it} {{\n"));
             return Ok(format!(
                 "{loop_head}{}\n{body}\n{indent}}}",
@@ -668,14 +774,23 @@ fn repeat_write(
         for line in outer_bindings(f, indent) {
             loop_head.push_str(&format!("{line}\n"));
         }
-        loop_head.push_str(&format!("{indent}for {var}_item in &{var}.{} {{\n", f.ident));
-        return Ok(format!("{loop_head}{}\n{body}\n{indent}}}", destructure(f, var)));
+        loop_head.push_str(&format!(
+            "{indent}for {var}_item in &{var}.{} {{\n",
+            f.ident
+        ));
+        return Ok(format!(
+            "{loop_head}{}\n{body}\n{indent}}}",
+            destructure(f, var)
+        ));
     }
     // until_end / until: the terminator is a schema detail; emit to the end.
     let body = elem_writes(f, resolved, var, top)?.join("\n");
     if nested {
         let loop_head = format!("{indent}for {var}_item in &{}.clone() {{\n", f.ident);
-        return Ok(format!("{loop_head}{}\n{body}\n{indent}}}", destructure(f, var)));
+        return Ok(format!(
+            "{loop_head}{}\n{body}\n{indent}}}",
+            destructure(f, var)
+        ));
     } else if optional_vec {
         let loop_head = format!(
             "{indent}if let Some(items) = &{var}.{} {{\n{indent}    for {var}_item in items {{\n",
@@ -687,7 +802,10 @@ fn repeat_write(
         ));
     }
     let loop_head = format!("{indent}for {var}_item in &{var}.{} {{\n", f.ident);
-    Ok(format!("{loop_head}{}\n{body}\n{indent}}}", destructure(f, var)))
+    Ok(format!(
+        "{loop_head}{}\n{body}\n{indent}}}",
+        destructure(f, var)
+    ))
 }
 
 /// Read a repeat field (`_repeat_read`).
@@ -751,7 +869,9 @@ fn elem_struct(f: &PacketShape) -> String {
 
 /// An optional count is bound as `Option`, so unwrap it for the loop bound (`_unwrap_count`).
 fn unwrap_count(count: &str, scope: &[PacketShape]) -> String {
-    let optional = scope.iter().any(|f| f.guard.is_some() && f.repeat_mode.is_none() && f.ident == count);
+    let optional = scope
+        .iter()
+        .any(|f| f.guard.is_some() && f.repeat_mode.is_none() && f.ident == count);
     if optional {
         format!("{count}.unwrap_or(0)")
     } else {
@@ -766,7 +886,10 @@ fn destructure(f: &PacketShape, var: &str) -> String {
     if names.len() == 1 {
         return format!("            let {} = {binding}.clone();", names[0]);
     }
-    format!("            let ({}) = {binding}.clone();", names.join(", "))
+    format!(
+        "            let ({}) = {binding}.clone();",
+        names.join(", ")
+    )
 }
 
 /// The `Type` expression for a payload field, or None for a plain wire type (`_frame_expr`).
@@ -797,11 +920,11 @@ fn java_name(ident: &str) -> String {
 }
 
 const RUST_KEYWORDS: &[&str] = &[
-    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for", "if",
-    "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self",
-    "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while", "async",
-    "await", "dyn", "abstract", "become", "box", "do", "final", "macro", "override", "priv", "typeof",
-    "unsized", "virtual", "yield",
+    "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn", "for",
+    "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+    "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where",
+    "while", "async", "await", "dyn", "abstract", "become", "box", "do", "final", "macro",
+    "override", "priv", "typeof", "unsized", "virtual", "yield",
 ];
 
 /// A safe Rust identifier for a schema field name (`_ident`).
@@ -1024,7 +1147,9 @@ fn rust_operand(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BpsResul
             let right = rust_operand(r, types, mode)?;
             Ok(format!("({left} {op} {right})"))
         }
-        Expr::Unop(op, inner) if op == "!" => Ok(format!("!({})", rust_operand(inner, types, mode)?)),
+        Expr::Unop(op, inner) if op == "!" => {
+            Ok(format!("!({})", rust_operand(inner, types, mode)?))
+        }
         _ => Err(emit(format!("unsupported guard operand: {expr:?}"))),
     }
 }
@@ -1051,21 +1176,28 @@ fn rust_guard(expr: Option<&Expr>, types: &OrderedMap<String>, mode: &str) -> Bp
         Expr::Int(i) => Ok(i.to_string()),
         Expr::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
         Expr::Ident(n) if !n.is_empty() => Ok(truthy_ident(n)),
-        Expr::Unop(op, inner) if op == "!" => Ok(format!("!({})", rust_guard(Some(inner), types, mode)?)),
+        Expr::Unop(op, inner) if op == "!" => {
+            Ok(format!("!({})", rust_guard(Some(inner), types, mode)?))
+        }
         Expr::Binop(op, l, r) => {
             if op == "&&" || op == "||" {
                 let left = rust_guard(Some(l), types, mode)?;
                 let right = rust_guard(Some(r), types, mode)?;
                 return Ok(format!("({left} {op} {right})"));
             }
-            if matches!(op.as_str(), "==" | "!=") && is_zero_int(r)
+            if matches!(op.as_str(), "==" | "!=")
+                && is_zero_int(r)
                 && let Expr::Ident(n) = &**l
                 && !n.is_empty()
             {
                 let (inner, _) = field_rust_type(n, types);
                 if inner == "bool" {
                     let access = rust_field_access(n, types, mode);
-                    return Ok(if op == "!=" { access } else { format!("!{access}") });
+                    return Ok(if op == "!=" {
+                        access
+                    } else {
+                        format!("!{access}")
+                    });
                 }
             }
             let left = rust_operand(l, types, mode)?;
@@ -1128,25 +1260,23 @@ fn guard_holds(expr: Option<&Expr>, env: &Env, types: &OrderedMap<String>) -> Bp
             Ok(value_int(&v)? != 0)
         }
         Expr::Unop(op, inner) if op == "!" => Ok(!guard_holds(Some(inner), env, types)?),
-        Expr::Binop(op, l, r) => {
-            match op.as_str() {
-                "&&" => Ok(guard_holds(Some(l), env, types)? && guard_holds(Some(r), env, types)?),
-                "||" => Ok(guard_holds(Some(l), env, types)? || guard_holds(Some(r), env, types)?),
-                "==" | "!=" | "<" | "<=" | ">" | ">=" => {
-                    let left = guard_holds_value(l, env)?;
-                    let right = guard_holds_value(r, env)?;
-                    Ok(match op.as_str() {
-                        "==" => left == right,
-                        "!=" => left != right,
-                        "<" => left < right,
-                        "<=" => left <= right,
-                        ">" => left > right,
-                        _ => left >= right,
-                    })
-                }
-                _ => Ok(false),
+        Expr::Binop(op, l, r) => match op.as_str() {
+            "&&" => Ok(guard_holds(Some(l), env, types)? && guard_holds(Some(r), env, types)?),
+            "||" => Ok(guard_holds(Some(l), env, types)? || guard_holds(Some(r), env, types)?),
+            "==" | "!=" | "<" | "<=" | ">" | ">=" => {
+                let left = guard_holds_value(l, env)?;
+                let right = guard_holds_value(r, env)?;
+                Ok(match op.as_str() {
+                    "==" => left == right,
+                    "!=" => left != right,
+                    "<" => left < right,
+                    "<=" => left <= right,
+                    ">" => left > right,
+                    _ => left >= right,
+                })
             }
-        }
+            _ => Ok(false),
+        },
         _ => Ok(false),
     }
 }
@@ -1203,8 +1333,16 @@ fn declared_twice(ident_name: &str, first: &str, second: &str) -> BpsError {
             py_repr_str(ident_name)
         ));
     }
-    let f = if first.is_empty() { "the packet".to_string() } else { py_repr_str(first) };
-    let s = if second.is_empty() { "the packet".to_string() } else { py_repr_str(second) };
+    let f = if first.is_empty() {
+        "the packet".to_string()
+    } else {
+        py_repr_str(first)
+    };
+    let s = if second.is_empty() {
+        "the packet".to_string()
+    } else {
+        py_repr_str(second)
+    };
     emit(format!(
         "field {} is declared by both {f} and {s}; the generated struct has one namespace per packet, so give them distinct names",
         py_repr_str(ident_name)
@@ -1213,7 +1351,12 @@ fn declared_twice(ident_name: &str, first: &str, second: &str) -> BpsError {
 
 /// Reconcile a name declared twice in the same flattened scope (`_merge_declared`).
 /// `idx` is the position of the existing declaration in `out`.
-fn merge_declared(out: &mut Vec<PacketShape>, idx: usize, guard: Option<Expr>, parent: &str) -> BpsResult<()> {
+fn merge_declared(
+    out: &mut Vec<PacketShape>,
+    idx: usize,
+    guard: Option<Expr>,
+    parent: &str,
+) -> BpsResult<()> {
     let existing_parent = out[idx].parent.clone();
     if !existing_parent.is_empty() && !parent.is_empty() && existing_parent != parent {
         return Err(declared_twice(&out[idx].ident, &existing_parent, parent));
@@ -1269,7 +1412,16 @@ fn expand_encoding(
             bind.insert(&enc.params[i].name, v);
         }
     }
-    flatten(&body.items, out, Some(resolved), Some(&bind), guard, field_types, parent, true)?;
+    flatten(
+        &body.items,
+        out,
+        Some(resolved),
+        Some(&bind),
+        guard,
+        field_types,
+        parent,
+        true,
+    )?;
     Ok(true)
 }
 
@@ -1294,7 +1446,16 @@ fn repeat_shape(
     let mut computed: Vec<(String, Expr)> = Vec::new();
     match &wf.type_ref {
         FieldType::Block(b) => {
-            flatten(&b.items, &mut element, resolved, bind, None, &mut elem_types, parent, false)?;
+            flatten(
+                &b.items,
+                &mut element,
+                resolved,
+                bind,
+                None,
+                &mut elem_types,
+                parent,
+                false,
+            )?;
             for item in &b.items {
                 if let BlockItem::Computed { name, expr } = item {
                     computed.push((name.clone(), expr.clone()));
@@ -1377,7 +1538,16 @@ fn append_field(
             return flatten_match(mt, out, resolved, bind, guard, field_types, &match_parent);
         }
         FieldType::Block(b) => {
-            return flatten(&b.items, out, resolved, bind, guard, field_types, parent, true);
+            return flatten(
+                &b.items,
+                out,
+                resolved,
+                bind,
+                guard,
+                field_types,
+                parent,
+                true,
+            );
         }
         FieldType::Ref(r) => r,
     };
@@ -1403,7 +1573,11 @@ fn append_field(
         ));
         field_types.insert(
             &wf.name,
-            if guard.is_some() { format!("Option<{rtype}>") } else { rtype.to_string() },
+            if guard.is_some() {
+                format!("Option<{rtype}>")
+            } else {
+                rtype.to_string()
+            },
         );
         return Ok(());
     }
@@ -1425,7 +1599,11 @@ fn append_field(
             out,
             guard,
             field_types,
-            &if parent.is_empty() { wf.name.clone() } else { format!("{parent}.{}", wf.name) },
+            &if parent.is_empty() {
+                wf.name.clone()
+            } else {
+                format!("{parent}.{}", wf.name)
+            },
         )?
     {
         return Ok(());
@@ -1450,7 +1628,11 @@ fn append_field(
     ));
     field_types.insert(
         &wf.name,
-        if guard.is_some() { format!("Option<{rtype}>") } else { rtype.clone() },
+        if guard.is_some() {
+            format!("Option<{rtype}>")
+        } else {
+            rtype.clone()
+        },
     );
     Ok(())
 }
@@ -1500,7 +1682,16 @@ fn flatten_match(
         match &arm.type_ref {
             None => continue,
             Some(FieldType::Block(b)) => {
-                flatten(&b.items, out, resolved, bind, arm_guard.as_ref(), field_types, parent, true)?;
+                flatten(
+                    &b.items,
+                    out,
+                    resolved,
+                    bind,
+                    arm_guard.as_ref(),
+                    field_types,
+                    parent,
+                    true,
+                )?;
             }
             Some(FieldType::Ref(r)) => {
                 if is_wire(&r.name) || is_opaque(&r.name) {
@@ -1533,7 +1724,16 @@ fn flatten_match(
     }
     match default_type {
         FieldType::Block(b) => {
-            flatten(&b.items, out, resolved, bind, default_guard.as_ref(), field_types, "", true)?;
+            flatten(
+                &b.items,
+                out,
+                resolved,
+                bind,
+                default_guard.as_ref(),
+                field_types,
+                "",
+                true,
+            )?;
         }
         FieldType::Ref(r) => {
             expand_encoding(r, resolved, out, default_guard.as_ref(), field_types, "")?;
@@ -1562,7 +1762,16 @@ fn flatten(
         match item {
             BlockItem::Group { cond, items: inner } => {
                 let guard = and_guard(parent_guard.cloned(), cond.clone());
-                flatten(inner, out, resolved, bind, guard.as_ref(), field_types, parent, expand_payloads)?;
+                flatten(
+                    inner,
+                    out,
+                    resolved,
+                    bind,
+                    guard.as_ref(),
+                    field_types,
+                    parent,
+                    expand_payloads,
+                )?;
             }
             BlockItem::MatchStmt(mt) => {
                 flatten_match(mt, out, resolved, bind, parent_guard, field_types, parent)?;
@@ -1572,12 +1781,30 @@ fn flatten(
                     && let Some(enc) = resolved.encodings.get(name)
                     && let EncBody::Block(b) = &enc.body
                 {
-                    flatten(&b.items, out, Some(resolved), bind, parent_guard, field_types, parent, expand_payloads)?;
+                    flatten(
+                        &b.items,
+                        out,
+                        Some(resolved),
+                        bind,
+                        parent_guard,
+                        field_types,
+                        parent,
+                        expand_payloads,
+                    )?;
                 }
             }
             BlockItem::Field(wf) => {
                 let guard = and_guard(parent_guard.cloned(), wf.if_expr.clone());
-                append_field(out, wf, resolved, bind, guard.as_ref(), field_types, parent, expand_payloads)?;
+                append_field(
+                    out,
+                    wf,
+                    resolved,
+                    bind,
+                    guard.as_ref(),
+                    field_types,
+                    parent,
+                    expand_payloads,
+                )?;
             }
             BlockItem::Computed { .. } | BlockItem::Require(_) => {}
         }
@@ -1629,8 +1856,21 @@ pub fn packet_fields(
 ) -> BpsResult<(Vec<PacketShape>, OrderedMap<String>)> {
     let mut fields: Vec<PacketShape> = Vec::new();
     let mut flatten_types: OrderedMap<String> = OrderedMap::new();
-    if let Err(err) = flatten(&pkt.items, &mut fields, Some(resolved), None, None, &mut flatten_types, "", true) {
-        return Err(emit(format!("packet {}: {}", py_repr_str(&pkt.name), err.message)));
+    if let Err(err) = flatten(
+        &pkt.items,
+        &mut fields,
+        Some(resolved),
+        None,
+        None,
+        &mut flatten_types,
+        "",
+        true,
+    ) {
+        return Err(emit(format!(
+            "packet {}: {}",
+            py_repr_str(&pkt.name),
+            err.message
+        )));
     }
     let mut field_types = flatten_types;
     for f in &fields {
@@ -1638,7 +1878,11 @@ pub fn packet_fields(
             Some(_) => format!("Vec<{}>", f.rtype),
             None => f.rtype.clone(),
         };
-        let mapped = if f.guard.is_some() { format!("Option<{base}>") } else { base };
+        let mapped = if f.guard.is_some() {
+            format!("Option<{base}>")
+        } else {
+            base
+        };
         field_types.insert(&f.ident, mapped.clone());
         field_types.insert(&snake(&f.ident), mapped);
     }
@@ -1695,7 +1939,11 @@ fn payload_mode(
     if !unframed {
         return Ok("plain");
     }
-    Ok(if index + 1 == count { "to_end" } else { "prefixed" })
+    Ok(if index + 1 == count {
+        "to_end"
+    } else {
+        "prefixed"
+    })
 }
 
 /// `_frame_expr(f, resolved) or f.wire`.
@@ -1717,10 +1965,28 @@ pub fn packet_body(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<PacketBo
             let opt_vec = f.guard.is_some();
             if let Some(g) = &f.guard {
                 let cond = rust_cond(g, &field_types, "write")?;
-                let inner = repeat_write(f, resolved, "        ", "value", false, Some(fields.as_slice()), opt_vec, None)?;
+                let inner = repeat_write(
+                    f,
+                    resolved,
+                    "        ",
+                    "value",
+                    false,
+                    Some(fields.as_slice()),
+                    opt_vec,
+                    None,
+                )?;
                 writes.push(format!("        if {cond} {{\n{inner}\n        }}"));
             } else {
-                writes.push(repeat_write(f, resolved, "        ", "value", false, Some(fields.as_slice()), false, None)?);
+                writes.push(repeat_write(
+                    f,
+                    resolved,
+                    "        ",
+                    "value",
+                    false,
+                    Some(fields.as_slice()),
+                    false,
+                    None,
+                )?);
             }
             continue;
         }
@@ -1759,7 +2025,10 @@ pub fn packet_body(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<PacketBo
                 id = f.ident
             ));
         } else {
-            writes.push(format!("        buffer.write({frame}, value.{}.clone());", f.ident));
+            writes.push(format!(
+                "        buffer.write({frame}, value.{}.clone());",
+                f.ident
+            ));
         }
     }
 
@@ -1770,14 +2039,32 @@ pub fn packet_body(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<PacketBo
         if f.repeat_mode.is_some() {
             if let Some(g) = &f.guard {
                 let cond = rust_cond(g, &read_types, "read")?;
-                let inner = repeat_read(f, resolved, "        ", "value", false, Some(fields.as_slice()), true, None)?
-                    .trim()
-                    .to_string();
+                let inner = repeat_read(
+                    f,
+                    resolved,
+                    "        ",
+                    "value",
+                    false,
+                    Some(fields.as_slice()),
+                    true,
+                    None,
+                )?
+                .trim()
+                .to_string();
                 reads.push(format!(
                     "        let {id} = if {cond} {{\n{inner}\n            Some({id})\n        }} else {{ None }};"
                 ));
             } else {
-                reads.push(repeat_read(f, resolved, "        ", "value", false, Some(fields.as_slice()), true, None)?);
+                reads.push(repeat_read(
+                    f,
+                    resolved,
+                    "        ",
+                    "value",
+                    false,
+                    Some(fields.as_slice()),
+                    true,
+                    None,
+                )?);
             }
             read_types.insert(id, format!("Vec<{}>", f.rtype));
             continue;
@@ -1797,7 +2084,11 @@ pub fn packet_body(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<PacketBo
                      \x20       let {id} = if len == 0 {{ Vec::new() }} else {{ buffer.read(fixed_raw_bytes(len as i32)) }};"
                 ));
             }
-            let t = if f.guard.is_some() { format!("Option<{}>", f.rtype) } else { f.rtype.clone() };
+            let t = if f.guard.is_some() {
+                format!("Option<{}>", f.rtype)
+            } else {
+                f.rtype.clone()
+            };
             read_types.insert(id, t);
             continue;
         }
@@ -1848,26 +2139,46 @@ pub fn packet_body(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<PacketBo
             Some(_) => format!("Vec<{}>", f.rtype),
             None => f.rtype.clone(),
         };
-        if f.guard.is_some() { format!("Option<{base}>") } else { base }
+        if f.guard.is_some() {
+            format!("Option<{base}>")
+        } else {
+            base
+        }
     };
     let ctor = if fields.is_empty() {
         String::new()
     } else {
-        fields.iter().map(|f| format!("{}: {}", f.ident, ctor_type(f))).collect::<Vec<_>>().join(",\n        ")
+        fields
+            .iter()
+            .map(|f| format!("{}: {}", f.ident, ctor_type(f)))
+            .collect::<Vec<_>>()
+            .join(",\n        ")
     };
     let init = if fields.is_empty() {
         String::new()
     } else {
-        fields.iter().map(|f| f.ident.clone()).collect::<Vec<_>>().join(",\n            ")
+        fields
+            .iter()
+            .map(|f| f.ident.clone())
+            .collect::<Vec<_>>()
+            .join(",\n            ")
     };
 
     let writes = {
         let joined = writes.join("\n");
-        if joined.is_empty() { "        let _ = (buffer, value);".to_string() } else { joined }
+        if joined.is_empty() {
+            "        let _ = (buffer, value);".to_string()
+        } else {
+            joined
+        }
     };
     let reads = {
         let joined = reads.join("\n");
-        if joined.is_empty() { "        let _ = buffer;".to_string() } else { joined }
+        if joined.is_empty() {
+            "        let _ = buffer;".to_string()
+        } else {
+            joined
+        }
     };
 
     /// (wire constants, domain types) needed by these fields and their elements.
@@ -1944,7 +2255,11 @@ pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> 
             Some(_) => format!("Vec<{}>", f.rtype),
             None => f.rtype.clone(),
         };
-        let rtype = if f.guard.is_some() { format!("Option<{base}>") } else { base };
+        let rtype = if f.guard.is_some() {
+            format!("Option<{base}>")
+        } else {
+            base
+        };
         struct_lines.push(format!("    /// Java: `{}`.", f.java));
         struct_lines.push(format!("    pub {}: {},", f.ident, rtype));
     }
@@ -1961,7 +2276,10 @@ pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> 
 
     let mut imports = String::new();
     if !body.used_wires.is_empty() {
-        imports.push_str(&format!("use rstom::network::types::{{{}}};\n", body.used_wires.join(", ")));
+        imports.push_str(&format!(
+            "use rstom::network::types::{{{}}};\n",
+            body.used_wires.join(", ")
+        ));
     }
     if body.needs_fixed_raw_bytes {
         imports.push_str("use rstom::network::types::fixed_raw_bytes;\n");
@@ -1999,7 +2317,9 @@ pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> 
             };
             match (declared, self_delim) {
                 (Some(d), _) if !d.is_empty() => {
-                    let n: usize = d.parse().map_err(|_| emit(format!("bad declared length {d}")))?;
+                    let n: usize = d
+                        .parse()
+                        .map_err(|_| emit(format!("bad declared length {d}")))?;
                     (format!("vec![0u8; {d}]"), Value::bytes(vec![0u8; n]))
                 }
                 (_, Some(sd)) => (rust_bytes(&sd), Value::bytes(sd)),
@@ -2007,7 +2327,9 @@ pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> 
             }
         } else {
             let v = default_value(&f.rtype);
-            let py_v = if ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"].contains(&f.rtype.as_str()) {
+            let py_v = if ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"]
+                .contains(&f.rtype.as_str())
+            {
                 Value::Int(0)
             } else if f.rtype == "bool" {
                 Value::Bool(false)
@@ -2066,12 +2388,16 @@ pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> 
     let (marker_import, marker_impl) = if unit.cls.group == "client" {
         (
             "use rstom::network::packet::client::client_packet::{ClientPacket, ClientPacketGroup};\n",
-            format!("\nimpl ClientPacket for {name} {{}}\nimpl ClientPacketGroup for {name} {{}}\n"),
+            format!(
+                "\nimpl ClientPacket for {name} {{}}\nimpl ClientPacketGroup for {name} {{}}\n"
+            ),
         )
     } else {
         (
             "use rstom::network::packet::server::server_packet::{ServerPacket, ServerPacketGroup};\n",
-            format!("\nimpl ServerPacket for {name} {{}}\nimpl ServerPacketGroup for {name} {{}}\n"),
+            format!(
+                "\nimpl ServerPacket for {name} {{}}\nimpl ServerPacketGroup for {name} {{}}\n"
+            ),
         )
     };
 
@@ -2168,8 +2494,14 @@ fn rust_int(value: i128, bits: u32, signed: bool) -> Option<String> {
 
 /// Split a packed position into signed x, y, z components (`_position_components`).
 fn position_components(raw: i128) -> (i128, i128, i128) {
-    let ext = |v: i128, bits: u32| (v + (1i128 << (bits - 1))).rem_euclid(1i128 << bits) - (1i128 << (bits - 1));
-    (ext(raw >> 38, 26), ext(raw.rem_euclid(4096), 12), ext((raw >> 12).rem_euclid(67108864), 26))
+    let ext = |v: i128, bits: u32| {
+        (v + (1i128 << (bits - 1))).rem_euclid(1i128 << bits) - (1i128 << (bits - 1))
+    };
+    (
+        ext(raw >> 38, 26),
+        ext(raw.rem_euclid(4096), 12),
+        ext((raw >> 12).rem_euclid(67108864), 26),
+    )
 }
 
 /// `(bits, signed)` for the primitive rtypes (`_PRIM_RTYPES`; u8 is signed in the reference).
@@ -2187,7 +2519,12 @@ fn prim_rtype(rtype: &str) -> Option<(u32, bool)> {
 }
 
 /// A repeat element's literal: the element type is never an Option (`_rust_element`).
-fn rust_element(e: &PacketShape, value: &Value, resolved: &ResolvedSchema, env: Option<&Env>) -> BpsResult<Option<String>> {
+fn rust_element(
+    e: &PacketShape,
+    value: &Value,
+    resolved: &ResolvedSchema,
+    env: Option<&Env>,
+) -> BpsResult<Option<String>> {
     if e.guard.is_some() && matches!(value, Value::Null) {
         return Ok(None);
     }
@@ -2195,18 +2532,32 @@ fn rust_element(e: &PacketShape, value: &Value, resolved: &ResolvedSchema, env: 
 }
 
 /// Rust source for one field value, or None when it cannot be rendered (`_rust_literal`).
-fn rust_literal(f: &PacketShape, value: &Value, resolved: &ResolvedSchema, env: Option<&Env>) -> BpsResult<Option<String>> {
+fn rust_literal(
+    f: &PacketShape,
+    value: &Value,
+    resolved: &ResolvedSchema,
+    env: Option<&Env>,
+) -> BpsResult<Option<String>> {
     if f.guard.is_some() && matches!(value, Value::Null) {
         return Ok(Some("None".to_string()));
     }
     let Some(lit) = rust_inner(f, value, resolved, env)? else {
         return Ok(None);
     };
-    Ok(Some(if f.guard.is_some() { format!("Some({lit})") } else { lit }))
+    Ok(Some(if f.guard.is_some() {
+        format!("Some({lit})")
+    } else {
+        lit
+    }))
 }
 
 /// The `T` in `Option<T>` / the bare value: no optionality wrapper (`_rust_inner`).
-fn rust_inner(f: &PacketShape, value: &Value, resolved: &ResolvedSchema, env: Option<&Env>) -> BpsResult<Option<String>> {
+fn rust_inner(
+    f: &PacketShape,
+    value: &Value,
+    resolved: &ResolvedSchema,
+    env: Option<&Env>,
+) -> BpsResult<Option<String>> {
     if f.repeat_mode.is_some() {
         let Value::List(items) = value else {
             return Ok(None);
@@ -2266,7 +2617,9 @@ fn rust_inner(f: &PacketShape, value: &Value, resolved: &ResolvedSchema, env: Op
         // short value and rejects a long one, and `fixed_raw_bytes` panics on
         // any other length, so a literal must match that contract.
         if let Some(n) = opaque_len(f.ref_.as_ref(), Some(resolved), Some(&f.params)) {
-            let n: usize = n.parse().map_err(|_| emit(format!("bad declared length {n}")))?;
+            let n: usize = n
+                .parse()
+                .map_err(|_| emit(format!("bad declared length {n}")))?;
             if data.len() < n {
                 data.resize(n, 0);
             } else if data.len() > n {
@@ -2342,8 +2695,15 @@ fn py_field_value(f: &PacketShape, value: &Value) -> Value {
 }
 
 /// Python-encoded bytes for one field value, or None if it cannot encode (`_encode_bare`).
-fn encode_bare_value(r: &TypeRef, value: &Value, resolved: &ResolvedSchema, env: &Env) -> Option<Vec<u8>> {
-    crate::interp::engine::encode_bare(r, value, resolved, env).ok().flatten()
+fn encode_bare_value(
+    r: &TypeRef,
+    value: &Value,
+    resolved: &ResolvedSchema,
+    env: &Env,
+) -> Option<Vec<u8>> {
+    crate::interp::engine::encode_bare(r, value, resolved, env)
+        .ok()
+        .flatten()
 }
 
 /// `_parity_args`: constructor literals + the Python-encoded reference bytes.
@@ -2454,7 +2814,10 @@ fn emit_roundtrip_test(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<Stri
 
 /// `_emit_package_mod`: a package's `mod.rs`.
 fn emit_package_mod(group: &str, package: &str, units: &[&Unit]) -> String {
-    let mods: Vec<String> = units.iter().map(|u| format!("pub mod {};", u.cls.stem)).collect();
+    let mods: Vec<String> = units
+        .iter()
+        .map(|u| format!("pub mod {};", u.cls.stem))
+        .collect();
     let rows: Vec<String> = units
         .iter()
         .map(|u| {
@@ -2598,7 +2961,11 @@ fn emit_registry_tables_test(by_reg: &OrderedMap<Vec<(RouteDecl, Unit)>>) -> Str
         for state in STATES {
             let names: Vec<String> = by_reg
                 .get(&format!("{side}_{state}"))
-                .map(|v| v.iter().map(|(_, u)| format!("\"{}\"", u.cls.name)).collect())
+                .map(|v| {
+                    v.iter()
+                        .map(|(_, u)| format!("\"{}\"", u.cls.name))
+                        .collect()
+                })
                 .unwrap_or_default();
             rows.push(format!(
                 "    (\"{}\", \"{}\", &[{}]),",
@@ -2907,7 +3274,6 @@ pub use rstom::network::packet::{
     serializer::{PacketEntry, PacketSerializer, PacketValue, Serializer, downcast},
 };
 "#;
-
 
 const STATES: &[&str] = &["handshake", "status", "login", "configuration", "play"];
 const GROUPS: &[&str] = &["client", "server"];

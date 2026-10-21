@@ -1,7 +1,7 @@
 //! `dump-json`, porting `bps/emit_json.py`.
 
 use crate::ast::Schema;
-use crate::json::{dumps_pretty_sorted, Value};
+use crate::json::{Value, dumps_pretty_sorted};
 use crate::ordmap::OrderedMap;
 
 pub fn schema_to_json(schema: &Schema) -> String {
@@ -12,15 +12,33 @@ fn schema_dict(schema: &Schema) -> Value {
     let mut root = OrderedMap::new();
     root.insert(
         "encodings",
-        Value::list(schema.encodings.iter().map(|e| Value::str(e.name.clone())).collect()),
+        Value::list(
+            schema
+                .encodings
+                .iter()
+                .map(|e| Value::str(e.name.clone()))
+                .collect(),
+        ),
     );
     root.insert(
         "enums",
-        Value::list(schema.enums.iter().map(|e| Value::str(e.name.clone())).collect()),
+        Value::list(
+            schema
+                .enums
+                .iter()
+                .map(|e| Value::str(e.name.clone()))
+                .collect(),
+        ),
     );
     root.insert(
         "packets",
-        Value::list(schema.packets.iter().map(|p| Value::str(p.name.clone())).collect()),
+        Value::list(
+            schema
+                .packets
+                .iter()
+                .map(|p| Value::str(p.name.clone()))
+                .collect(),
+        ),
     );
     let mut protocols = Vec::new();
     for p in &schema.protocols {

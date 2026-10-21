@@ -5,7 +5,7 @@
 //! Python's `str.isalpha`/`isalnum` (Unicode), approximated by `char::is_alphabetic` /
 //! `is_alphanumeric`; number literals stay ASCII-only.
 
-use crate::errors::{parse, parse_at, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, parse, parse_at, py_repr_str};
 use std::fmt;
 
 pub const KEYWORDS: &[&str] = &[
@@ -129,11 +129,7 @@ pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
 
     macro_rules! peek {
         ($k:expr) => {
-            if i + $k < n {
-                chars[i + $k]
-            } else {
-                '\0'
-            }
+            if i + $k < n { chars[i + $k] } else { '\0' }
         };
     }
 
@@ -176,7 +172,11 @@ pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
                 return Err(parse_at("unterminated string", start));
             }
             i += 1;
-            tokens.push(Token { kind: TokKind::Str, value: TokValue::Text(buf), pos: start });
+            tokens.push(Token {
+                kind: TokKind::Str,
+                value: TokValue::Text(buf),
+                pos: start,
+            });
             continue;
         }
         if c.is_ascii_digit() || (c == '-' && peek!(1).is_ascii_digit()) {
@@ -188,13 +188,20 @@ pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
                 let text: String = chars[start..i].iter().collect();
                 if text.len() == 2 {
                     // Python's `int("0x", 16)` raises a raw ValueError here.
-                    return Err(parse_at(format!("hex literal has no digits: {text}"), start));
+                    return Err(parse_at(
+                        format!("hex literal has no digits: {text}"),
+                        start,
+                    ));
                 }
                 // Python int(text, 16) with an arbitrary-precision result; schemas
                 // stay within u64/i128 range.
                 let val = i128::from_str_radix(&text[2..], 16)
                     .map_err(|_| parse_at(format!("int too large: {text}"), start))?;
-                tokens.push(Token { kind: TokKind::Int, value: TokValue::Int(val), pos: start });
+                tokens.push(Token {
+                    kind: TokKind::Int,
+                    value: TokValue::Int(val),
+                    pos: start,
+                });
                 continue;
             }
             i += 1;
@@ -205,7 +212,11 @@ pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
             let val: i128 = text
                 .parse()
                 .map_err(|_| parse_at(format!("int too large: {text}"), start))?;
-            tokens.push(Token { kind: TokKind::Int, value: TokValue::Int(val), pos: start });
+            tokens.push(Token {
+                kind: TokKind::Int,
+                value: TokValue::Int(val),
+                pos: start,
+            });
             continue;
         }
         if c == '.' && peek!(1) == '.' && peek!(2) == '.' {
@@ -223,13 +234,21 @@ pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
                 i += 1;
             }
             let text: String = chars[start..i].iter().collect();
-            tokens.push(Token { kind: TokKind::Ident, value: TokValue::Text(text), pos: start });
+            tokens.push(Token {
+                kind: TokKind::Ident,
+                value: TokValue::Text(text),
+                pos: start,
+            });
             continue;
         }
         let two: String = [c, peek!(1)].iter().collect();
         const TWO_OPS: &[&str] = &["==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "->", "=>"];
         if TWO_OPS.contains(&two.as_str()) {
-            tokens.push(Token { kind: TokKind::Op, value: TokValue::Text(two), pos: start });
+            tokens.push(Token {
+                kind: TokKind::Op,
+                value: TokValue::Text(two),
+                pos: start,
+            });
             i += 2;
             continue;
         }
@@ -266,9 +285,16 @@ pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
             i += 1;
             continue;
         }
-        return Err(parse_at(format!("unexpected character {}", py_repr_str(&c.to_string())), start));
+        return Err(parse_at(
+            format!("unexpected character {}", py_repr_str(&c.to_string())),
+            start,
+        ));
     }
 
-    tokens.push(Token { kind: TokKind::Eof, value: TokValue::None, pos: i });
+    tokens.push(Token {
+        kind: TokKind::Eof,
+        value: TokValue::None,
+        pos: i,
+    });
     Ok(tokens)
 }

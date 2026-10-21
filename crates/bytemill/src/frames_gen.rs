@@ -6,10 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::ast::{
-    BlockItem, EncBody, EncodingDecl, Expr, FieldType, MatchArm, MatchType, RepeatMode,
-    Repeat, ResolvedSchema, Tag, TypeRef, WireField,
+    BlockItem, EncBody, EncodingDecl, Expr, FieldType, MatchArm, MatchType, Repeat, RepeatMode,
+    ResolvedSchema, Tag, TypeRef, WireField,
 };
-use crate::errors::{emit, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, emit, py_repr_str};
 use crate::ordmap::OrderedMap;
 
 /// Fixed-width scalars: byte size.
@@ -164,7 +164,9 @@ fn alias_target(resolved: &ResolvedSchema, name: &str) -> String {
     let mut seen: HashSet<String> = HashSet::new();
     while !seen.contains(&name) {
         seen.insert(name.clone());
-        let Some(enc) = resolved.encodings.get(&name) else { break };
+        let Some(enc) = resolved.encodings.get(&name) else {
+            break;
+        };
         let EncBody::Ref(tr) = &enc.body else { break };
         if !tr.args.is_empty() || is_builtin(&tr.name) {
             break;
@@ -328,7 +330,9 @@ fn references(resolved: &ResolvedSchema, name: &str) -> BTreeSet<String> {
         }
         EncBody::Block(b) => walk_items(&b.items, &mut out),
     }
-    out.into_iter().filter(|n| resolved.encodings.contains_key(n)).collect()
+    out.into_iter()
+        .filter(|n| resolved.encodings.contains_key(n))
+        .collect()
 }
 
 /// Encodings that can reach themselves: they cannot be flattened into fields.
@@ -435,7 +439,10 @@ pub fn element_encodings(resolved: &ResolvedSchema) -> Vec<String> {
             scan_items(&b.items, &mut found);
         }
     }
-    found.into_iter().filter(|n| resolved.encodings.contains_key(n)).collect()
+    found
+        .into_iter()
+        .filter(|n| resolved.encodings.contains_key(n))
+        .collect()
 }
 
 /// The compiled walkers: Rust source, encoding -> public fn, and what failed.
@@ -501,7 +508,10 @@ impl Compiler<'_> {
         body.block(&block.items, 1)?;
         let mut lines = vec![
             "#[allow(unused_assignments, unused_mut, unused_variables)]".to_string(),
-            format!("fn {}(bytes: &[u8], pos: &mut usize, depth: u32) -> Option<()> {{", skip_name(name)),
+            format!(
+                "fn {}(bytes: &[u8], pos: &mut usize, depth: u32) -> Option<()> {{",
+                skip_name(name)
+            ),
             "    if depth > 256 {".to_string(),
             "        return None;".to_string(),
             "    }".to_string(),
@@ -561,7 +571,8 @@ impl Body<'_, '_> {
     // -- helpers ----------------------------------------------------------------
 
     fn emit(&mut self, indent: usize, text: &str) {
-        self.lines.push(format!("{}{}", "    ".repeat(indent), text));
+        self.lines
+            .push(format!("{}{}", "    ".repeat(indent), text));
     }
 
     fn fail(&self, why: &str) -> String {
@@ -725,7 +736,7 @@ impl Body<'_, '_> {
                 return Err(self.fail(&format!(
                     "repeat mode {} is not supported",
                     py_repr_str(rep.mode.as_str())
-                )))
+                )));
             }
         };
         let pair = self.expr(expr)?;
@@ -822,11 +833,17 @@ impl Body<'_, '_> {
             };
             let pair = self.expr(arg)?;
             let n = self.as_int(pair);
-            self.emit(indent, &format!("walk_skip(bytes, pos, walk_count({n}, bytes)?)?;"));
+            self.emit(
+                indent,
+                &format!("walk_skip(bytes, pos, walk_count({n}, bytes)?)?;"),
+            );
         } else if let Some(size) = fixed_size(name) {
             if wanted {
                 let signed = SIGNED.contains(&name);
-                self.emit(indent, &format!("{dest}walk_be(bytes, pos, {size}, {signed})?;"));
+                self.emit(
+                    indent,
+                    &format!("{dest}walk_be(bytes, pos, {size}, {signed})?;"),
+                );
             } else {
                 self.emit(indent, &format!("walk_skip(bytes, pos, {size})?;"));
             }
@@ -900,7 +917,10 @@ pub fn generate(
     let ok: Vec<String> = bodies
         .keys()
         .filter(|n| {
-            !broken.contains(*n) && !closure(resolved, n, known).iter().any(|c| broken.contains(c))
+            !broken.contains(*n)
+                && !closure(resolved, n, known)
+                    .iter()
+                    .any(|c| broken.contains(c))
         })
         .cloned()
         .collect();
@@ -909,9 +929,10 @@ pub fn generate(
         if ok.contains(&target) {
             result.names.insert(root, walker_name(&target));
         } else if !result.unsupported.contains_key(root) {
-            result
-                .unsupported
-                .insert(root, format!("{root}: reaches an encoding without a walker"));
+            result.unsupported.insert(
+                root,
+                format!("{root}: reaches an encoding without a walker"),
+            );
         }
     }
     if !ok.is_empty() {

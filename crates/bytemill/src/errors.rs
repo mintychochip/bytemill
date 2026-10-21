@@ -37,11 +37,19 @@ pub struct BpsError {
 
 impl BpsError {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        BpsError { kind, message: message.into(), offset: None }
+        BpsError {
+            kind,
+            message: message.into(),
+            offset: None,
+        }
     }
 
     pub fn with_offset(kind: ErrorKind, message: impl Into<String>, offset: usize) -> Self {
-        BpsError { kind, message: message.into(), offset: Some(offset) }
+        BpsError {
+            kind,
+            message: message.into(),
+            offset: Some(offset),
+        }
     }
 
     pub fn parse(message: impl Into<String>) -> Self {

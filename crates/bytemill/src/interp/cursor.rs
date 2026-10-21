@@ -1,6 +1,6 @@
 //! Byte cursors, porting `bps/interp/cursor.py`.
 
-use crate::errors::{decode_at, BpsResult};
+use crate::errors::{BpsResult, decode_at};
 
 pub struct Cursor<'a> {
     pub data: &'a [u8],
@@ -13,7 +13,11 @@ pub struct Cursor<'a> {
 
 impl<'a> Cursor<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Cursor { data, pos: 0, repeat_limit: None }
+        Cursor {
+            data,
+            pos: 0,
+            repeat_limit: None,
+        }
     }
 
     pub fn remaining(&self) -> usize {

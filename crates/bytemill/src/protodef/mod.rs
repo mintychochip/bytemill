@@ -12,8 +12,8 @@ pub mod model;
 pub mod names;
 pub mod prelude;
 pub mod render;
-pub mod share;
 pub mod scope;
+pub mod share;
 pub mod versions;
 
 pub use model::Protocol;

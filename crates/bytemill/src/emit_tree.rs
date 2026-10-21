@@ -3,9 +3,9 @@
 
 use crate::ast::ResolvedSchema;
 use crate::emit_rstom::{is_generated, packet_body};
-use crate::errors::{emit, BpsResult};
-use crate::minestom::{build_units, ClassTable, Unit};
-use crate::pins::{build_pins, pins_json, pins_json_is_owned, PINS_TEST_RS};
+use crate::errors::{BpsResult, emit};
+use crate::minestom::{ClassTable, Unit, build_units};
+use crate::pins::{PINS_TEST_RS, build_pins, pins_json, pins_json_is_owned};
 use crate::shapes::extract::extract_shape;
 use crate::shapes::ledger::{bps_field_pairs, load_ledger, mismatch, module_path};
 use crate::shapes::model::Shape;
@@ -31,9 +31,7 @@ fn run_rustfmt(rustfmt: &Path, path: &Path, text: &str) -> Result<(), String> {
         cmd.args(["--unstable-features", "--skip-children"]);
     }
     cmd.args(["--edition", "2024"]).arg(path);
-    let out = cmd
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = cmd.output().map_err(|e| e.to_string())?;
     if out.status.success() {
         return Ok(());
     }
@@ -58,14 +56,10 @@ fn rustfmt_text(text: &str) -> BpsResult<String> {
         return Ok(text.to_string());
     };
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "bps-emit-tree-{}-{seq}.rs",
-        std::process::id()
-    ));
+    let path = std::env::temp_dir().join(format!("bps-emit-tree-{}-{seq}.rs", std::process::id()));
     std::fs::write(&path, text).map_err(|e| emit(format!("rustfmt failed: {e}")))?;
     let result = match run_rustfmt(&rustfmt, &path, text) {
-        Ok(()) => crate::text::read_text(&path)
-            .map_err(|e| emit(format!("rustfmt failed: {e}"))),
+        Ok(()) => crate::text::read_text(&path).map_err(|e| emit(format!("rustfmt failed: {e}"))),
         Err(err) => Err(emit(format!("rustfmt failed: {err}"))),
     };
     let _ = std::fs::remove_file(&path);
@@ -310,10 +304,7 @@ fn orphan_generated_packets(workspace: &Path, shaped_modules: &[String]) -> BpsR
         if !is_generated(&path) {
             continue;
         }
-        let rel = path
-            .strip_prefix(&root)
-            .unwrap_or(&path)
-            .with_extension("");
+        let rel = path.strip_prefix(&root).unwrap_or(&path).with_extension("");
         let rel = posix_rel(&rel, Path::new(""));
         if !shaped_modules.contains(&rel) {
             out.push(format!("{}: orphan", path.display()));
@@ -393,12 +384,7 @@ fn planned_packets(
                 .as_deref()
                 .filter(|e| !e.is_empty())
                 .map(|e| packet_dir.join(e));
-            assert_hand_content_preserved(
-                &module,
-                &read(&path)?,
-                &text,
-                ext_path.as_deref(),
-            )?;
+            assert_hand_content_preserved(&module, &read(&path)?, &text, ext_path.as_deref())?;
             hand_swaps.push(path.clone());
         }
         put(&mut planned, path, text);
@@ -483,8 +469,5 @@ pub fn emit_tree(
     }
 
     rustfmt_paths(&written)?;
-    Ok(written
-        .iter()
-        .map(|p| posix_rel(p, workspace))
-        .collect())
+    Ok(written.iter().map(|p| posix_rel(p, workspace)).collect())
 }

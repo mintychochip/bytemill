@@ -11,7 +11,7 @@ use crate::ast::{
     BlockItem, EncBody, Expr, FieldType, MatchArm, MatchType, PacketDecl, Repeat, RepeatMode,
     ResolvedSchema, Tag, TypeRef, WireField,
 };
-use crate::errors::{emit, py_repr_str, BpsResult};
+use crate::errors::{BpsResult, emit, py_repr_str};
 use crate::frames_gen;
 
 const RUNTIME_RS: &str = r#"//! Generated BPS runtime: cursor, Minecraft VarInt, and shared wire helpers.
@@ -385,7 +385,13 @@ fn lookup(table: &[(&'static str, &'static str)], name: &str) -> Option<&'static
 
 fn snake(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -496,7 +502,9 @@ impl<'a> Walker<'a> {
                     "min" => Ok(format!("std::cmp::min({joined})")),
                     "max" => Ok(format!("std::cmp::max({joined})")),
                     "contains" => Ok(format!("({joined}).contains(&({joined}))")),
-                    _ => Err(emit(format!("unsupported expression in Rust emitter: {e:?}"))),
+                    _ => Err(emit(format!(
+                        "unsupported expression in Rust emitter: {e:?}"
+                    ))),
                 }
             }
             Expr::Ternary(cond, yes, no) => Ok(format!(
@@ -505,9 +513,9 @@ impl<'a> Walker<'a> {
                 self.expr(yes)?,
                 self.expr(no)?
             )),
-            Expr::Str(_) | Expr::Path(_) => {
-                Err(emit(format!("unsupported expression in Rust emitter: {e:?}")))
-            }
+            Expr::Str(_) | Expr::Path(_) => Err(emit(format!(
+                "unsupported expression in Rust emitter: {e:?}"
+            ))),
         }
     }
 
@@ -527,7 +535,9 @@ impl<'a> Walker<'a> {
         let mut arms = Vec::new();
         for arm in &mt.arms {
             let Some(ftype) = &arm.type_ref else { continue };
-            let Some(pat) = Self::match_pat(arm) else { continue };
+            let Some(pat) = Self::match_pat(arm) else {
+                continue;
+            };
             let body = self.decode_expr(ftype, &format!("{indent}        "))?;
             arms.push(format!("{indent}        {pat} => {body},"));
         }
@@ -617,7 +627,9 @@ impl<'a> Walker<'a> {
                 BlockItem::Computed { name, expr } => {
                     let e = self.expr(expr)?;
                     lines.push(format!("{indent}env.insert(\"{name}\".into(), {e});"));
-                    lines.push(format!("{indent}out.insert(\"{name}\".into(), json!({e}));"));
+                    lines.push(format!(
+                        "{indent}out.insert(\"{name}\".into(), json!({e}));"
+                    ));
                 }
                 BlockItem::Group { cond, items } => {
                     let cond = self.expr(required(cond)?)?;
@@ -630,7 +642,9 @@ impl<'a> Walker<'a> {
                     lines.push(format!("{indent}match {} {{", self.expr(&mt.tag_expr)?));
                     let mut saw_default = false;
                     for arm in &mt.arms {
-                        let Some(pat) = Self::match_pat(arm) else { continue };
+                        let Some(pat) = Self::match_pat(arm) else {
+                            continue;
+                        };
                         if pat == "_" {
                             saw_default = true;
                         }
@@ -718,7 +732,9 @@ impl<'a> Walker<'a> {
             RepeatMode::Until => {
                 let term = self.expr(required(&rep.expr)?)?;
                 lines.push(format!("{indent}    while cur.remaining() > 0 {{"));
-                lines.push(format!("{indent}        if cur.peek_u8()? as i64 == {term} {{"));
+                lines.push(format!(
+                    "{indent}        if cur.peek_u8()? as i64 == {term} {{"
+                ));
                 lines.push(format!("{indent}            cur.read(1)?;"));
                 lines.push(format!("{indent}            break;"));
                 lines.push(format!("{indent}        }}"));
@@ -726,7 +742,10 @@ impl<'a> Walker<'a> {
                 lines.push(format!("{indent}    }}"));
             }
         }
-        lines.push(format!("{indent}    out.insert(\"{}\".into(), json!(items));", wf.name));
+        lines.push(format!(
+            "{indent}    out.insert(\"{}\".into(), json!(items));",
+            wf.name
+        ));
         lines.push(format!("{indent}}}"));
         Ok(lines.join("\n"))
     }
@@ -768,7 +787,13 @@ fn packet_stem(resolved: &ResolvedSchema, name: &str) -> String {
         .routes
         .iter()
         .filter(|(_, pkt)| pkt.name == name)
-        .map(|(route, _)| format!("{}_{}", file_token(&route.state), file_token(&route.direction)))
+        .map(|(route, _)| {
+            format!(
+                "{}_{}",
+                file_token(&route.state),
+                file_token(&route.direction)
+            )
+        })
         .collect();
     keys.sort();
     keys.dedup();
