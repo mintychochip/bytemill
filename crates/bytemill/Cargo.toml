@@ -1,6 +1,6 @@
 [package]
 name = "bytemill"
-version = "0.1.1"
+version = "0.2.0"
 description = "Binary wire protocol schema compiler and code generator"
 edition = "2024"
 

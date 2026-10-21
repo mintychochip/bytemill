@@ -387,7 +387,7 @@ pub fn find(name: &str) -> Option<&'static Command> {
     COMMANDS.iter().find(|c| c.name == name)
 }
 
-/// `bml 0.1.1`.
+/// `bml <version>`, the crate's own version, as `--version` prints it.
 pub fn version_line() -> String {
     format!("bml {}", env!("CARGO_PKG_VERSION"))
 }
