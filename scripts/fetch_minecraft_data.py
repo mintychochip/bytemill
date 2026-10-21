@@ -3,7 +3,7 @@
 
     scripts/fetch_minecraft_data.py [--check] [--force] [--root DIR]
 
-Reads `data/minecraft-data/sources.json` (a `files` list with `path`, `repo`,
+Reads `scripts/minecraft_data_sources.json` (a `files` list with `path`, `repo`,
 `commit`, `upstream`, `sha256`) and downloads each file from
 `https://raw.githubusercontent.com/{repo}/{commit}/{upstream}` to
 `data/minecraft-data/{path}`, verifying the SHA-256 of every file. Files
@@ -46,9 +46,9 @@ def main():
 
     root = Path(args.root)
     try:
-        sources = json.loads((root / "data/minecraft-data/sources.json").read_text())
+        sources = json.loads((root / "scripts/minecraft_data_sources.json").read_text())
     except OSError as e:
-        sys.exit(f"sources.json: {e}")
+        sys.exit(f"minecraft_data_sources.json: {e}")
     files = sources["files"]
 
     fetched = 0

@@ -72,8 +72,8 @@ lists.
 
 The packet layouts are PrismarineJS [minecraft-data](https://github.com/PrismarineJS/minecraft-data)'s
 ProtoDef `protocol.json` files, the data behind mineflayer and node-minecraft-protocol. They are
-**not committed**: `data/minecraft-data/sources.json` pins the repository, commit, upstream path and
-SHA-256 of each file (`NOTICE.md` has the licence), and `scripts/fetch_minecraft_data.py` downloads
+**not committed**: `scripts/minecraft_data_sources.json` pins the repository, commit, upstream path and
+SHA-256 of each file (the root `NOTICE.md` has the licence), and `scripts/fetch_minecraft_data.py` downloads
 them byte for byte into `data/minecraft-data/` on demand. `bml import-versions` turns them into the
 schemas here: `crates/bytemill/src/protodef/` is the importer, `docs/superpowers/specs/2026-10-12-bps-protocol-versions-design.md`
 the design, the translation table and the reasoning.
