@@ -105,6 +105,9 @@ cargo build --release   # target/release/bml
 
 ### Check and Inspect Schemas
 
+Run `bml help` to list every command, and `bml help <command>` (or `bml <command> --help`) for
+that command's options.
+
 ```bash
 ROOT=schemas/minecraft_26_3_wiki.bml
 

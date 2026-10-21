@@ -6,6 +6,7 @@
 //! `import-protodef` or `wire-check`; those are Rust-only.
 
 use crate::analyze::analyze;
+use crate::cli_help as help;
 use crate::compress::CompressionSpec;
 use crate::emit_json::schema_to_json;
 use crate::emit_rstom::emit_rstom;
@@ -26,6 +27,22 @@ use std::path::{Path, PathBuf};
 const PACKETS_GEN_SCHEMA: &str = "tools/packets_gen/schema/packets.json";
 const PROTOC_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const DEFAULT_SHAPES_REL: &str = "targets/rstom/shapes";
+
+/// The targets `bml emit` accepts, besides `cs` for `csharp`. `bml help emit` lists them.
+pub const EMIT_TARGETS: &[&str] = &[
+    "rust",
+    "rust-typed",
+    "rstom",
+    "rstom-tree",
+    "go",
+    "python",
+    "c",
+    "typescript",
+    "cpp",
+    "zig",
+    "java",
+    "csharp",
+];
 
 fn default_shapes() -> PathBuf {
     Path::new(PROTOC_ROOT).join(DEFAULT_SHAPES_REL)
@@ -286,10 +303,28 @@ fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
 
 pub fn main(argv: &[String]) -> Result<i32, String> {
     let mut argv = argv.to_vec();
-    if argv.is_empty() {
-        return Err("usage: bml <command> ...".to_string());
+    let Some(first) = argv.first().cloned() else {
+        // A bare `bml` is a usage error, and the overview is the explanation.
+        return Err(help::overview());
+    };
+    match first.as_str() {
+        "help" => return help::run_help(&argv[1..]),
+        "-h" | "--help" => return help::run_help(&[]),
+        "-V" | "--version" => {
+            println!("{}", help::version_line());
+            return Ok(0);
+        }
+        _ => {}
     }
     let cmd = argv.remove(0);
+    let Some(command) = help::find(&cmd) else {
+        return Err(help::unknown_command(&cmd));
+    };
+    // `--help` is answered before the command can read stdin or treat it as a schema path.
+    if argv.iter().any(|arg| arg == "-h" || arg == "--help") {
+        println!("{}", help::page(command));
+        return Ok(0);
+    }
     if cmd == "import-versions" || cmd == "import-protodef" {
         return import_cli(&cmd, argv);
     }
@@ -341,28 +376,14 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
             } else {
                 (raw_target, None)
             };
-            a.target = Some(target_name);
-            if !matches!(
-                a.target.as_deref(),
-                Some("rust")
-                    | Some("rust-typed")
-                    | Some("rstom")
-                    | Some("rstom-tree")
-                    | Some("go")
-                    | Some("python")
-                    | Some("c")
-                    | Some("typescript")
-                    | Some("cpp")
-                    | Some("zig")
-                    | Some("java")
-                    | Some("csharp")
-                    | Some("cs")
-            ) {
+            if !EMIT_TARGETS.contains(&target_name.as_str()) && target_name != "cs" {
+                let choices: Vec<String> = EMIT_TARGETS.iter().map(|t| format!("'{t}'")).collect();
                 return Err(format!(
-                    "emit: argument target: invalid choice: {:?} (choose from 'rust', 'rust-typed', 'rstom', 'rstom-tree', 'go', 'python', 'c', 'typescript', 'cpp', 'zig', 'java', 'csharp')",
-                    a.target.unwrap(),
+                    "emit: argument target: invalid choice: {target_name:?} (choose from {})",
+                    choices.join(", ")
                 ));
             }
+            a.target = Some(target_name);
             a.std =
                 take_flag(&mut argv, &["--std", "--target-version", "--edition"])?.or(target_std);
             a.out = take_flag(&mut argv, &["--out"])?;
@@ -419,11 +440,8 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                 }
             }
         }
-        _ => {
-            return Err(format!(
-                "argument cmd: invalid choice: {cmd:?} (choose from 'check', 'dump-json', 'routes', 'decode', 'encode', 'emit', 'shapes', 'import-versions', 'import-protodef', 'wire-check')"
-            ));
-        }
+        // Listed in COMMANDS but not handled here: tests/test_cli_help.rs fails on this.
+        _ => return Err(help::unknown_command(&cmd)),
     }
 
     // The Python code prints BmlError/ShapeError to stderr and exits 3.
