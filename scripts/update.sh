@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Update an installed Bytemill CLI (`bml`) to the latest release (or a pinned tag).
 #
-#   curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/update.sh | bash
-#   curl -fsSL .../update.sh | bash -s -- --version v1.2.3
+#   curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/scripts/update.sh | bash
+#   curl -fsSL .../scripts/update.sh | bash -s -- --version v1.2.3
 #
 # The install location is taken from --dir, $BML_INSTALL_DIR, the bml found on
 # PATH, or ~/.local/bin. The installer records the version in bml.version
@@ -169,7 +169,7 @@ if [ -z "$installer" ]; then
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/bml-update.XXXXXX")
   trap 'rm -rf "$tmp"' EXIT
   installer="${tmp}/install.sh"
-  fetch "https://raw.githubusercontent.com/${REPO}/master/install.sh" >"$installer" ||
+  fetch "https://raw.githubusercontent.com/${REPO}/master/scripts/install.sh" >"$installer" ||
     die "could not download install.sh"
 fi
 

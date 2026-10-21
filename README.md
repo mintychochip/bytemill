@@ -78,13 +78,13 @@ Every tagged release ships prebuilt binaries; the installer detects the platform
 the matching archive, verifies `SHA256SUMS`, and installs to `~/.local/bin`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/scripts/install.sh | bash
 ```
 
-Upgrade later with `update.sh` (a no-op when already current):
+Upgrade later with `scripts/update.sh` (a no-op when already current):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/update.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/scripts/update.sh | bash
 ```
 
 Use `--dir <path>` to install elsewhere or `--version vX.Y.Z` to pin a release, e.g.

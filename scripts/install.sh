@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install the Bytemill CLI (`bml`) from this repository's GitHub releases.
 #
-#   curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/install.sh | bash
-#   curl -fsSL .../install.sh | bash -s -- --version v1.2.3 --dir /usr/local/bin
+#   curl -fsSL https://raw.githubusercontent.com/mintychochip/bytemill/master/scripts/install.sh | bash
+#   curl -fsSL .../scripts/install.sh | bash -s -- --version v1.2.3 --dir /usr/local/bin
 #
 # The archive and SHA256SUMS are downloaded from the same release; the binary
 # is verified before it replaces anything. Linux x86_64 defaults to the static
