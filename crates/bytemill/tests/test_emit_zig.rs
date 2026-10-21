@@ -95,11 +95,11 @@ fn encode_tail(program: &Program, codec: usize) -> String {
 
 #[test]
 fn zig_unit_vectors() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint\n  x: f32be\n  y: f64be\n  require n == 300 }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let program = bytemill::ir::typed(&resolved).unwrap();
-    let dir = std::env::temp_dir().join(format!("bps-zig-unit-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-zig-unit-{}", std::process::id()));
     let generated = emit(&resolved, &dir);
     assert!(
         generated.contains("pub fn decodeVarint("),
@@ -296,22 +296,22 @@ fn roundtrip_suite(schema: &str, dir_name: &str, minimum: usize) {
 
 #[test]
 fn zig_26_3_packets_roundtrip() {
-    roundtrip_suite("schemas/minecraft_26_3_wiki.bps", "bps-zig-263", 100);
+    roundtrip_suite("schemas/minecraft_26_3_wiki.bml", "bml-zig-263", 100);
 }
 
 #[test]
 fn zig_hytale_packets_roundtrip() {
-    roundtrip_suite("schemas/hytale/2026_02_17.bps", "bps-zig-hytale", 1);
+    roundtrip_suite("schemas/hytale/2026_02_17.bml", "bml-zig-hytale", 1);
 }
 
 /// `emit_zig_with_version` accepts the target version and emits the same
 /// module tree. Text-only: no `zig` run here.
 #[test]
 fn zig_version_option() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
-    let dir = std::env::temp_dir().join(format!("bps-zig-v014-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-zig-v014-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     bytemill::emit_zig::emit_zig_with_version(&resolved, &dir, bytemill::ZigVersion::V0_14).unwrap();
     assert!(dir.join("bmlgen.zig").is_file(), "missing bmlgen.zig");

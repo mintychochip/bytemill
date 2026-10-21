@@ -6,9 +6,9 @@ Transcribed from the decompiled `com.hypixel.hytale.protocol` package on
 `crates/bytemill/tests/test_hytale.rs` are what those `serialize` methods write.
 
 ```bash
-bml check  schemas/hytale/2026_02_17.bps
-bml routes schemas/hytale/2026_02_17.bps
-bml decode schemas/hytale/2026_02_17.bps --packet disconnect --hex <<< '0100026869'
+bml check  schemas/hytale/2026_02_17.bml
+bml routes schemas/hytale/2026_02_17.bml
+bml decode schemas/hytale/2026_02_17.bml --packet disconnect --hex <<< '0100026869'
 ```
 
 Covered so far: `connect` (0, serverbound), `disconnect` (1, both directions),

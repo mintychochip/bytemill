@@ -22,7 +22,7 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 
 use crate::ast::{BlockItem, FieldType, ResolvedSchema, WireField};
-use crate::errors::{BpsResult, decode, encode};
+use crate::errors::{BmlResult, decode, encode};
 
 /// `--compression zlib[:threshold]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,7 +63,7 @@ pub fn ensure_minecraft_frame(
     resolved: &ResolvedSchema,
     state: &str,
     direction: &str,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let frame_name = resolved
         .routes
         .iter()
@@ -127,7 +127,7 @@ pub fn ensure_minecraft_frame(
 /// Unwrap a whole Minecraft wire frame: outer length, `data_length`, then
 /// either raw bytes or a zlib blob. Returns the logical schema frame
 /// (`length: varint`, `id: varint`, `payload: rest`).
-pub fn unwrap_minecraft_frame(frame: &[u8]) -> BpsResult<Vec<u8>> {
+pub fn unwrap_minecraft_frame(frame: &[u8]) -> BmlResult<Vec<u8>> {
     let mut pos = 0;
     let packet_len = read_varint(frame, &mut pos)?;
     let end = pos
@@ -144,7 +144,7 @@ pub fn unwrap_minecraft_frame(frame: &[u8]) -> BpsResult<Vec<u8>> {
 
 /// Unwrap the bytes after the outer length and return the raw packet data
 /// (`id` plus payload). `game_probe` reads captured frames this way.
-pub fn inflate_data(payload: &[u8]) -> BpsResult<Vec<u8>> {
+pub fn inflate_data(payload: &[u8]) -> BmlResult<Vec<u8>> {
     let mut pos = 0;
     let data_len = read_varint(payload, &mut pos)?;
     let compressed = &payload[pos..];
@@ -173,7 +173,7 @@ pub fn inflate_data(payload: &[u8]) -> BpsResult<Vec<u8>> {
 
 /// Unwrap the bytes after the outer length and return a logical schema frame
 /// (`length: varint`, `id: varint`, `payload: rest`).
-pub fn inflate_frame_payload(payload: &[u8]) -> BpsResult<Vec<u8>> {
+pub fn inflate_frame_payload(payload: &[u8]) -> BmlResult<Vec<u8>> {
     let data = inflate_data(payload)?;
     let mut out = Vec::with_capacity(data.len() + 5);
     write_varint(data.len(), &mut out);
@@ -184,7 +184,7 @@ pub fn inflate_frame_payload(payload: &[u8]) -> BpsResult<Vec<u8>> {
 /// Wrap a logical schema frame (`length: varint`, `id: varint`, `payload: rest`)
 /// in a Minecraft compression envelope. A payload shorter than the threshold
 /// is written raw with `data_length = 0`.
-pub fn wrap_minecraft_frame(frame: &[u8], spec: CompressionSpec) -> BpsResult<Vec<u8>> {
+pub fn wrap_minecraft_frame(frame: &[u8], spec: CompressionSpec) -> BmlResult<Vec<u8>> {
     let mut pos = 0;
     let length = read_varint(frame, &mut pos)?;
     if length != frame.len().saturating_sub(pos) {
@@ -220,7 +220,7 @@ pub fn wrap_minecraft_frame(frame: &[u8], spec: CompressionSpec) -> BpsResult<Ve
     Ok(out)
 }
 
-fn read_varint(data: &[u8], pos: &mut usize) -> BpsResult<usize> {
+fn read_varint(data: &[u8], pos: &mut usize) -> BmlResult<usize> {
     let mut value: u64 = 0;
     let mut shift = 0;
     loop {

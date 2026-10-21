@@ -1,8 +1,8 @@
 # protodef-oracle
 
-Differential oracle for the BPS protocol schemas. It compiles a
+Differential oracle for the BML protocol schemas. It compiles a
 minecraft-data `protocol.json` exactly the way node-minecraft-protocol does
-and exchanges raw packet bytes with the BPS Rust tools through JSON Lines.
+and exchanges raw packet bytes with the BML Rust tools through JSON Lines.
 
 ## Install
 
@@ -73,7 +73,7 @@ Two codec quirks are mirrored faithfully rather than worked around:
 
 Every mode takes `--patches <patch.json>`: a `schemas/versions/patches/*.json` file whose named types
 replace or extend the description before it is compiled, exactly as `bml import-versions` applies
-them, so the oracle and BPS read the same corrected description.
+them, so the oracle and BML read the same corrected description.
 
 ### `list` — route tables
 
@@ -84,7 +84,7 @@ node oracle.js list --protocol <protocol.json>
 Prints `state direction 0xID name` lines, one per declared packet, ordered
 by state (`handshaking, status, login, configuration, play`), direction
 (`toClient, toServer`), then numeric id. Ids are lowercase hex (`0x0`,
-`0x1a`). Compare against the BPS side's route tables.
+`0x1a`). Compare against the BML side's route tables.
 
 ### `gen` — random valid packets
 
@@ -149,7 +149,7 @@ Reasons: `bad-json`, `bad-input`, `unknown-scope`, `unknown-packet`,
 summary (`check: ok=O fail=F total=T reasons={...}`) goes to stderr, and
 the exit code is 1 when any vector fails.
 
-## How the BPS side uses it
+## How the BML side uses it
 
 ```sh
 # 1. Compare route tables.
@@ -157,7 +157,7 @@ node oracle.js list --protocol data/minecraft-data/pc/1.20/protocol.json
 # 2. Produce differential vectors (20 per packet here).
 node oracle.js gen --protocol data/minecraft-data/pc/1.20/protocol.json --count 20 --seed 1 > vectors.jsonl
 # 3. Strict decode + re-encode check on the Rust side.
-bml wire-check schemas/versions/v1_20_1.bps --file vectors.jsonl
+bml wire-check schemas/versions/v1_20_1.bml --file vectors.jsonl
 #    prints `checked N, failed M`, failures on stderr, exit 3 on failure.
 # 4. Sanity: the oracle must accept its own output.
 node oracle.js check --protocol data/minecraft-data/pc/1.20/protocol.json --file vectors.jsonl
@@ -167,8 +167,8 @@ Compiled protos are cached per `(state, direction)` inside one process, so
 one invocation covers a whole protocol file efficiently.
 
 `scripts/verify_versions.py` runs this for every entry of
-`schemas/versions/manifest.json`, with the entry's patch file, in both directions: JS → BPS is the
-`gen` + `wire-check` pair above; BPS → JS feeds `check` with random packets drawn from the BPS
+`schemas/versions/manifest.json`, with the entry's patch file, in both directions: JS → BML is the
+`gen` + `wire-check` pair above; BML → JS feeds `check` with random packets drawn from the BML
 schema (`bytemill::wiregen`, via the `write_generated_vectors` cargo test). A packet the oracle decodes
 with every byte consumed but cannot write back (four shapes ProtoDef's JS value model cannot
 represent, named in the script) is counted as `js-lossy`, anything else is a failure.

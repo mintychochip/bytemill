@@ -2,7 +2,7 @@
   "name": "protodef-oracle",
   "version": "1.0.0",
   "private": true,
-  "description": "Differential oracle: compiles minecraft-data protocol.json exactly like node-minecraft-protocol and exchanges raw packet bytes with the BPS Rust tools over JSON Lines.",
+  "description": "Differential oracle: compiles minecraft-data protocol.json exactly like node-minecraft-protocol and exchanges raw packet bytes with the BML Rust tools over JSON Lines.",
   "license": "MIT",
   "bin": {
     "protodef-oracle": "oracle.js"

@@ -3,11 +3,11 @@
 
 use crate::ast::ResolvedSchema;
 use crate::emit_rstom::{is_generated, packet_body};
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::minestom::{ClassTable, Unit, build_units};
 use crate::pins::{PINS_TEST_RS, build_pins, pins_json, pins_json_is_owned};
 use crate::shapes::extract::extract_shape;
-use crate::shapes::ledger::{bps_field_pairs, load_ledger, mismatch, module_path};
+use crate::shapes::ledger::{bml_field_pairs, load_ledger, mismatch, module_path};
 use crate::shapes::model::Shape;
 use crate::tree_packet::{tree_packet, validate_shape};
 use std::path::{Component, Path, PathBuf};
@@ -51,12 +51,12 @@ fn run_rustfmt(rustfmt: &Path, path: &Path, text: &str) -> Result<(), String> {
 static TEMP_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 /// `_rustfmt_text(text)`: format through a temporary `.rs` file.
-fn rustfmt_text(text: &str) -> BpsResult<String> {
+fn rustfmt_text(text: &str) -> BmlResult<String> {
     let Some(rustfmt) = which_rustfmt() else {
         return Ok(text.to_string());
     };
     let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("bps-emit-tree-{}-{seq}.rs", std::process::id()));
+    let path = std::env::temp_dir().join(format!("bml-emit-tree-{}-{seq}.rs", std::process::id()));
     std::fs::write(&path, text).map_err(|e| emit(format!("rustfmt failed: {e}")))?;
     let result = match run_rustfmt(&rustfmt, &path, text) {
         Ok(()) => crate::text::read_text(&path).map_err(|e| emit(format!("rustfmt failed: {e}"))),
@@ -67,7 +67,7 @@ fn rustfmt_text(text: &str) -> BpsResult<String> {
 }
 
 /// `_rustfmt_paths(paths)`: format written `.rs` files in place.
-fn rustfmt_paths(paths: &[PathBuf]) -> BpsResult<()> {
+fn rustfmt_paths(paths: &[PathBuf]) -> BmlResult<()> {
     let Some(rustfmt) = which_rustfmt() else {
         return Ok(());
     };
@@ -83,11 +83,11 @@ fn rustfmt_paths(paths: &[PathBuf]) -> BpsResult<()> {
     Ok(())
 }
 
-fn read(path: &Path) -> BpsResult<String> {
+fn read(path: &Path) -> BmlResult<String> {
     crate::text::read_text(path).map_err(|e| emit(format!("{}: {e}", path.display())))
 }
 
-fn is_owned_output(path: &Path) -> BpsResult<bool> {
+fn is_owned_output(path: &Path) -> BmlResult<bool> {
     if !path.is_file() {
         return Ok(true);
     }
@@ -100,7 +100,7 @@ fn is_owned_output(path: &Path) -> BpsResult<bool> {
     Ok(false)
 }
 
-fn refuse_hand_files(planned: &[(PathBuf, String)], hand_swaps: &[PathBuf]) -> BpsResult<()> {
+fn refuse_hand_files(planned: &[(PathBuf, String)], hand_swaps: &[PathBuf]) -> BmlResult<()> {
     for (path, _) in planned {
         if hand_swaps.contains(path) {
             continue;
@@ -133,7 +133,7 @@ fn packet_output_path(workspace: &Path, unit: &Unit) -> PathBuf {
         .join(format!("{}.rs", module_path(unit)))
 }
 
-fn require_extras(workspace: &Path, shape: &Shape, packet_dir: &Path) -> BpsResult<()> {
+fn require_extras(workspace: &Path, shape: &Shape, packet_dir: &Path) -> BmlResult<()> {
     let Some(extras) = shape.extras.as_deref().filter(|e| !e.is_empty()) else {
         return Ok(());
     };
@@ -144,7 +144,7 @@ fn require_extras(workspace: &Path, shape: &Shape, packet_dir: &Path) -> BpsResu
     Ok(())
 }
 
-fn refuse_orphan_ext(module: &str, shape: &Shape, packet_path: &Path) -> BpsResult<()> {
+fn refuse_orphan_ext(module: &str, shape: &Shape, packet_path: &Path) -> BmlResult<()> {
     if shape.extras.as_deref().is_some_and(|e| !e.is_empty()) {
         return Ok(());
     }
@@ -258,7 +258,7 @@ pub fn assert_hand_content_preserved(
     hand_text: &str,
     generated_text: &str,
     ext_path: Option<&Path>,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let ext_text = match ext_path {
         Some(p) if p.is_file() => read(p)?,
         _ => String::new(),
@@ -283,7 +283,7 @@ pub fn assert_hand_content_preserved(
     Ok(())
 }
 
-fn hand_matches_ledger(path: &Path, shape: &Shape) -> BpsResult<bool> {
+fn hand_matches_ledger(path: &Path, shape: &Shape) -> BmlResult<bool> {
     let text = read(path)?;
     match extract_shape(&text, &shape.cls, &shape.module, Some(path)) {
         Ok(hand) => Ok(&hand == shape),
@@ -291,7 +291,7 @@ fn hand_matches_ledger(path: &Path, shape: &Shape) -> BpsResult<bool> {
     }
 }
 
-fn orphan_generated_packets(workspace: &Path, shaped_modules: &[String]) -> BpsResult<Vec<String>> {
+fn orphan_generated_packets(workspace: &Path, shaped_modules: &[String]) -> BmlResult<Vec<String>> {
     let root = workspace.join(PACKET_SCAN_ROOT);
     if !root.is_dir() {
         return Ok(Vec::new());
@@ -314,7 +314,7 @@ fn orphan_generated_packets(workspace: &Path, shaped_modules: &[String]) -> BpsR
 }
 
 /// Recursive `rglob("*.rs")`.
-fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) -> BpsResult<()> {
+fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) -> BmlResult<()> {
     let entries = std::fs::read_dir(dir).map_err(|e| emit(format!("{}: {e}", dir.display())))?;
     for entry in entries {
         let entry = entry.map_err(|e| emit(e.to_string()))?;
@@ -346,7 +346,7 @@ fn planned_packets(
     classes: &ClassTable,
     shapes: &[(String, Shape)],
     swap_hand: bool,
-) -> BpsResult<PacketPlan> {
+) -> BmlResult<PacketPlan> {
     let units = build_units(resolved, classes)?;
     let modules: Vec<String> = units.iter().map(module_path).collect();
     for (module, _) in shapes {
@@ -362,7 +362,7 @@ fn planned_packets(
             continue;
         };
         validate_shape(shape)?;
-        let reasons = mismatch(shape, &bps_field_pairs(&unit.pkt, resolved)?);
+        let reasons = mismatch(shape, &bml_field_pairs(&unit.pkt, resolved)?);
         if !reasons.is_empty() {
             return Err(emit(format!("{module}: {}", reasons.join("; "))));
         }
@@ -400,7 +400,7 @@ pub fn emit_tree(
     classes: &ClassTable,
     shapes_dir: &Path,
     check: bool,
-) -> BpsResult<Vec<String>> {
+) -> BmlResult<Vec<String>> {
     let shapes = if shapes_dir.is_dir() {
         load_ledger(shapes_dir)?
     } else {

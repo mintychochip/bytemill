@@ -1,10 +1,10 @@
 //! Expression evaluation, porting `bps/interp/evalexpr.py`.
 
 use crate::ast::Expr;
-use crate::errors::{BpsError, BpsResult, decode, py_repr_str};
+use crate::errors::{BmlError, BmlResult, decode, py_repr_str};
 use crate::value::{Env, Value};
 
-pub fn eval_expr(expr: &Expr, env: &Env) -> BpsResult<Value> {
+pub fn eval_expr(expr: &Expr, env: &Env) -> BmlResult<Value> {
     match expr {
         Expr::Int(v) => Ok(Value::Int(*v)),
         Expr::Bool(b) => Ok(Value::Bool(*b)),
@@ -80,20 +80,20 @@ pub fn eval_expr(expr: &Expr, env: &Env) -> BpsResult<Value> {
             let vals: Vec<Value> = args
                 .iter()
                 .map(|a| eval_expr(a, env))
-                .collect::<BpsResult<_>>()?;
+                .collect::<BmlResult<_>>()?;
             eval_call(name, &vals)
         }
     }
 }
 
-fn cmp_op(l: &Value, r: &Value, pick: fn(std::cmp::Ordering) -> bool) -> BpsResult<bool> {
+fn cmp_op(l: &Value, r: &Value, pick: fn(std::cmp::Ordering) -> bool) -> BmlResult<bool> {
     let a = int_of(l)?;
     let b = int_of(r)?;
     Ok(pick(a.cmp(&b)))
 }
 
 /// Python `int(v)`.
-pub fn int_of(v: &Value) -> BpsResult<i128> {
+pub fn int_of(v: &Value) -> BmlResult<i128> {
     match v {
         Value::Int(i) => Ok(*i),
         Value::Bool(b) => Ok(i128::from(*b)),
@@ -107,7 +107,7 @@ pub fn truthy(v: &Value) -> bool {
 }
 
 /// Python `//`: floor division (rounds toward negative infinity).
-fn floor_div(a: i128, b: i128) -> BpsResult<i128> {
+fn floor_div(a: i128, b: i128) -> BmlResult<i128> {
     if b == 0 {
         return Err(decode("integer division or modulo by zero"));
     }
@@ -121,7 +121,7 @@ fn floor_div(a: i128, b: i128) -> BpsResult<i128> {
 }
 
 /// Python `%`: the result takes the divisor's sign.
-fn py_mod(a: i128, b: i128) -> BpsResult<i128> {
+fn py_mod(a: i128, b: i128) -> BmlResult<i128> {
     if b == 0 {
         return Err(decode("integer division or modulo by zero"));
     }
@@ -162,7 +162,7 @@ fn py_shr(a: i128, n: i128) -> i128 {
     a >> n
 }
 
-fn eval_call(name: &str, args: &[Value]) -> BpsResult<Value> {
+fn eval_call(name: &str, args: &[Value]) -> BmlResult<Value> {
     match name {
         "sign_extend" => {
             let v = int_of(&args[0])?;
@@ -207,7 +207,7 @@ fn eval_call(name: &str, args: &[Value]) -> BpsResult<Value> {
 }
 
 /// Python `str(v)` for the builtins that coerce.
-fn as_str(v: &Value) -> BpsResult<String> {
+fn as_str(v: &Value) -> BmlResult<String> {
     match v {
         Value::Str(s) => Ok(s.to_string()),
         Value::Int(i) => Ok(i.to_string()),
@@ -215,7 +215,7 @@ fn as_str(v: &Value) -> BpsResult<String> {
         Value::Float(f) => Ok(crate::json::float_repr(*f)),
         Value::Null => Ok("None".into()),
         Value::Bytes(b) => Ok(String::from_utf8_lossy(b).into_owned()),
-        Value::List(_) | Value::Map(_) => Err(BpsError::new(
+        Value::List(_) | Value::Map(_) => Err(BmlError::new(
             crate::errors::ErrorKind::Decode,
             "str() on container",
         )),

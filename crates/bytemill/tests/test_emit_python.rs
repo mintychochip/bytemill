@@ -8,7 +8,7 @@ fn repo(rel: &str) -> PathBuf {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-py-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-py-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -43,7 +43,7 @@ fn run_check(dir: &std::path::Path) {
 
 #[test]
 fn python_varint_values() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "enum intent : varint { status = 1 login = 2 }\npacket probe { n: varint }\npacket probe_guarded { n: varint require n == 300 }\npacket routed { i: intent }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let program = bytemill::ir::typed::typed(&resolved).unwrap();
@@ -205,19 +205,19 @@ fn packets_roundtrip(schema_rel: &str, dir_name: &str, min_packets: usize) {
 
 #[test]
 fn python_26_3_packets_roundtrip() {
-    packets_roundtrip("schemas/minecraft_26_3_wiki.bps", "26-3", 100);
+    packets_roundtrip("schemas/minecraft_26_3_wiki.bml", "26-3", 100);
 }
 
 #[test]
 fn python_hytale_packets_roundtrip() {
-    packets_roundtrip("schemas/hytale/2026_02_17.bps", "hytale", 1);
+    packets_roundtrip("schemas/hytale/2026_02_17.bml", "hytale", 1);
 }
 
 /// Version-gated emission: one schema exercising dataclasses, an open enum,
 /// a sum union, `match` tag dispatch, and an optional field.
 fn version_schema() -> bytemill::ResolvedSchema {
-    let source = std::fs::read_to_string(repo("schemas/std/integers.bps")).unwrap()
-        + &std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "enum intent : varint { status = 1 login = 2 }\npacket probe { kind: u8 v: match kind { 0 => u8 1 | 2 => { a: u8, b: u8 } _ => boolean } mode: u8 if mode == 0 { extra: u8 } }\npacket routed { i: intent }\n";
     bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap()
 }

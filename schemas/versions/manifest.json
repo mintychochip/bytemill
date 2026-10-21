@@ -235,7 +235,7 @@
       "protocol": 777,
       "release": "26.3",
       "data": "pc/26.3",
-      "note": "minecraft-data has no 26.3 on master; this is pull request #1301. The hand-written, vanilla-derived\nschemas/minecraft_26_3*.bps stay authoritative for 26.3; this file exists so the set is uniform.",
+      "note": "minecraft-data has no 26.3 on master; this is pull request #1301. The hand-written, vanilla-derived\nschemas/minecraft_26_3*.bml stay authoritative for 26.3; this file exists so the set is uniform.",
       "patches": "patches/26.3.json"
     }
   ]

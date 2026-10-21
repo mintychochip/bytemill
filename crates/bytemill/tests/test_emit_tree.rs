@@ -34,7 +34,7 @@ fn probe_workspace(tag: &str) -> ProbeWorkspace {
         &workspace.join("tools/packets_gen/schema/packets.json"),
         &probe_schema_json(),
     );
-    let schema = root.join("probe.bps");
+    let schema = root.join("probe.bml");
     write(&schema, &probe_source("packet probe { a: u8 }"));
     let resolved = bytemill::analyze(
         &bytemill::load_schema(&[schema]).unwrap(),
@@ -154,7 +154,7 @@ fn cli_check_on_rust_exits_3() {
     let code = bytemill::cli::main(&[
         "emit".into(),
         "rust".into(),
-        ws.root.join("probe.bps").to_string_lossy().into_owned(),
+        ws.root.join("probe.bml").to_string_lossy().into_owned(),
         "--out".into(),
         ws.root.join("rstom/out").to_string_lossy().into_owned(),
         "--check".into(),
@@ -166,7 +166,7 @@ fn cli_check_on_rust_exits_3() {
 #[test]
 fn cli_without_rstom_exits_3() {
     let dir = temp_dir("clino");
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     write(&schema, &probe_source("packet probe { a: u8 }"));
     let code = bytemill::cli::main(&[
         "emit".into(),
@@ -185,7 +185,7 @@ fn rustfmt(text: &str) -> String {
     use std::io::Write;
     let mut path = std::env::temp_dir();
     path.push(format!(
-        "bps-fmt-{}-{:?}.rs",
+        "bml-fmt-{}-{:?}.rs",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -235,10 +235,10 @@ fn unit_packet_uses_constant_serializer_and_has_no_new() {
     };
     let source = format!(
         "import \"{}\"\npacket clear_dialog {{}}\nprotocol minecraft @ v1 {{\n    id = 1\n    frame default {{ length: varint id: varint payload: rest }}\n    route play.clientbound 0x00 => clear_dialog\n}}\n",
-        common::repo_root().join("schemas/std/varint.bps").display()
+        common::repo_root().join("schemas/std/varint.bml").display()
     );
     let dir = temp_dir("cleardialog");
-    let schema = dir.join("x.bps");
+    let schema = dir.join("x.bml");
     write(&schema, &source);
     let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let mut root = OrderedMap::new();
@@ -317,11 +317,11 @@ fn copy_fields_are_not_cloned() {
     };
     let source = format!(
         "import \"{}\"\n{}",
-        common::repo_root().join("schemas/minecraft_core.bps").display(),
+        common::repo_root().join("schemas/minecraft_core.bml").display(),
         probe_source("packet probe { n: i64be label: string }")
     );
     let dir = temp_dir("probecopy");
-    let schema = dir.join("p.bps");
+    let schema = dir.join("p.bml");
     write(&schema, &source);
     let resolved2 = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let table = common::rstom_tables::probe_table();
@@ -420,7 +420,7 @@ fn extras_adds_the_path_mod_and_reexports_it() {
     };
     let source = probe_source("packet probe { x: i32be }");
     let dir = temp_dir("extras");
-    let schema = dir.join("p.bps");
+    let schema = dir.join("p.bml");
     write(&schema, &source);
     let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let table = common::rstom_tables::probe_table();
@@ -492,7 +492,7 @@ impl TempRoot {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "bps-tree-{tag}-{}-{n}-{:?}",
+            "bml-tree-{tag}-{}-{n}-{:?}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -602,11 +602,11 @@ fn recipe_book_settings_new_attributes() {
     let root = common::repo_root();
     let source = format!(
         "import \"{}\"\nimport \"{}\"\npacket recipe_book_settings {{\n    crafting_recipe_book_open: boolean\n    crafting_recipe_book_filter_active: boolean\n    smelting_recipe_book_open: boolean\n    smelting_recipe_book_filter_active: boolean\n    blast_furnace_recipe_book_open: boolean\n    blast_furnace_recipe_book_filter_active: boolean\n    smoker_recipe_book_open: boolean\n    smoker_recipe_book_filter_active: boolean\n}}\nprotocol minecraft @ v1 {{\n    id = 1\n    frame default {{ length: varint id: varint payload: rest }}\n    route play.clientbound 0x00 => recipe_book_settings\n}}\n",
-        root.join("schemas/std/integers.bps").display(),
-        root.join("schemas/std/varint.bps").display(),
+        root.join("schemas/std/integers.bml").display(),
+        root.join("schemas/std/varint.bml").display(),
     );
     let scratch = TempRoot::new("recipebook");
-    let schema = scratch.path().join("r.bps");
+    let schema = scratch.path().join("r.bml");
     write(&schema, &source);
     let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let table = single_class_table("server", "play", "RecipeBookSettingsPacket");
@@ -644,11 +644,11 @@ fn plugin_message_string_and_vec_fields() {
     let root = common::repo_root();
     let source = format!(
         "import \"{}\"\nimport \"{}\"\npacket plugin_message {{ channel: string data: rest }}\nprotocol minecraft @ v1 {{\n    id = 1\n    frame default {{ length: varint id: varint payload: rest }}\n    route play.clientbound 0x00 => plugin_message\n}}\n",
-        root.join("schemas/std/varint.bps").display(),
-        root.join("schemas/minecraft_core.bps").display(),
+        root.join("schemas/std/varint.bml").display(),
+        root.join("schemas/minecraft_core.bml").display(),
     );
     let scratch = TempRoot::new("pluginmsg");
-    let schema = scratch.path().join("p.bps");
+    let schema = scratch.path().join("p.bml");
     write(&schema, &source);
     let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let table = single_class_table("server", "common", "PluginMessagePacket");
@@ -683,10 +683,10 @@ fn const_fn_new_from_extracted_shape() {
     let root = common::repo_root();
     let source = format!(
         "import \"{}\"\npacket acknowledge_block_change {{ sequence: varint }}\nprotocol minecraft @ v1 {{\n    id = 1\n    frame default {{ length: varint id: varint payload: rest }}\n    route play.clientbound 0x00 => acknowledge_block_change\n}}\n",
-        root.join("schemas/std/varint.bps").display(),
+        root.join("schemas/std/varint.bml").display(),
     );
     let scratch = TempRoot::new("constnew");
-    let schema = scratch.path().join("a.bps");
+    let schema = scratch.path().join("a.bml");
     write(&schema, &source);
     let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let table = single_class_table("server", "play", "AcknowledgeBlockChangePacket");

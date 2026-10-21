@@ -3,7 +3,7 @@
 //! these pin the behavior the regexes had: IGNORECASE tags, a gap between the id cells and
 //! the name cell, rows without a name skipped, and nothing read before the first heading.
 
-use bytemill::wiki_routes::{RouteRow, emit_bps, packet_name, parse_tables};
+use bytemill::wiki_routes::{RouteRow, emit_bml, packet_name, parse_tables};
 use std::collections::BTreeSet;
 
 fn row(state: &str, direction: &str, packet_id: u64, official_name: &str) -> RouteRow {
@@ -57,7 +57,7 @@ fn a_page_without_headings_has_no_routes() {
 #[test]
 fn official_names_map_to_the_hand_written_packets() {
     let cases = [
-        // (official, state, direction, id) -> BPS packet
+        // (official, state, direction, id) -> BML packet
         (("intention", "handshaking", "serverbound", 0), "handshake"),
         (("intention", "play", "clientbound", 1), "handshake"),
         (("hello", "login", "serverbound", 0), "login_start"),
@@ -93,13 +93,13 @@ fn the_route_file_declares_a_stub_only_for_packets_no_file_owns() {
     let extra = ["    route handshaking.serverbound 0xfe => legacy_server_list_ping".to_string()];
     // `alpha` is declared by a hand-written file; `handshake` is one of the fixed hand packets.
     let manual = BTreeSet::from(["alpha".to_string()]);
-    let imports = ["std/varint.bps".to_string(), "packets.bps".to_string()];
+    let imports = ["std/varint.bml".to_string(), "packets.bml".to_string()];
     let want = "\
 // Packet stubs + routes transcribed from minecraft.wiki (protocol 777 / 26.3).
-// Regenerate: cargo run -q -p bytemill --bin scrape_wiki_routes -- -o schemas/minecraft_26_3_wiki.bps
+// Regenerate: cargo run -q -p bytemill --bin scrape_wiki_routes -- -o schemas/minecraft_26_3_wiki.bml
 
-import \"std/varint.bps\"
-import \"packets.bps\"
+import \"std/varint.bml\"
+import \"packets.bml\"
 
 packet some_name {
     body: rest
@@ -119,7 +119,7 @@ protocol minecraft @ v26_3 {
     route play.clientbound 0x0a => some_name
 }
 ";
-    assert_eq!(emit_bps(&rows, &extra, &manual, &imports), want);
+    assert_eq!(emit_bml(&rows, &extra, &manual, &imports), want);
 }
 
 #[test]

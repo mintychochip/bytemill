@@ -1,7 +1,7 @@
 //! Scopes, field registry and name assignment for one packet or encoding.
 //!
 //! ProtoDef resolves a reference (`flags/x`, `../action`, a lexical name) to a specific field of
-//! a specific container. BPS resolves a name in a flat environment that every nested block
+//! a specific container. BML resolves a name in a flat environment that every nested block
 //! inherits and that a block's own fields shadow. Lowering therefore refers to fields by
 //! [`FieldId`]; once a whole root is lowered, [`Arena::assign_names`] picks the final
 //! names so that no block between a reference and its target re-declares the target's name
@@ -61,7 +61,7 @@ struct FieldRec {
 struct ScopeRec {
     /// The enclosing ProtoDef container scope (`..` goes here).
     proto_parent: Option<ScopeId>,
-    /// The BPS block whose namespace this scope's fields live in (itself, unless spliced).
+    /// The BML block whose namespace this scope's fields live in (itself, unless spliced).
     ns: ScopeId,
     /// A block the importer invented: invisible to ProtoDef paths.
     transparent: bool,
@@ -102,7 +102,7 @@ impl Arena {
         Arena::default()
     }
 
-    /// A ProtoDef container scope with its own BPS namespace.
+    /// A ProtoDef container scope with its own BML namespace.
     pub fn scope(&mut self, parent: Option<ScopeId>) -> ScopeId {
         self.push_scope(parent, None, false)
     }

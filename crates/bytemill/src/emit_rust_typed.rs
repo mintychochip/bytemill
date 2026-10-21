@@ -72,7 +72,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::ast::ResolvedSchema;
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ir::typed::{
     BinOp, Body, CodecIdx, CodecKind, Expr, Func, IntTy, LocalId, Origin, Program, ReadOp,
     RepeatMode, Stmt, Ty, TypeIdx, escape, hex_literal, typed,
@@ -89,7 +89,7 @@ const KEYWORDS: &[&str] = &[
 ];
 
 /// Emit the `rust-typed` crate for `resolved` into `out_dir`.
-pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     emit_rust_typed_with_edition(resolved, out_dir, crate::RustEdition::default())
 }
 
@@ -97,7 +97,7 @@ pub fn emit_rust_typed_with_edition(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     edition: crate::RustEdition,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let program = typed(resolved)?;
     let printer = Gen::new(&program);
     let src = out_dir.join("src");
@@ -222,7 +222,7 @@ fn claim(want: String, taken: &mut HashSet<String>) -> String {
 fn cargo_toml(edition: crate::RustEdition) -> String {
     format!(
         "[package]\nname = \"bml_generated\"\nversion = \"0.1.0\"\nedition = \"{}\"\n\
-         description = \"Generated BPS encoders and decoders.\"\n",
+         description = \"Generated BML encoders and decoders.\"\n",
         edition.as_str(),
     )
 }
@@ -801,7 +801,7 @@ impl<'a> Gen<'a> {
     /// `src/lib.rs`.
     fn lib_rs(&self) -> String {
         let mut w = W::new();
-        w.line("//! Generated BPS encoders and decoders: typed records for every");
+        w.line("//! Generated BML encoders and decoders: typed records for every");
         w.line("//! packet, encoding, and nested block, with `decode`/`encode` pairs");
         w.line("//! that agree byte-for-byte with the interpreter.");
         w.line("#![forbid(unsafe_code)]");

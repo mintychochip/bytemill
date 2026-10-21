@@ -38,14 +38,14 @@ use std::fs;
 use std::path::Path;
 
 use crate::ResolvedSchema;
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ir::typed::{
     BinOp, Bind, Body, CodecIdx, Expr, Func, IntTy, LocalId, Origin, Program, ReadOp, RepeatMode,
     Stmt, Ty, TypeIdx, WriteOp, byte_literal, hex_literal,
 };
 
 /// Emit `bmlgen.zig` and its modules for `resolved` into `out_dir`.
-pub fn emit_zig(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+pub fn emit_zig(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     emit_zig_with_version(resolved, out_dir, crate::ZigVersion::default())
 }
 
@@ -53,7 +53,7 @@ pub fn emit_zig_with_version(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     ver: crate::ZigVersion,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let program = crate::ir::typed(resolved)?;
     let mut printer = Printer::build(&program, ver)?;
     let files = printer.files()?;
@@ -559,7 +559,7 @@ struct Printer<'a> {
 }
 
 impl<'a> Printer<'a> {
-    fn build(prog: &'a Program, ver: crate::ZigVersion) -> BpsResult<Self> {
+    fn build(prog: &'a Program, ver: crate::ZigVersion) -> BmlResult<Self> {
         let (boxed_field, boxed_variant) = boxed_edges(prog);
         let owns = owns_fixpoint(prog, &boxed_field, &boxed_variant);
         let needs_strlen = prog
@@ -600,7 +600,7 @@ impl<'a> Printer<'a> {
 
     /// `stem` -> module source: `runtime.zig`, one module per route category,
     /// and the `bmlgen.zig` index that re-exports them all.
-    fn files(&mut self) -> BpsResult<BTreeMap<String, String>> {
+    fn files(&mut self) -> BmlResult<BTreeMap<String, String>> {
         // The constructs printed here are stable across every supported Zig
         // version, so the target only selects this shared formatting.
         let _ = self.ver;
@@ -684,7 +684,7 @@ impl<'a> Printer<'a> {
                 self.prog.output_stem(&self.prog.types[t].origin),
             ));
         }
-        let mut out = String::from("//! Generated BPS codecs, one module per route category.\n\n");
+        let mut out = String::from("//! Generated BML codecs, one module per route category.\n\n");
         for (name, stem) in entries {
             out.push_str(&format!(
                 "pub const {name} = @import(\"{stem}.zig\").{name};\n"
@@ -769,7 +769,7 @@ fn boxed_edges(prog: &Program) -> (EdgeSet, EdgeSet) {
 impl Printer<'_> {
     // -- types ----------------------------------------------------------
 
-    fn type_decl(&mut self, t: TypeIdx, here: &str) -> BpsResult<String> {
+    fn type_decl(&mut self, t: TypeIdx, here: &str) -> BmlResult<String> {
         let mut out = String::new();
         out.push_str(&self.doc(t));
         let name = self.prog.types[t].name.pascal();
@@ -887,14 +887,14 @@ impl Printer<'_> {
         f: usize,
         decl: &crate::ir::typed::FieldDecl,
         here: &str,
-    ) -> BpsResult<String> {
+    ) -> BmlResult<String> {
         let inner = self.zig_ty(&decl.ty, here)?;
         let boxed = self.boxed_field.contains(&(t, f));
         Ok(wrap_optional(wrap_boxed(inner, boxed), decl.optional))
     }
 
     /// Zig type of a sum variant payload.
-    fn payload_ty(&self, t: TypeIdx, v: usize, payload: &Ty, here: &str) -> BpsResult<String> {
+    fn payload_ty(&self, t: TypeIdx, v: usize, payload: &Ty, here: &str) -> BmlResult<String> {
         Ok(wrap_boxed(
             self.zig_ty(payload, here)?,
             self.boxed_variant.contains(&(t, v)),
@@ -914,7 +914,7 @@ impl Printer<'_> {
         }
     }
 
-    fn zig_ty(&self, ty: &Ty, here: &str) -> BpsResult<String> {
+    fn zig_ty(&self, ty: &Ty, here: &str) -> BmlResult<String> {
         match ty {
             Ty::Int(t) => Ok(int_ty(*t).into()),
             Ty::Bool => Ok("bool".into()),
@@ -953,7 +953,7 @@ fn int_ty(ty: IntTy) -> &'static str {
 impl Printer<'_> {
     // -- codecs ---------------------------------------------------------
 
-    fn free_codec(&self, c: CodecIdx, here: &str) -> BpsResult<String> {
+    fn free_codec(&self, c: CodecIdx, here: &str) -> BmlResult<String> {
         let mut out = String::new();
         out.push_str(&format!(
             "/// {}\n",
@@ -978,7 +978,7 @@ impl Printer<'_> {
         extra: &str,
         decode: bool,
         here: &str,
-    ) -> BpsResult<String> {
+    ) -> BmlResult<String> {
         let codec = &self.prog.codecs[c];
         let body = if decode { &codec.decode } else { &codec.encode };
         let info = analyze_body(self, body);
@@ -1085,16 +1085,16 @@ impl Printer<'_> {
         local_name(&body.locals[v].name, &self.stems)
     }
 
-    fn decode_method(&self, c: CodecIdx, recv: &str, here: &str) -> BpsResult<String> {
+    fn decode_method(&self, c: CodecIdx, recv: &str, here: &str) -> BmlResult<String> {
         self.function(c, Some(recv), "decode", "", true, here)
     }
 
-    fn encode_method(&self, c: CodecIdx, recv: &str, here: &str) -> BpsResult<String> {
+    fn encode_method(&self, c: CodecIdx, recv: &str, here: &str) -> BmlResult<String> {
         self.function(c, Some(recv), "encode", "", false, here)
     }
 
     /// Borrowed form of a type for free encode inputs: slices become const.
-    fn borrow_ty(&self, ty: &Ty, here: &str) -> BpsResult<String> {
+    fn borrow_ty(&self, ty: &Ty, here: &str) -> BmlResult<String> {
         match ty {
             Ty::Str | Ty::Bytes => Ok("[]const u8".into()),
             Ty::List(inner) => Ok(format!("[]const {}", self.zig_ty(inner, here)?)),
@@ -1103,7 +1103,7 @@ impl Printer<'_> {
     }
 
     /// Zig type of a codec parameter (never a boxed pointer in practice).
-    fn param_ty(&self, p: &crate::ir::typed::Local, here: &str) -> BpsResult<String> {
+    fn param_ty(&self, p: &crate::ir::typed::Local, here: &str) -> BmlResult<String> {
         Ok(wrap_optional(self.zig_ty(&p.ty, here)?, p.optional))
     }
 }
@@ -1561,7 +1561,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         }
     }
 
-    fn stmts(&mut self, stmts: &[Stmt]) -> BpsResult<()> {
+    fn stmts(&mut self, stmts: &[Stmt]) -> BmlResult<()> {
         for s in stmts {
             self.stmt(s)?;
         }
@@ -1569,7 +1569,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     }
 
     /// Zig type of a local, pointer-aware.
-    fn local_ty(&self, id: LocalId) -> BpsResult<String> {
+    fn local_ty(&self, id: LocalId) -> BmlResult<String> {
         let l = &self.body.locals[id];
         Ok(wrap_optional(
             wrap_boxed(
@@ -1653,7 +1653,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     /// with `errdefer` for fresh owned values, or plain stores.
     /// `fresh_owned`: `rhs` newly allocates (read bytes, owning decode,
     /// validated string). `rhs_ptr`: `rhs` already has pointer type.
-    fn bind(&mut self, dst: &Bind, rhs: String, fresh_owned: bool, rhs_ptr: bool) -> BpsResult<()> {
+    fn bind(&mut self, dst: &Bind, rhs: String, fresh_owned: bool, rhs_ptr: bool) -> BmlResult<()> {
         let id = dst.local;
         let name = self.name(id);
         // Repeat items go to the array, never to a named local.
@@ -1705,7 +1705,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     /// `rhs` (a `T` value) boxed into a `*T` allocation expression for local
     /// `id`, always expanded: `zig fmt` keeps the block form at any width.
-    fn boxed(&mut self, id: LocalId, rhs: String) -> BpsResult<String> {
+    fn boxed(&mut self, id: LocalId, rhs: String) -> BmlResult<String> {
         let target = self
             .printer
             .zig_ty(&self.body.locals[id].ty.clone(), &self.here)?;
@@ -1722,7 +1722,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 impl<'a, 'p> FnGen<'a, 'p> {
     // -- statements ---------------------------------------------------
 
-    fn stmt(&mut self, s: &Stmt) -> BpsResult<()> {
+    fn stmt(&mut self, s: &Stmt) -> BmlResult<()> {
         match s {
             Stmt::Declare { local, zero } => self.declare(*local, *zero),
             Stmt::Let { dst, value } => {
@@ -1847,7 +1847,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         }
     }
 
-    fn declare(&mut self, local: LocalId, zero: bool) -> BpsResult<()> {
+    fn declare(&mut self, local: LocalId, zero: bool) -> BmlResult<()> {
         let l = &self.body.locals[local];
         let name = local_name(&l.name, &self.printer.stems);
         if l.optional {
@@ -1870,7 +1870,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         Ok(())
     }
 
-    fn read(&mut self, op: &ReadOp) -> BpsResult<String> {
+    fn read(&mut self, op: &ReadOp) -> BmlResult<String> {
         self.uses_reader = true;
         match op {
             ReadOp::U8 => Ok("try reader.readU8()".into()),
@@ -1890,7 +1890,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     /// A length cast to `usize`: a widening hop through `i64` is covered by
     /// the outer cast, so it is skipped (the negativity guard, if any, still
     /// reads the original expression).
-    fn usize_arg(&mut self, e: &Expr) -> BpsResult<String> {
+    fn usize_arg(&mut self, e: &Expr) -> BmlResult<String> {
         // A cast widening to `i64` is covered by the outer cast to `usize`.
         let mut core = e;
         if let Expr::Cast { expr, to } = e
@@ -1906,7 +1906,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         Ok(format!("@as(usize, @intCast({}))", self.expr(core)?))
     }
 
-    fn utf8(&mut self, dst: &Bind, src: &Expr) -> BpsResult<()> {
+    fn utf8(&mut self, dst: &Bind, src: &Expr) -> BmlResult<()> {
         self.uses_alloc = true;
         let s = self.expr(src)?;
         let id = dst.local;
@@ -1960,7 +1960,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     }
 
     /// `Utf8` whose destination is a repeat item.
-    fn utf8_item(&mut self, src: &Expr, s: &str, donor: bool) -> BpsResult<()> {
+    fn utf8_item(&mut self, src: &Expr, s: &str, donor: bool) -> BmlResult<()> {
         let (_, mode) = self.item.unwrap_or((0, ItemMode::Push));
         self.ln(&format!(
             "if (!std.unicode.utf8ValidateSlice({s})) return error.InvalidUtf8;"
@@ -2008,7 +2008,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         scrutinee: &Expr,
         arms: &[crate::ir::typed::MatchArm],
         other: &Option<Vec<Stmt>>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let s = self.expr(scrutinee)?;
         self.ln(&format!("switch ({s}) {{"));
         self.depth += 1;
@@ -2042,7 +2042,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         Ok(())
     }
 
-    fn for_each(&mut self, list: &Expr, item: LocalId, body: &[Stmt]) -> BpsResult<()> {
+    fn for_each(&mut self, list: &Expr, item: LocalId, body: &[Stmt]) -> BmlResult<()> {
         let l = self.expr(list)?;
         self.uses_writer = true;
         if self.body.locals[item].uses == 0 {
@@ -2064,7 +2064,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         sum: &Expr,
         ty: TypeIdx,
         variant: usize,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let s = self.expr(sum)?;
         let vname = match &self.printer.prog.types[ty].kind {
             crate::ir::typed::TypeKind::Sum { variants } => field_name(&variants[variant].name),
@@ -2094,7 +2094,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     }
 
     /// `.name = value` parts of a record construction, in field order.
-    fn construct_parts(&mut self, ty: TypeIdx, fields: &[Expr]) -> BpsResult<Vec<String>> {
+    fn construct_parts(&mut self, ty: TypeIdx, fields: &[Expr]) -> BmlResult<Vec<String>> {
         let names = match &self.printer.prog.types[ty].kind {
             crate::ir::typed::TypeKind::Record { fields } => fields
                 .iter()
@@ -2109,7 +2109,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         Ok(parts)
     }
 
-    fn return_expr(&mut self, e: &Expr) -> BpsResult<String> {
+    fn return_expr(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Construct { ty, fields } => {
                 let parts = self.construct_parts(*ty, fields)?;
@@ -2165,7 +2165,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     }
 
     /// Call another codec's decode: `Type.decode(allocator?, reader, args)`.
-    fn decode_call(&mut self, codec: CodecIdx, args: &[Expr]) -> BpsResult<String> {
+    fn decode_call(&mut self, codec: CodecIdx, args: &[Expr]) -> BmlResult<String> {
         self.uses_reader = true;
         let path = self.codec_path(codec, true);
         let mut parts = Vec::new();
@@ -2189,7 +2189,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     /// Call another codec's encode: free `encodeX(writer, value, args)` or
     /// `value.encode(writer, args)`.
-    fn encode_call(&mut self, codec: CodecIdx, args: &[Expr], value: &Expr) -> BpsResult<String> {
+    fn encode_call(&mut self, codec: CodecIdx, args: &[Expr], value: &Expr) -> BmlResult<String> {
         self.uses_writer = true;
         let ty = self.printer.prog.codecs[codec].ty;
         let params = self.printer.prog.codecs[codec].encode.params.clone();
@@ -2227,7 +2227,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     /// An encode input or call argument, dereferenced when the Zig value is a
     /// boxed pointer but the callee takes it by value.
-    fn encode_value(&mut self, value: &Expr) -> BpsResult<String> {
+    fn encode_value(&mut self, value: &Expr) -> BmlResult<String> {
         let v = self.expr(value)?;
         if expr_ptr(self.printer, self.body, &self.info.ptr, value) {
             Ok(format!("{v}.*"))
@@ -2241,7 +2241,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         arg: &Expr,
         param: LocalId,
         callee_ptr: &HashSet<LocalId>,
-    ) -> BpsResult<String> {
+    ) -> BmlResult<String> {
         let a = self.expr(arg)?;
         let want_ptr = callee_ptr.contains(&param);
         if expr_ptr(self.printer, self.body, &self.info.ptr, arg) && !want_ptr {
@@ -2258,7 +2258,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         list: LocalId,
         item: LocalId,
         body: &[Stmt],
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         if !self.decode {
             return self.repeat_encode(mode, list, item, body);
         }
@@ -2407,7 +2407,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         list: LocalId,
         item: LocalId,
         body: &[Stmt],
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         self.uses_writer = true;
         let name = self.name(list);
         if self.body.locals[item].uses == 0 {
@@ -2446,7 +2446,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 impl<'a, 'p> FnGen<'a, 'p> {
     // -- expressions --------------------------------------------------
 
-    fn expr(&mut self, e: &Expr) -> BpsResult<String> {
+    fn expr(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Int { value, .. } => Ok(format!("{value}")),
             Expr::Bool(b) => Ok(format!("{b}")),
@@ -2537,7 +2537,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     /// A condition: wrapped only when too loose (`and`/`or`/if-expression)
     /// to sit directly in its statement.
-    fn cond(&mut self, e: &Expr) -> BpsResult<String> {
+    fn cond(&mut self, e: &Expr) -> BmlResult<String> {
         let s = self.expr(e)?;
         match e {
             Expr::Binary {
@@ -2550,7 +2550,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     }
 
     /// An operand of `parent`: wrapped only when precedence needs it.
-    fn operand(&mut self, e: &Expr, parent: BinOp, side: Side) -> BpsResult<String> {
+    fn operand(&mut self, e: &Expr, parent: BinOp, side: Side) -> BmlResult<String> {
         let s = self.expr(e)?;
         if need_parens(e, parent, side) {
             Ok(format!("({s})"))
@@ -2561,7 +2561,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     /// An operand of `&`, `|`, or `^`: integer literals print in hex, as do
     /// the branches of a ternary continuation flag (`if (c) 0x80 else 0`).
-    fn mask_operand(&mut self, e: &Expr, parent: BinOp, side: Side) -> BpsResult<String> {
+    fn mask_operand(&mut self, e: &Expr, parent: BinOp, side: Side) -> BmlResult<String> {
         match e {
             Expr::Int { value, .. } if hex_literal(parent, *value) => Ok(zig_hex(*value)),
             Expr::Cond {
@@ -2587,7 +2587,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         rhs: &Expr,
         ty: &Ty,
         wraps: bool,
-    ) -> BpsResult<String> {
+    ) -> BmlResult<String> {
         use BinOp::*;
         // String equality is a library call.
         if matches!(op, Eq | Ne) {
@@ -2640,7 +2640,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
 
     /// A `|`/`&`/`^` spine, one operand per line when the single line would
     /// run past the width limit (`zig fmt` keeps breaks after operators).
-    fn bit_chain(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr) -> BpsResult<String> {
+    fn bit_chain(&mut self, op: BinOp, lhs: &Expr, rhs: &Expr) -> BmlResult<String> {
         fn spine<'e>(e: &'e Expr, op: BinOp, out: &mut Vec<&'e Expr>) {
             match e {
                 Expr::Binary {
@@ -2669,7 +2669,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         Ok(flat.join(&format!(" {symbol}\n{pad}")))
     }
 
-    fn cast_expr(&mut self, inner: &Expr, printed: String, to: &Ty) -> BpsResult<String> {
+    fn cast_expr(&mut self, inner: &Expr, printed: String, to: &Ty) -> BmlResult<String> {
         let (from, _) = self.printer.prog.expr_ty(self.body, inner);
         if from == *to {
             return Ok(printed);
@@ -2699,7 +2699,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     /// rely on inference); the operand keeps its own annotation only when it
     /// does not already have the source type. A lossless round trip through
     /// a wider or same-width type (`u64` → `i64` → `u64`) is the value itself.
-    fn int_cast(&mut self, from: IntTy, to: IntTy, inner: &Expr, x: String) -> BpsResult<String> {
+    fn int_cast(&mut self, from: IntTy, to: IntTy, inner: &Expr, x: String) -> BmlResult<String> {
         if from == to {
             return Ok(x);
         }
@@ -2779,7 +2779,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
         }
     }
 
-    fn call(&mut self, func: Func, args: &[Expr]) -> BpsResult<String> {
+    fn call(&mut self, func: Func, args: &[Expr]) -> BmlResult<String> {
         match func {
             Func::SignExtend => {
                 if args.len() != 2 {

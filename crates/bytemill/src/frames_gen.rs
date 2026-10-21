@@ -9,7 +9,7 @@ use crate::ast::{
     BlockItem, EncBody, EncodingDecl, Expr, FieldType, MatchArm, MatchType, Repeat, RepeatMode,
     ResolvedSchema, Tag, TypeRef, WireField,
 };
-use crate::errors::{BpsResult, emit, py_repr_str};
+use crate::errors::{BmlResult, emit, py_repr_str};
 use crate::ordmap::OrderedMap;
 
 /// Fixed-width scalars: byte size.
@@ -887,7 +887,7 @@ pub fn generate(
     resolved: &ResolvedSchema,
     roots: &[String],
     known: &OrderedMap<String>,
-) -> BpsResult<Walkers> {
+) -> BmlResult<Walkers> {
     let mut comp = Compiler {
         resolved,
         known,

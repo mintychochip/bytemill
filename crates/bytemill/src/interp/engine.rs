@@ -8,7 +8,7 @@
 
 use crate::ResolvedSchema;
 use crate::ast::*;
-use crate::errors::{BpsResult, decode, decode_at, encode, py_repr_str};
+use crate::errors::{BmlResult, decode, decode_at, encode, py_repr_str};
 use crate::interp::cursor::{Cursor, WriteCursor};
 use crate::interp::expr::{eval_expr, int_of};
 use crate::value::{Env, Value};
@@ -22,7 +22,7 @@ pub fn decode_packet(
     packet_name: &str,
     data: &[u8],
     strict: bool,
-) -> BpsResult<Env> {
+) -> BmlResult<Env> {
     let pkt = resolved
         .packets
         .get(packet_name)
@@ -47,7 +47,7 @@ pub fn encode_packet(
     resolved: &ResolvedSchema,
     packet_name: &str,
     value: &Env,
-) -> BpsResult<Vec<u8>> {
+) -> BmlResult<Vec<u8>> {
     let pkt = resolved
         .packets
         .get(packet_name)
@@ -64,7 +64,7 @@ pub fn encode_bare(
     value: &Value,
     resolved: &ResolvedSchema,
     env: &Env,
-) -> BpsResult<Option<Vec<u8>>> {
+) -> BmlResult<Option<Vec<u8>>> {
     let mut w = WriteCursor::new();
     match encode_type_ref(ref_, &mut w, resolved, env, value) {
         Ok(()) => Ok(Some(w.result())),
@@ -88,7 +88,7 @@ pub fn decode_frame_payload(
     state: &str,
     direction: &str,
     data: &[u8],
-) -> BpsResult<(i128, Env)> {
+) -> BmlResult<(i128, Env)> {
     let mut frame_names: Vec<String> = Vec::new();
     for (route, _) in &resolved.routes {
         if route.state == state && route.direction == direction {
@@ -267,7 +267,7 @@ fn merge_tag(env: &Env, tag: &Option<Env>) -> Env {
     }
 }
 
-fn bind_params(params: &[Param], args: &[Expr], env: &Env) -> BpsResult<Env> {
+fn bind_params(params: &[Param], args: &[Expr], env: &Env) -> BmlResult<Env> {
     let mut bind = env.clone();
     for (i, p) in params.iter().enumerate() {
         if i < args.len() {
@@ -287,7 +287,7 @@ fn expand_items(
     items: &[BlockItem],
     resolved: &ResolvedSchema,
     param_env: &Env,
-) -> BpsResult<Vec<ExpandedItem>> {
+) -> BmlResult<Vec<ExpandedItem>> {
     let mut out = Vec::with_capacity(items.len());
     for item in items {
         match item {
@@ -385,7 +385,7 @@ fn decode_block_items(
     resolved: &ResolvedSchema,
     param_env: &Env,
     prebind: Option<&Env>,
-) -> BpsResult<Env> {
+) -> BmlResult<Env> {
     // Expansion happens once per block; the Python interpreter re-expands the
     // already-expanded items on every recursive walk, which is equivalent
     // because the re-tag only re-stamps fields (whose tag nothing reads).
@@ -399,7 +399,7 @@ fn decode_expanded(
     resolved: &ResolvedSchema,
     param_env: &Env,
     prebind: Option<&Env>,
-) -> BpsResult<Env> {
+) -> BmlResult<Env> {
     // `prebind` values (optional varint bytes are 0 when absent) are visible to
     // conditions and `require` without being stamped as spread parameters.
     let mut env = match prebind {
@@ -513,7 +513,7 @@ fn decode_repeat(
     cur: &mut Cursor<'_>,
     resolved: &ResolvedSchema,
     env: &Env,
-) -> BpsResult<Value> {
+) -> BmlResult<Value> {
     let mut out = Vec::new();
     match rep.mode {
         RepeatMode::Count => {
@@ -553,7 +553,7 @@ fn decode_type(
     cur: &mut Cursor<'_>,
     resolved: &ResolvedSchema,
     env: &Env,
-) -> BpsResult<Value> {
+) -> BmlResult<Value> {
     match t {
         FieldType::Block(b) => {
             let decoded = decode_block_items(&b.items, cur, resolved, env, None)?;
@@ -583,7 +583,7 @@ pub fn decode_type_ref(
     cur: &mut Cursor<'_>,
     resolved: &ResolvedSchema,
     env: &Env,
-) -> BpsResult<Value> {
+) -> BmlResult<Value> {
     if let Some(enc) = resolved.encodings.get(&ref_.name) {
         // Parameters only: a parameterless encoding must not inherit the
         // caller's whole scope, or its field names collide with the caller's.
@@ -689,7 +689,7 @@ fn decode_scalar(
     cur: &mut Cursor<'_>,
     resolved: &ResolvedSchema,
     bind: &Env,
-) -> BpsResult<Value> {
+) -> BmlResult<Value> {
     // Optional wire fields (a varint's continuation bytes) are 0 when absent, so
     // the yield expression and any `require` can mention them unconditionally.
     let mut zeros = Env::new();
@@ -716,7 +716,7 @@ fn encode_block_items(
     w: &mut WriteCursor,
     resolved: &ResolvedSchema,
     value: &Env,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let expanded = expand_items(items, resolved, &Env::new())?;
     encode_expanded(&expanded, w, resolved, value)
 }
@@ -726,7 +726,7 @@ fn encode_expanded(
     w: &mut WriteCursor,
     resolved: &ResolvedSchema,
     value: &Env,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     for item in expanded {
         match item {
             ExpandedItem::Require { .. } | ExpandedItem::Computed { .. } => continue,
@@ -812,7 +812,7 @@ fn encode_repeat(
     resolved: &ResolvedSchema,
     env: &Env,
     seq: &Value,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let Value::List(items) = seq else {
         return Err(encode(format!("expected list for {}", wf.name)));
     };
@@ -842,7 +842,7 @@ fn encode_type(
     resolved: &ResolvedSchema,
     env: &Env,
     val: &Value,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     match t {
         FieldType::Block(b) => {
             let Value::Map(m) = val else {
@@ -873,7 +873,7 @@ fn encode_type_ref(
     resolved: &ResolvedSchema,
     env: &Env,
     val: &Value,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     if let Some(enc) = resolved.encodings.get(&ref_.name) {
         // Parameters only: a parameterless encoding must not inherit the
         // caller's whole scope, or its field names collide with the caller's.
@@ -1023,7 +1023,7 @@ fn encode_type_ref(
     }
 }
 
-fn as_f64(val: &Value) -> BpsResult<f64> {
+fn as_f64(val: &Value) -> BmlResult<f64> {
     match val {
         Value::Int(i) => Ok(*i as f64),
         Value::Bool(b) => Ok(i128::from(*b) as f64),
@@ -1048,7 +1048,7 @@ fn encode_scalar(
     bind: &Env,
     val: &Value,
     _yield_expr: &Expr,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     // `value` is the scalar being written. Each field is bound under its name
     // after its expression runs, so a later `if` can see the byte just chosen.
     let mut env = bind.clone();
@@ -1066,7 +1066,7 @@ fn encode_scalar_items(
     w: &mut WriteCursor,
     resolved: &ResolvedSchema,
     env: &mut Env,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     for item in items {
         match item {
             BlockItem::Require(_) | BlockItem::Spread { .. } => continue,

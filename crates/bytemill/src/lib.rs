@@ -1,6 +1,6 @@
-//! BPS — Binary Protocol Schema compiler and interpreter.
+//! BML — Binary Protocol Schema compiler and interpreter.
 //!
-//! The Bytemill implementation of the BPS language. `lexer`/`ast`/`parser`
+//! The Bytemill implementation of the BML language. `lexer`/`ast`/`parser`
 //! form the front end, `load`/`refs`/`analyze` resolve a schema, `interp` is
 //! the decode/encode engine, `emit_*` generates code, and `wiki_routes` is the
 //! scraper behind the route file.
@@ -54,7 +54,7 @@ pub use target_version::{
 
 pub use analyze::analyze;
 pub use ast::{BlockItem, ResolvedSchema};
-pub use errors::{BpsError, BpsResult, ErrorKind};
+pub use errors::{BmlError, BmlResult, ErrorKind};
 pub use load::load_schema;
 pub use parser::parse;
 pub use value::{Env, Value};

@@ -1,0 +1,778 @@
+// Minecraft Java Edition 26.3 (protocol 777) — play + configuration packet layouts.
+// Transcribed from minecraft.wiki Java_Edition_protocol/Packets field tables.
+// Fallback packets use `body: rest` where the wiki layout is registry- or
+// payload-dependent (chunk data, particles, sound events, recipe displays).
+
+import "std/integers.bml"
+import "std/varint.bml"
+import "minecraft_core.bml"
+
+packet bundle_delimiter {
+}
+
+packet animate {
+    entity_id: varint
+    animation: u8
+}
+
+packet award_stats {
+    statistics_count: varint
+    statistics: {
+        category_id:   varint
+        statistic_id:  varint
+        value:         varint
+    }[] count = statistics_count
+}
+
+packet block_changed_ack {
+    sequence_id: varint
+}
+
+packet block_destruction {
+    entity_id:    varint
+    location:     position
+    destroy_stage: u8
+}
+
+packet block_entity_data {
+    location: position
+    type:     varint
+    nbt_data: nbt
+}
+
+packet block_event {
+    location:                position
+    action_id_byte_1:        u8
+    action_parameter_byte_2: u8
+    block_type:              varint
+}
+
+packet block_update {
+    location: position
+    block_id: varint
+}
+
+packet boss_event {
+    uuid:   uuid
+    action: varint
+    if action == 0 {
+        title:    text_component
+        health:   f32be
+        color:    varint
+        division: varint
+        flags:    u8
+    }
+    if action == 2 {
+        health: f32be
+    }
+    if action == 3 {
+        title: text_component
+    }
+    if action == 4 {
+        color:    varint
+        dividers: varint
+    }
+    if action == 5 {
+        flags: u8
+    }
+}
+
+packet change_difficulty {
+    difficulty:        varint
+    difficulty_locked: boolean
+}
+
+packet chunk_batch_finished {
+    batch_size: varint
+}
+
+packet chunk_batch_start {
+}
+
+packet chunks_biomes {
+    chunk_biome_data_count: varint
+    chunk_biome_data: {
+        chunk_z:    i32be
+        chunk_x:    i32be
+        data_count: varint
+        data:       i8[] count = data_count
+    }[] count = chunk_biome_data_count
+}
+
+packet clear_titles {
+    reset: boolean
+}
+
+packet command_suggestions {
+    id:     varint
+    start:  varint
+    length: varint
+    matches_count: varint
+    matches: {
+        match:        string(32767)
+        tooltip_flag: boolean
+        if tooltip_flag {
+            tooltip: text_component
+        }
+    }[] count = matches_count
+}
+
+packet container_close {
+    window_id: varint
+}
+
+packet container_set_content {
+    window_id: varint
+    state_id:  varint
+    slot_data_count: varint
+    slot_data:       slot[] count = slot_data_count
+    carried_item:    slot
+}
+
+packet container_set_data {
+    window_id: varint
+    property:  i16be
+    value:     i16be
+}
+
+packet container_set_slot {
+    window_id: varint
+    state_id:  varint
+    slot:      i16be
+    slot_data: slot
+}
+
+packet cooldown {
+    cooldown_group: identifier
+    cooldown_ticks: varint
+}
+
+packet custom_chat_completions {
+    action: varint
+    entries_count: varint
+    entries:       string(32767)[] count = entries_count
+}
+
+packet damage_event {
+    entity_id:        varint
+    source_type_id:   varint
+    source_cause_id:  varint
+    source_direct_id: varint
+    source_position_flag: boolean
+    if source_position_flag {
+        x: f64be
+        y: f64be
+        z: f64be
+    }
+}
+
+packet debug_sample {
+    sample_count: varint
+    sample:       i64be[] count = sample_count
+    sample_type:  varint
+}
+
+// MessageSignature.Packed: a cached-signature id + 1, or 0 and the full
+// 256-byte signature.
+packet delete_chat {
+    message_id: varint
+    if message_id == 0 {
+        signature: bytes(256)
+    }
+}
+
+packet entity_event {
+    entity_id:     i32be
+    entity_status: i8
+}
+
+packet entity_position_sync {
+    entity_id:          varint
+    position_path_type: varint
+    if position_path_type == 0 {
+        x: f64be
+        y: f64be
+        z: f64be
+    }
+    if position_path_type == 1 {
+        steps_count: varint
+        steps: {
+            x:           f64be
+            y:           f64be
+            z:           f64be
+            tick_offset: varint
+        }[] count = steps_count
+    }
+    yaw:       f32be
+    pitch:     f32be
+    on_ground: boolean
+}
+
+packet add_transient_block {
+    location: position
+    block_state: varint
+}
+
+packet forget_level_chunk {
+    chunk_z: i32be
+    chunk_x: i32be
+}
+
+packet game_event {
+    event: u8
+    value: f32be
+}
+
+packet game_rule_values {
+    rules_count: varint
+    rules: {
+        name: identifier
+        value: string(32767)
+    }[] count = rules_count
+}
+
+packet game_test_highlight_pos {
+    absolute_location: position
+    relative_location: position
+}
+
+packet mount_screen_open {
+    window_id: varint
+    inventory_columns_count: varint
+    entity_id: i32be
+}
+
+packet hurt_animation {
+    entity_id: varint
+    yaw: f32be
+}
+
+packet initialize_border {
+    center_x: f64be
+    center_z: f64be
+    old_diameter: f64be
+    new_diameter: f64be
+    speed: varlong
+    portal_teleport_boundary: varint
+    warning_blocks: varint
+    warning_time: varint
+}
+
+packet level_event {
+    event: i32be
+    location: position
+    data: i32be
+    disable_relative_volume: boolean
+}
+
+packet login {
+    entity_id: i32be
+    is_hardcore: boolean
+    dimension_names_count: varint
+    dimension_names: identifier[] count = dimension_names_count
+    max_players: varint
+    view_distance: varint
+    simulation_distance: varint
+    reduced_debug_info: boolean
+    enable_respawn_screen: boolean
+    do_limited_crafting: boolean
+    dimension_type: varint
+    dimension_name: identifier
+    hashed_seed: i64be
+    game_mode: varint
+    previous_game_mode: varint
+    is_debug: boolean
+    is_flat: boolean
+    has_death_location: boolean
+    if has_death_location {
+        death_dimension_name: identifier
+        death_location: position
+    }
+    portal_cooldown: varint
+    sea_level: varint
+    online_mode: boolean
+    enforces_secure_chat: boolean
+}
+
+packet low_disk_space_warning { }
+
+packet map_item_data {
+    map_id: varint
+    scale: i8
+    locked: boolean
+    tracking_position: boolean
+    if tracking_position {
+        icons_count: varint
+        icons: {
+            type: varint
+            x: i8
+            z: i8
+            direction: i8
+            has_display_name: boolean
+            if has_display_name {
+                display_name: text_component
+            }
+        }[] count = icons_count
+    }
+    columns: u8
+    if columns > 0 {
+        rows: u8
+        x: u8
+        z: u8
+        data_count: varint
+        data: u8[] count = data_count
+    }
+}
+
+packet move_entity_pos {
+    entity_id: varint
+    properties: varint
+    if (properties >> 1) == 0 {
+        delta_x: i16be
+        delta_y: i16be
+        delta_z: i16be
+    }
+    if (properties >> 1) > 0 {
+        steps: {
+            tick_offset: varint
+            delta_x: i16be
+            delta_y: i16be
+            delta_z: i16be
+        }[] count = (properties >> 1)
+    }
+}
+
+packet move_entity_pos_rot {
+    entity_id: varint
+    properties: varint
+    if (properties >> 1) == 0 {
+        delta_x: i16be
+        delta_y: i16be
+        delta_z: i16be
+    }
+    if (properties >> 1) > 0 {
+        steps: {
+            tick_offset: varint
+            delta_x: i16be
+            delta_y: i16be
+            delta_z: i16be
+        }[] count = (properties >> 1)
+    }
+    yaw: angle
+    pitch: angle
+}
+
+packet move_minecart_along_track {
+    entity_id: varint
+    steps_count: varint
+    steps: {
+        x: f64be
+        y: f64be
+        z: f64be
+        velocity_x: f64be
+        velocity_y: f64be
+        velocity_z: f64be
+        yaw: angle
+        pitch: angle
+        weight: f32be
+    }[] count = steps_count
+}
+
+packet move_entity_rot {
+    entity_id: varint
+    on_ground: boolean
+    yaw: angle
+    pitch: angle
+}
+
+packet move_vehicle {
+    x: f64be
+    y: f64be
+    z: f64be
+    yaw: f32be
+    pitch: f32be
+}
+
+packet open_book {
+    hand: varint
+}
+
+packet open_screen {
+    window_id: varint
+    window_type: varint
+    window_title: text_component
+}
+
+packet open_sign_editor {
+    location: position
+    text_slot: varint
+}
+
+packet player_abilities {
+    flags: i8
+    flying_speed: f32be
+    field_of_view_modifier: f32be
+}
+
+packet player_combat_end {
+    duration: varint
+}
+
+packet player_combat_enter { }
+
+packet player_combat_kill {
+    player_id: varint
+    message: text_component
+}
+
+packet player_info_remove {
+    uuids_count: varint
+    uuids: uuid[] count = uuids_count
+}
+
+// Configuration clientbound + serverbound (Finish Configuration .. Accept Code of Conduct)
+// Play clientbound (Look At .. Show Dialog)
+
+packet finish_configuration { }
+
+packet reset_chat { }
+
+packet registry_data {
+    registry_id: identifier
+    entries_count: varint
+    entries: {
+        entry_id: identifier
+        has_data: boolean
+        if has_data {
+            data: nbt
+        }
+    }[] count = entries_count
+}
+
+packet update_enabled_features {
+    feature_flags_count: varint
+    feature_flags: identifier[] count = feature_flags_count
+}
+
+packet select_known_packs {
+    known_packs_count: varint
+    known_packs: {
+        namespace: string(32767)
+        id: string(32767)
+        version: string(32767)
+    }[] count = known_packs_count
+}
+
+packet code_of_conduct {
+    code_of_conduct: string(32767)
+}
+
+packet accept_code_of_conduct { }
+
+packet player_look_at {
+    feeteyes: varint
+    target_x: f64be
+    target_y: f64be
+    target_z: f64be
+    is_entity: boolean
+    if is_entity {
+        entity_id: varint
+        entity_feeteyes: varint
+    }
+}
+
+packet player_rotation {
+    yaw: f32be
+    relative_yaw: boolean
+    pitch: f32be
+    relative_pitch: boolean
+}
+
+packet recipe_book_remove {
+    recipes_count: varint
+    recipes: varint[] count = recipes_count
+}
+
+packet recipe_book_settings {
+    crafting_recipe_book_open: boolean
+    crafting_recipe_book_filter_active: boolean
+    smelting_recipe_book_open: boolean
+    smelting_recipe_book_filter_active: boolean
+    blast_furnace_recipe_book_open: boolean
+    blast_furnace_recipe_book_filter_active: boolean
+    smoker_recipe_book_open: boolean
+    smoker_recipe_book_filter_active: boolean
+}
+
+packet remove_entities {
+    entity_ids_count: varint
+    entity_ids: varint[] count = entity_ids_count
+}
+
+packet remove_mob_effect {
+    entity_id: varint
+    effect_id: varint
+}
+
+packet reset_score {
+    entity_name: string(32767)
+    objective_name_flag: boolean
+    if objective_name_flag {
+        objective_name: string(32767)
+    }
+}
+
+packet respawn {
+    dimension_type: varint
+    dimension_name: identifier
+    hashed_seed: i64be
+    game_mode: varint
+    previous_game_mode: varint
+    is_debug: boolean
+    is_flat: boolean
+    has_death_location: boolean
+    if has_death_location {
+        death_dimension_name: identifier
+        death_location: position
+    }
+    portal_cooldown: varint
+    sea_level: varint
+    data_kept: i8
+}
+
+packet rotate_head {
+    entity_id: varint
+    head_yaw: angle
+}
+
+packet section_blocks_update {
+    chunk_section_position: i64be
+    blocks_count: varint
+    blocks: varlong[] count = blocks_count
+}
+
+packet select_advancements_tab {
+    identifier_flag: boolean
+    if identifier_flag {
+        identifier: identifier
+    }
+}
+
+packet server_data {
+    motd: text_component
+    icon_flag: boolean
+    if icon_flag {
+        icon_count: varint
+        icon: i8[] count = icon_count
+    }
+}
+
+packet set_action_bar_text {
+    action_bar_text: text_component
+}
+
+packet set_border_center {
+    x: f64be
+    z: f64be
+}
+
+packet set_border_lerp_size {
+    old_diameter: f64be
+    new_diameter: f64be
+    speed: varlong
+}
+
+packet set_border_size {
+    diameter: f64be
+}
+
+packet set_border_warning_delay {
+    warning_time: varint
+}
+
+packet set_border_warning_distance {
+    warning_blocks: varint
+}
+
+packet set_camera {
+    camera_id: varint
+}
+
+packet set_chunk_cache_center {
+    chunk_x: varint
+    chunk_z: varint
+}
+
+packet set_chunk_cache_radius {
+    view_distance: varint
+}
+
+packet set_cursor_item {
+    carried_item: slot
+}
+
+packet set_default_spawn_position {
+    dimension_name: identifier
+    location: position
+    yaw: f32be
+    pitch: f32be
+}
+
+packet set_display_objective {
+    position: varint
+    score_name: string(32767)
+}
+
+packet set_entity_data {
+    entity_id: varint
+    metadata: entity_metadata
+}
+
+packet set_entity_link {
+    attached_entity_id: i32be
+    holding_entity_id: i32be
+}
+
+packet set_experience {
+    experience_bar: f32be
+    level: varint
+    total_experience: varint
+}
+
+packet set_health {
+    health: f32be
+    food: varint
+    food_saturation: f32be
+}
+
+packet set_held_slot {
+    slot: varint
+}
+
+packet set_passengers {
+    entity_id: varint
+    passengers_count: varint
+    passengers: varint[] count = passengers_count
+}
+
+packet set_player_inventory {
+    slot: varint
+    slot_data: slot
+}
+
+packet set_simulation_distance {
+    simulation_distance: varint
+}
+
+packet set_subtitle_text {
+    subtitle_text: text_component
+}
+
+packet set_time {
+    world_age: i64be
+    clocks_count: varint
+    clocks: {
+        clock_id: varint
+        time: varlong
+        fractional_time: f32be
+        rate: f32be
+    }[] count = clocks_count
+}
+
+packet set_title_text {
+    title_text: text_component
+}
+
+packet set_titles_animation {
+    fade_in: i32be
+    stay: i32be
+    fade_out: i32be
+}
+
+packet start_configuration { }
+
+packet stop_sound {
+    flags: i8
+    if flags == 1 || flags == 3 {
+        source: varint
+    }
+    if flags == 2 || flags == 3 {
+        sound: identifier
+    }
+}
+
+packet swing_animation {
+    entity_id: varint
+    hand: varint
+    animation_type: varint
+    duration: varint
+}
+
+packet system_chat {
+    content: text_component
+    overlay: boolean
+}
+
+packet tab_list {
+    header: text_component
+    footer: text_component
+}
+
+packet tag_query {
+    transaction_id: varint
+    nbt: nbt
+}
+
+packet take_item_entity {
+    collected_entity_id: varint
+    collector_entity_id: varint
+    pickup_item_count: varint
+}
+
+packet test_instance_block_status {
+    status: text_component
+    has_size: boolean
+    if has_size {
+        size_x: varint
+        size_y: varint
+        size_z: varint
+    }
+}
+
+packet ticking_state {
+    tick_rate: f32be
+    is_frozen: boolean
+}
+
+packet ticking_step {
+    tick_steps: varint
+}
+
+packet update_attributes {
+    entity_id: varint
+    property_count: varint
+    property: {
+        id: varint
+        value: f64be
+        modifiers_count: varint
+        modifiers: {
+            id: identifier
+            amount: f64be
+            operation: varint
+        }[] count = modifiers_count
+    }[] count = property_count
+}
+
+packet update_mob_effect {
+    entity_id: varint
+    effect_id: varint
+    amplifier: varint
+    duration: varint
+    flags: i8
+}
+
+packet projectile_power {
+    entity_id: varint
+    power: f64be
+}
+

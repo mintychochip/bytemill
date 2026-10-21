@@ -1,4 +1,4 @@
-//! Ports tests/test_minestom.py: BPS packets get the Minestom class
+//! Ports tests/test_minestom.py: BML packets get the Minestom class
 //! `rstom-packets` names them by.
 
 mod common;
@@ -15,12 +15,12 @@ fn protocol(routes: &[&str]) -> String {
 }
 
 /// `build_units` over the std scalars plus `source`, like the Python `_units`.
-fn units(source: &str, table: &ClassTable) -> bytemill::BpsResult<Vec<Unit>> {
+fn units(source: &str, table: &ClassTable) -> bytemill::BmlResult<Vec<Unit>> {
     let root = common::repo_root();
     let mut std = String::new();
     for name in ["integers", "varint"] {
         std.push_str(
-            &std::fs::read_to_string(root.join("schemas/std").join(format!("{name}.bps"))).unwrap(),
+            &std::fs::read_to_string(root.join("schemas/std").join(format!("{name}.bml"))).unwrap(),
         );
     }
     let schema = bytemill::parse(&format!("{std}{source}")).expect("test source parses");
@@ -48,7 +48,7 @@ fn minestom_java(tail: &str) -> String {
 /// `assertRaisesRegex` on an `EmitError`: the Python patterns here are
 /// literals joined by `.*` on one line, so ordered substring search matches
 /// exactly what `re.search` would.
-fn assert_emit_in_order(result: bytemill::BpsResult<Vec<Unit>>, needles: &[&str]) {
+fn assert_emit_in_order(result: bytemill::BmlResult<Vec<Unit>>, needles: &[&str]) {
     let err = result.expect_err("expected an EmitError");
     assert_eq!(err.kind, ErrorKind::Emit, "wrong error kind: {}", err.message);
     let mut from = 0;

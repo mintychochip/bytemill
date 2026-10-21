@@ -5,7 +5,7 @@
 //! produces.
 
 use crate::ast::*;
-use crate::errors::{BpsResult, parse_at, py_repr_str};
+use crate::errors::{BmlResult, parse_at, py_repr_str};
 use crate::lexer::{TokKind, TokValue, Token, tokenize};
 
 pub struct Parser {
@@ -40,7 +40,7 @@ impl Parser {
         }
     }
 
-    fn eat(&mut self, kind: TokKind, msg: Option<&str>) -> BpsResult<Token> {
+    fn eat(&mut self, kind: TokKind, msg: Option<&str>) -> BmlResult<Token> {
         let tok = self.cur().clone();
         if tok.kind != kind {
             let m = match msg {
@@ -63,7 +63,7 @@ impl Parser {
         }
     }
 
-    fn eat_op(&mut self, text: &str) -> BpsResult<()> {
+    fn eat_op(&mut self, text: &str) -> BmlResult<()> {
         let tok = self.cur();
         if tok.kind != TokKind::Op || tok.text() != Some(text) {
             return Err(parse_at(format!("expected {}", py_repr_str(text)), tok.pos));
@@ -72,7 +72,7 @@ impl Parser {
         Ok(())
     }
 
-    fn eat_ident(&mut self, text: &str) -> BpsResult<()> {
+    fn eat_ident(&mut self, text: &str) -> BmlResult<()> {
         let tok = self.cur();
         if tok.kind != TokKind::Ident || tok.text() != Some(text) {
             return Err(parse_at(format!("expected {}", py_repr_str(text)), tok.pos));
@@ -81,7 +81,7 @@ impl Parser {
         Ok(())
     }
 
-    fn eat_ident_value(&mut self) -> BpsResult<String> {
+    fn eat_ident_value(&mut self) -> BmlResult<String> {
         let tok = self.eat(TokKind::Ident, None)?;
         match &tok.value {
             TokValue::Text(s) => Ok(s.clone()),
@@ -89,7 +89,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> BpsResult<Schema> {
+    pub fn parse(&mut self) -> BmlResult<Schema> {
         let mut schema = Schema::default();
         while !self.at(TokKind::Eof) {
             let name = self.text().map(|s| s.to_string());
@@ -121,7 +121,7 @@ impl Parser {
         Ok(schema)
     }
 
-    fn parse_encoding(&mut self) -> BpsResult<EncodingDecl> {
+    fn parse_encoding(&mut self) -> BmlResult<EncodingDecl> {
         self.eat_ident("encoding")?;
         let name = self.eat_ident_value()?;
         let params = self.parse_params()?;
@@ -149,7 +149,7 @@ impl Parser {
         })
     }
 
-    fn parse_params(&mut self) -> BpsResult<Vec<Param>> {
+    fn parse_params(&mut self) -> BmlResult<Vec<Param>> {
         if !self.at(TokKind::LParen) {
             return Ok(Vec::new());
         }
@@ -176,7 +176,7 @@ impl Parser {
         Ok(params)
     }
 
-    fn parse_enum(&mut self) -> BpsResult<EnumDecl> {
+    fn parse_enum(&mut self) -> BmlResult<EnumDecl> {
         self.eat_ident("enum")?;
         let name = self.eat_ident_value()?;
         self.eat(TokKind::Colon, None)?;
@@ -201,14 +201,14 @@ impl Parser {
         })
     }
 
-    fn parse_packet(&mut self) -> BpsResult<PacketDecl> {
+    fn parse_packet(&mut self) -> BmlResult<PacketDecl> {
         self.eat_ident("packet")?;
         let name = self.eat_ident_value()?;
         let items = self.parse_block_items()?;
         Ok(PacketDecl { name, items })
     }
 
-    fn parse_protocol(&mut self) -> BpsResult<ProtocolDecl> {
+    fn parse_protocol(&mut self) -> BmlResult<ProtocolDecl> {
         self.eat_ident("protocol")?;
         let name = self.eat_ident_value()?;
         self.eat(TokKind::At, None)?;
@@ -273,7 +273,7 @@ impl Parser {
         })
     }
 
-    fn parse_block_items(&mut self) -> BpsResult<Vec<BlockItem>> {
+    fn parse_block_items(&mut self) -> BmlResult<Vec<BlockItem>> {
         self.eat(TokKind::LBrace, None)?;
         let mut items = Vec::new();
         while !self.at(TokKind::RBrace) {
@@ -362,7 +362,7 @@ impl Parser {
         Ok(items)
     }
 
-    fn parse_repeat(&mut self) -> BpsResult<Repeat> {
+    fn parse_repeat(&mut self) -> BmlResult<Repeat> {
         self.eat(TokKind::LBracket, None)?;
         self.eat(TokKind::RBracket, None)?;
         if self.text() == Some("until_end") {
@@ -393,7 +393,7 @@ impl Parser {
         ))
     }
 
-    fn parse_field_type(&mut self) -> BpsResult<FieldType> {
+    fn parse_field_type(&mut self) -> BmlResult<FieldType> {
         if matches!(self.text(), Some("match") | Some("switch")) {
             return Ok(FieldType::Match(self.parse_match_type(false)?));
         }
@@ -403,7 +403,7 @@ impl Parser {
         Ok(FieldType::Ref(self.parse_type_ref()?))
     }
 
-    fn parse_match_type(&mut self, statement: bool) -> BpsResult<MatchType> {
+    fn parse_match_type(&mut self, statement: bool) -> BmlResult<MatchType> {
         let kw = self.text().map(|s| s.to_string());
         if !matches!(kw.as_deref(), Some("match") | Some("switch")) {
             let tok = self.cur();
@@ -443,7 +443,7 @@ impl Parser {
         })
     }
 
-    fn parse_arm_tags(&mut self) -> BpsResult<(Option<Tag>, Vec<Tag>)> {
+    fn parse_arm_tags(&mut self) -> BmlResult<(Option<Tag>, Vec<Tag>)> {
         if self.text() == Some("_") {
             self.pos += 1;
             if self.cur().kind == TokKind::Op && self.text() == Some("|") {
@@ -467,7 +467,7 @@ impl Parser {
         Ok((Some(first), tags))
     }
 
-    fn parse_one_arm_tag(&mut self) -> BpsResult<Tag> {
+    fn parse_one_arm_tag(&mut self) -> BmlResult<Tag> {
         if self.text() == Some("_") {
             return Err(parse_at(
                 "'_' cannot be combined with other tags",
@@ -481,13 +481,13 @@ impl Parser {
         Ok(Tag::Str(self.eat_ident_value()?))
     }
 
-    fn parse_block_type(&mut self) -> BpsResult<BlockType> {
+    fn parse_block_type(&mut self) -> BmlResult<BlockType> {
         Ok(BlockType {
             items: self.parse_block_items()?,
         })
     }
 
-    fn parse_conditional_group_item(&mut self) -> BpsResult<BlockItem> {
+    fn parse_conditional_group_item(&mut self) -> BmlResult<BlockItem> {
         let (cond, items) = self.parse_conditional_group()?;
         Ok(BlockItem::Group {
             cond: Some(cond),
@@ -495,14 +495,14 @@ impl Parser {
         })
     }
 
-    fn parse_conditional_group(&mut self) -> BpsResult<(Expr, Vec<BlockItem>)> {
+    fn parse_conditional_group(&mut self) -> BmlResult<(Expr, Vec<BlockItem>)> {
         self.pos += 1; // 'if'
         let cond = self.parse_expr()?;
         let items = self.parse_block_type()?.items;
         Ok((cond, items))
     }
 
-    fn parse_type_ref(&mut self) -> BpsResult<TypeRef> {
+    fn parse_type_ref(&mut self) -> BmlResult<TypeRef> {
         let name = self.eat_ident_value()?;
         let mut args = Vec::new();
         if self.at(TokKind::LParen) {
@@ -520,7 +520,7 @@ impl Parser {
         })
     }
 
-    fn parse_transform(&mut self) -> BpsResult<String> {
+    fn parse_transform(&mut self) -> BmlResult<String> {
         if matches!(self.text(), Some("utf8") | Some("mutf8")) {
             let t = self.text().unwrap().to_string();
             self.pos += 1;
@@ -549,7 +549,7 @@ impl Parser {
         }
     }
 
-    fn parse_call_args(&mut self) -> BpsResult<Vec<Expr>> {
+    fn parse_call_args(&mut self) -> BmlResult<Vec<Expr>> {
         self.eat(TokKind::LParen, None)?;
         let mut args = Vec::new();
         if !self.at(TokKind::RParen) {
@@ -564,11 +564,11 @@ impl Parser {
         Ok(args)
     }
 
-    fn parse_expr(&mut self) -> BpsResult<Expr> {
+    fn parse_expr(&mut self) -> BmlResult<Expr> {
         self.parse_ternary()
     }
 
-    fn parse_ternary(&mut self) -> BpsResult<Expr> {
+    fn parse_ternary(&mut self) -> BmlResult<Expr> {
         let cond = self.parse_or()?;
         if self.cur().kind == TokKind::Op && self.text() == Some("?") {
             self.pos += 1;
@@ -580,7 +580,7 @@ impl Parser {
         Ok(cond)
     }
 
-    fn parse_or(&mut self) -> BpsResult<Expr> {
+    fn parse_or(&mut self) -> BmlResult<Expr> {
         let mut left = self.parse_and()?;
         while self.cur().kind == TokKind::Op && self.text() == Some("||") {
             self.pos += 1;
@@ -590,7 +590,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_and(&mut self) -> BpsResult<Expr> {
+    fn parse_and(&mut self) -> BmlResult<Expr> {
         let mut left = self.parse_cmp()?;
         while self.cur().kind == TokKind::Op && self.text() == Some("&&") {
             self.pos += 1;
@@ -600,7 +600,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_cmp(&mut self) -> BpsResult<Expr> {
+    fn parse_cmp(&mut self) -> BmlResult<Expr> {
         let mut left = self.parse_shift()?;
         loop {
             let op = match self.cur().kind {
@@ -618,7 +618,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_shift(&mut self) -> BpsResult<Expr> {
+    fn parse_shift(&mut self) -> BmlResult<Expr> {
         let mut left = self.parse_bitwise()?;
         loop {
             let op = match self.cur().kind {
@@ -636,7 +636,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_add(&mut self) -> BpsResult<Expr> {
+    fn parse_add(&mut self) -> BmlResult<Expr> {
         let mut left = self.parse_mul()?;
         loop {
             let op = match self.cur().kind {
@@ -654,7 +654,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_bitwise(&mut self) -> BpsResult<Expr> {
+    fn parse_bitwise(&mut self) -> BmlResult<Expr> {
         let mut left = self.parse_add()?;
         loop {
             let op = match self.cur().kind {
@@ -672,7 +672,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_mul(&mut self) -> BpsResult<Expr> {
+    fn parse_mul(&mut self) -> BmlResult<Expr> {
         let mut left = self.parse_unary()?;
         loop {
             let op = match self.cur().kind {
@@ -690,7 +690,7 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_unary(&mut self) -> BpsResult<Expr> {
+    fn parse_unary(&mut self) -> BmlResult<Expr> {
         if self.cur().kind == TokKind::Op && self.text() == Some("!") {
             self.pos += 1;
             return Ok(Expr::Unop("!".into(), Box::new(self.parse_unary()?)));
@@ -698,7 +698,7 @@ impl Parser {
         self.parse_primary()
     }
 
-    fn parse_primary(&mut self) -> BpsResult<Expr> {
+    fn parse_primary(&mut self) -> BmlResult<Expr> {
         if self.at(TokKind::Int) {
             let tok = self.eat(TokKind::Int, None)?;
             return Ok(Expr::Int(tok.as_int()?));
@@ -740,7 +740,7 @@ impl Parser {
     }
 }
 
-pub fn parse(source: &str) -> BpsResult<Schema> {
+pub fn parse(source: &str) -> BmlResult<Schema> {
     let tokens = tokenize(source)?;
     Parser::new(tokens).parse()
 }

@@ -5,7 +5,7 @@ use bytemill::interp::{decode_packet, encode_packet};
 use bytemill::{analyze, load_schema, parse, Value};
 
 fn load_nbt() -> bytemill::ResolvedSchema {
-    let core = load_schema(&[concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/minecraft_core.bps")])
+    let core = load_schema(&[concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/minecraft_core.bml")])
         .unwrap();
     let probe = parse("packet nb { t: nbt }").unwrap();
     analyze(&Schema {

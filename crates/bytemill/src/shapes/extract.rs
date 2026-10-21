@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use crate::errors::BpsResult;
+use crate::errors::BmlResult;
 use crate::shapes::items::{Item, impl_body_bounds, scan_items};
 use crate::shapes::model::{FieldShape, NewShape, SerializerShape, Shape, shape_error};
 use crate::shapes::scan::{
@@ -159,7 +159,7 @@ fn use_head(text: &str) -> Option<usize> {
 }
 
 /// `_use_statement`.
-fn use_statement(text: &str) -> BpsResult<String> {
+fn use_statement(text: &str) -> BmlResult<String> {
     let start = use_head(text).ok_or_else(|| shape_error("malformed use"))?;
     let joined = sub(text, start, text.len())
         .split_whitespace()
@@ -172,7 +172,7 @@ fn use_statement(text: &str) -> BpsResult<String> {
 }
 
 /// `_split_use`: (head, leaves).
-fn split_use(statement: &str) -> BpsResult<(String, Vec<String>)> {
+fn split_use(statement: &str) -> BmlResult<(String, Vec<String>)> {
     let body = statement.strip_suffix(';').unwrap_or(statement);
     if let Some((head, inner)) = body.split_once('{') {
         let inner = inner.strip_suffix('}').unwrap_or(inner);
@@ -225,7 +225,7 @@ fn leaf_binding(head: &str, leaf: &str) -> (String, String) {
 }
 
 /// `_coordinate_names`: names the coordinate `Vec` is bound to in this file.
-fn coordinate_names<'a>(use_texts: impl Iterator<Item = &'a str>) -> BpsResult<BTreeSet<String>> {
+fn coordinate_names<'a>(use_texts: impl Iterator<Item = &'a str>) -> BmlResult<BTreeSet<String>> {
     let mut names = BTreeSet::new();
     for text in use_texts {
         let (head, leaves) = split_use(&use_statement(text)?)?;
@@ -323,7 +323,7 @@ fn rebuild_use(head: &str, leaves: &[String]) -> Option<String> {
 }
 
 /// `_hand_imports`.
-fn hand_imports(use_texts: &[&str], needed: &str) -> BpsResult<Vec<String>> {
+fn hand_imports(use_texts: &[&str], needed: &str) -> BmlResult<Vec<String>> {
     let mut kept = Vec::new();
     for text in use_texts {
         let statement = use_statement(text)?;
@@ -361,7 +361,7 @@ fn sibling_exists(directory: Option<&Path>, name: &str) -> bool {
 }
 
 /// `_sibling_text`: contents of `<stem>.*.rs` siblings, sorted by path, joined by newlines.
-fn sibling_text(directory: Option<&Path>, stem: &str) -> BpsResult<String> {
+fn sibling_text(directory: Option<&Path>, stem: &str) -> BmlResult<String> {
     let Some(dir) = directory else {
         return Ok(String::new());
     };
@@ -391,7 +391,7 @@ fn sibling_text(directory: Option<&Path>, stem: &str) -> BpsResult<String> {
 }
 
 /// `_parse_struct_fields`.
-fn parse_struct_fields(body: &str) -> BpsResult<Vec<FieldShape>> {
+fn parse_struct_fields(body: &str) -> BmlResult<Vec<FieldShape>> {
     let mut fields = Vec::new();
     let mut pos = 0;
     while pos < body.len() {
@@ -431,7 +431,7 @@ fn parse_struct_fields(body: &str) -> BpsResult<Vec<FieldShape>> {
 type PacketStruct = (Vec<String>, Vec<String>, String, Vec<FieldShape>);
 
 /// `_packet_struct`.
-fn packet_struct(text: &str, cls: &str) -> BpsResult<PacketStruct> {
+fn packet_struct(text: &str, cls: &str) -> BmlResult<PacketStruct> {
     let head = struct_head(text).ok_or_else(|| shape_error(format!("malformed struct {cls}")))?;
     let (docs, attr_pos) = docs_and_attrs_before(text, head.start)?;
     let derives = parse_struct_attrs(text, attr_pos, head.start)?;
@@ -467,7 +467,7 @@ fn box_new_calls(text: &str, cls: &str) -> bool {
 }
 
 /// `_serializer_read_via_new`.
-fn serializer_read_via_new(impl_body: &str, cls: &str) -> BpsResult<bool> {
+fn serializer_read_via_new(impl_body: &str, cls: &str) -> BmlResult<bool> {
     let len = impl_body.len();
     let mut pos = 0;
     while pos < len {
@@ -525,7 +525,7 @@ fn first_call(text: &str, prefix: &str) -> Option<String> {
 }
 
 /// `_parse_serializer_body`: (style, name).
-fn parse_serializer_body(body: &str) -> BpsResult<(String, String)> {
+fn parse_serializer_body(body: &str) -> BmlResult<(String, String)> {
     if body.contains("ConstantSerializer::new")
         && let Some(name) = first_call(body, "ConstantSerializer::new(")
     {
@@ -540,7 +540,7 @@ fn parse_serializer_body(body: &str) -> BpsResult<(String, String)> {
 }
 
 /// `_raw_params`: the `fn new(...)` parameter list, whitespace collapsed, no trailing comma.
-fn raw_params(body: &str, after_name: usize) -> BpsResult<String> {
+fn raw_params(body: &str, after_name: usize) -> BmlResult<String> {
     let open =
         find_from(body, after_name, "(").ok_or_else(|| shape_error("substring not found"))?;
     let close = skip_balanced(body, open, b'(', b')').saturating_sub(1);
@@ -630,7 +630,7 @@ fn is_must_use(attr: &str) -> bool {
 }
 
 /// `_parse_inherent_impl`.
-fn parse_inherent_impl(body: &str, field_names: &[String]) -> BpsResult<InherentImpl> {
+fn parse_inherent_impl(body: &str, field_names: &[String]) -> BmlResult<InherentImpl> {
     let mut out = InherentImpl {
         style: "constant".to_string(),
         ..Default::default()
@@ -713,7 +713,7 @@ pub fn extract_shape(
     cls: &str,
     module: &str,
     packet_path: Option<&Path>,
-) -> BpsResult<Shape> {
+) -> BmlResult<Shape> {
     let stem = module.rsplit_once('/').map_or(module, |(_, s)| s);
     let items: Vec<Item> = scan_items(source)?;
     let coord_names = coordinate_names(

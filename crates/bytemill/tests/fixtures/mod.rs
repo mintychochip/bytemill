@@ -4,7 +4,7 @@
 
 pub fn temp_dir(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "bps-tree-{tag}-{}-{:?}",
+        "bml-tree-{tag}-{}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -36,7 +36,7 @@ fn keep_alive_schema() -> String {
             format!(
                 "import \"{}\"\n",
                 root.join("schemas/std")
-                    .join(format!("{n}.bps"))
+                    .join(format!("{n}.bml"))
                     .display()
             )
         })
@@ -164,7 +164,7 @@ pub fn keep_alive_shape() -> bytemill::shapes::Shape {
 
 pub fn analyze_keep_alive() -> (bytemill::ResolvedSchema, bytemill::minestom::Unit) {
     let dir = temp_dir("keepalive");
-    let schema = dir.join("keep.bps");
+    let schema = dir.join("keep.bml");
     write(&schema, &keep_alive_schema());
     let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let units = bytemill::minestom::build_units(&resolved, &keep_alive_table()).unwrap();

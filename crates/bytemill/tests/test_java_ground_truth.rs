@@ -1,9 +1,9 @@
-//! Ports tests/test_java_ground_truth.py: BPS layouts against real Minestom bytes.
+//! Ports tests/test_java_ground_truth.py: BML layouts against real Minestom bytes.
 
 mod common;
 
 /// packet -> how Minestom's bytes differ from vanilla's wire format, which
-/// BPS follows.
+/// BML follows.
 const KNOWN_MISMATCHES: &[(&str, &str)] = &[
     (
         "delete_chat",
@@ -15,7 +15,7 @@ const KNOWN_MISMATCHES: &[(&str, &str)] = &[
     ),
 ];
 
-/// Java classes that serve two BPS packets because vanilla writes them
+/// Java classes that serve two BML packets because vanilla writes them
 /// differently by state.
 const SPLIT_CLASSES: &[(&str, &[&str])] =
     &[("ShowDialogPacket", &["show_dialog", "show_dialog_configuration"])];
@@ -24,7 +24,7 @@ const SPLIT_CLASSES: &[(&str, &[&str])] =
 const COVERED_PACKETS: usize = 136;
 
 #[test]
-fn java_and_bps_register_the_same_ids() {
+fn java_and_bml_register_the_same_ids() {
     if !common::java_probes::available() {
         eprintln!("rstom probe fixtures not present; skipping");
         return;
@@ -38,17 +38,17 @@ fn java_and_bps_register_the_same_ids() {
     let route_keys: std::collections::BTreeSet<(String, String, i128)> =
         route.into_iter().map(|(s, d, i, _)| (s, d, i)).collect();
     let java_only: Vec<_> = java_slots.difference(&route_keys).collect();
-    assert!(java_only.is_empty(), "ids Java has and BPS lacks: {java_only:?}");
-    let bps_only: Vec<_> = route_keys.difference(&java_slots).collect();
+    assert!(java_only.is_empty(), "ids Java has and BML lacks: {java_only:?}");
+    let bml_only: Vec<_> = route_keys.difference(&java_slots).collect();
     assert_eq!(
-        bps_only,
+        bml_only,
         vec![&("handshaking".to_string(), "serverbound".to_string(), 0xFE)],
-        "ids BPS has and Java lacks"
+        "ids BML has and Java lacks"
     );
 }
 
 #[test]
-fn each_java_class_is_one_bps_packet() {
+fn each_java_class_is_one_bml_packet() {
     if !common::java_probes::available() {
         eprintln!("rstom probe fixtures not present; skipping");
         return;
@@ -74,7 +74,7 @@ fn each_java_class_is_one_bps_packet() {
 }
 
 #[test]
-fn every_recorded_sample_belongs_to_a_bps_packet() {
+fn every_recorded_sample_belongs_to_a_bml_packet() {
     if !common::java_probes::available() {
         eprintln!("rstom probe fixtures not present; skipping");
         return;

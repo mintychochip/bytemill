@@ -1,9 +1,9 @@
-//! Map BPS units to hand packet files and compare them with the shape ledger.
+//! Map BML units to hand packet files and compare them with the shape ledger.
 //! Ports `bps/shapes/ledger.py`.
 
 use crate::ast::{PacketDecl, ResolvedSchema};
 use crate::emit_rstom::packet_fields;
-use crate::errors::{BpsResult, shape};
+use crate::errors::{BmlResult, shape};
 use crate::minestom::Unit;
 use crate::shapes::extract::{PACKET_ROOT, extract_shape};
 use crate::shapes::model::{Shape, shape_from_json};
@@ -21,10 +21,10 @@ pub fn module_path(unit: &Unit) -> String {
     format!("{}/{}/{}", unit.cls.group, unit.cls.package, unit.cls.stem)
 }
 
-pub fn bps_field_pairs(
+pub fn bml_field_pairs(
     pkt: &PacketDecl,
     resolved: &ResolvedSchema,
-) -> BpsResult<Vec<(String, String)>> {
+) -> BmlResult<Vec<(String, String)>> {
     let (fields, _types) = packet_fields(pkt, resolved)?;
     let mut out = Vec::with_capacity(fields.len());
     for f in &fields {
@@ -43,30 +43,30 @@ pub fn bps_field_pairs(
     Ok(out)
 }
 
-pub fn mismatch(shape: &Shape, bps_fields: &[(String, String)]) -> Vec<String> {
+pub fn mismatch(shape: &Shape, bml_fields: &[(String, String)]) -> Vec<String> {
     let hand: Vec<(&str, &str)> = shape
         .fields
         .iter()
         .map(|f| (f.name.as_str(), f.type_.as_str()))
         .collect();
-    if hand.len() != bps_fields.len() {
+    if hand.len() != bml_fields.len() {
         return vec![format!(
-            "field count: hand has {}, BPS has {}",
+            "field count: hand has {}, BML has {}",
             hand.len(),
-            bps_fields.len()
+            bml_fields.len()
         )];
     }
-    for ((hn, ht), (bn, bt)) in hand.iter().zip(bps_fields.iter()) {
+    for ((hn, ht), (bn, bt)) in hand.iter().zip(bml_fields.iter()) {
         if hn != bn {
             return vec![format!(
-                "field {hn}: hand name {}, BPS name {}",
+                "field {hn}: hand name {}, BML name {}",
                 crate::errors::py_repr_str(hn),
                 crate::errors::py_repr_str(bn)
             )];
         }
         if ht != bt {
             return vec![format!(
-                "field {hn}: hand type {}, BPS type {}",
+                "field {hn}: hand type {}, BML type {}",
                 crate::errors::py_repr_str(ht),
                 crate::errors::py_repr_str(bt)
             )];
@@ -75,7 +75,7 @@ pub fn mismatch(shape: &Shape, bps_fields: &[(String, String)]) -> Vec<String> {
     Vec::new()
 }
 
-pub fn load_ledger(dir: &Path) -> BpsResult<Vec<(String, Shape)>> {
+pub fn load_ledger(dir: &Path) -> BmlResult<Vec<(String, Shape)>> {
     let mut paths: Vec<PathBuf> = Vec::new();
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -108,7 +108,7 @@ pub fn packet_report(
     unit: &Unit,
     resolved: &ResolvedSchema,
     workspace: &Path,
-) -> BpsResult<String> {
+) -> BmlResult<String> {
     let path = hand_packet_path(workspace, unit);
     if !path.is_file() {
         return Ok(format!("missing hand file {}", path.display()));
@@ -119,7 +119,7 @@ pub fn packet_report(
         Ok(s) => s,
         Err(err) => return Ok(err.to_string()),
     };
-    let reasons = mismatch(&s, &bps_field_pairs(&unit.pkt, resolved)?);
+    let reasons = mismatch(&s, &bml_field_pairs(&unit.pkt, resolved)?);
     if !reasons.is_empty() {
         return Ok(reasons.join("; "));
     }
@@ -127,14 +127,14 @@ pub fn packet_report(
 }
 
 /// `(unit, shape)` for each unit whose hand file parses; `eligible_only` skips
-/// shapes whose fields no longer match BPS.
+/// shapes whose fields no longer match BML.
 pub fn extract_shapes_for_units(
     resolved: &ResolvedSchema,
     workspace: &Path,
     units: &[Unit],
     eligible_only: bool,
     class_names: Option<&[String]>,
-) -> BpsResult<Vec<(Unit, Shape)>> {
+) -> BmlResult<Vec<(Unit, Shape)>> {
     let mut out = Vec::new();
     for unit in units {
         if let Some(names) = class_names
@@ -153,7 +153,7 @@ pub fn extract_shapes_for_units(
             Err(_) if eligible_only => continue,
             Err(e) => return Err(e),
         };
-        if eligible_only && !mismatch(&shape, &bps_field_pairs(&unit.pkt, resolved)?).is_empty() {
+        if eligible_only && !mismatch(&shape, &bml_field_pairs(&unit.pkt, resolved)?).is_empty() {
             continue;
         }
         out.push((unit.clone(), shape));

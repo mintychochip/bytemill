@@ -14,7 +14,7 @@ current-tree evidence (code, test, workflow, or committed report). Design ration
 
 | Area | State |
 |---|---|
-| Schema language | `.bps` parser, resolver, analyzer, interpreter (`ir::exec`), typed program (`ir::typed`), phase inspector (`ir::stages`, `bml stages`) |
+| Schema language | `.bml` parser, resolver, analyzer, interpreter (`ir::exec`), typed program (`ir::typed`), phase inspector (`ir::stages`, `bml stages`) |
 | Typed printers | Rust (typed), Go, Python, Java, C#, C, C++, TypeScript, Zig — all lower `ir::typed::Program`; shared matrix in `compat::TARGETS` (`bml targets`) |
 | Language versions | C++98–26, Go 1.16–1.24, Python 3.8–3.14, C89–C23, Rust 2015–2024, TS ES2015–ESNext, Zig 0.11–0.14, Java 8–21, C# 8–12 via `--std`/`<target>:<version>` |
 | Protocol coverage | 39 version roots / 51 releases (1.13 → 26.3), hand-written 26.3, Hytale connection packets |
@@ -39,7 +39,7 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 | A3 | Enforce formatting of the compiler itself | No `.rustfmt.toml`, no fmt workflow, no fmt in `.githooks/pre-commit`; the baseline tree is not `cargo fmt --check` clean, and the only fmt gates are for *emitted* code | A pinned rustfmt config + normalized tree (or an explicitly scoped check) runs as a required check |
 | A4 | Schedule the ProtoDef oracle | `scripts/verify_versions.py` is manual, needs `npm ci` in `tools/protodef-oracle` and `write_generated_vectors --ignored` | A scheduled (and manually dispatchable) job runs both directions, refreshes pinned vectors only via reviewed PRs, and reports drift |
 | A5 | Publish diagnostic results instead of hiding them | Four `#[ignore]` diagnostics: `test_versions.rs:208` (round-trip failures), `:223` (generator coverage), `:246` (vector writer), `test_versions_cross.rs:77` (cross disagreements) | Each release attaches or commits the diagnostic output, or the test becomes an assertion with a bound |
-| A6 | Broaden the release smoke test | `.github/workflows/release.yml` smoke-tests only `bml check schemas/std/varint.bps` | Release builds also `check` the 26.3 wiki root and Hytale root, and run `wire-check` on a committed vector file |
+| A6 | Broaden the release smoke test | `.github/workflows/release.yml` smoke-tests only `bml check schemas/std/varint.bml` | Release builds also `check` the 26.3 wiki root and Hytale root, and run `wire-check` on a committed vector file |
 
 ### P1 — Emitter and runtime completeness
 
@@ -50,18 +50,18 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 | B3 | Put the remaining emitters on the typed program, or stop claiming they are | `emit rust` (`emit_rust.rs`), `emit rstom` (`emit_rstom.rs`), `emit rstom-tree` (`emit_tree.rs`) take `ResolvedSchema` directly; `README.md` says “Every printer lowers schemas to a shared typed intermediate representation” | Either those three lower `ir::typed::Program`, or README/spec name them as AST-based exceptions with a tracked migration goal |
 | B4 | Make version flags honest for non-typed targets | `--std` is parsed for `rust`/`rstom`/`rstom-tree` in `EmitOptions::for_target` but ignored by the CLI arms; Zig stores `ZigVersion` as a no-op (`emit_zig.rs:543-547`) | Unsupported targets reject `--std` with a clear error (or implement it); Zig output differs meaningfully per version or the flag is rejected |
 | B5 | Support `emit <target> --check` | `cli.rs:505-509`: `--check` is an error except for `rstom-tree` | Every emit target can report drift (exit 3) without writing; generated-code CI can gate on it |
-| B6 | Remove the `rust-typed` panic | `emit_rust_typed.rs:197` panics when a method codec has no named type | The case returns a `BpsError`, with a regression test |
+| B6 | Remove the `rust-typed` panic | `emit_rust_typed.rs:197` panics when a method codec has no named type | The case returns a `BmlError`, with a regression test |
 
 ### P2 — Schema and protocol fidelity
 
 | ID | Goal | Evidence (current tree) | Done when |
 |---|---|---|---|
 | C1 | Extend Hytale coverage | `schemas/hytale/README.md`: covered packets are only `connect`, `disconnect`, `ping`, `pong` (4 packets / 5 routes); no gameplay/channel packets, no zstd-compressed framing, offset-table layouts limited to reading packed order | Additional packet families modeled and tested; compression behavior either modeled or explicitly out of scope for the schema |
-| C2 | Decode the intentionally opaque payloads | `data: rest` in `minecraft_26_3_login.bps:35,44,58`, `versions/common/from_1_13.bps:148,153,202,210`, `from_1_20_2.bps:44,49`; light data `rest` in `1_14_to_1_15_2.bps:134` and `1_16_to_1_16_5.bps:94`; metadata kinds 34/41 at `minecraft_core.bps:92,99` | Each site is either decoded by the schema, or carries a dated comment naming the blocker and the tests that would change |
+| C2 | Decode the intentionally opaque payloads | `data: rest` in `minecraft_26_3_login.bml:35,44,58`, `versions/common/from_1_13.bml:148,153,202,210`, `from_1_20_2.bml:44,49`; light data `rest` in `1_14_to_1_15_2.bml:134` and `1_16_to_1_16_5.bml:94`; metadata kinds 34/41 at `minecraft_core.bml:92,99` | Each site is either decoded by the schema, or carries a dated comment naming the blocker and the tests that would change |
 | C3 | Close or bound the hand-written 26.3 looseness | `test_versions_cross.rs` lists 13 packet types where the hand-written schema is deliberately looser (containers, recipes, advancements, explode, attributes); versions README records 171 packets that do not round-trip exactly | The list shrinks to a documented, test-pinned exception set, or the schema models those fields |
 | C4 | Audit pre-26.1 schemas against vanilla | `schemas/versions/README.md`: only 26.1–26.3 were compared with decompiled servers; 11 known 26.1 misdescriptions remain in older descriptions; 1.14.2 reuses 1.14.1 data as inference; 26.2/26.3 data are open-PR heads | Older descriptions patched where vanilla disagrees; the open-PR data dependencies are replaced when upstream merges; the inference note is removed or confirmed |
 | C5 | Exercise more than status/login against real servers | `game_probe` boots the dedicated server and speaks status + login only (`game_probe.rs:3-5`) | Configuration and at least one play flow are probed, or the README states the limit exactly |
-| C6 | Reconcile registry claims | `README.md` says all vanilla registries are fully modeled; `schemas/versions/README.md` says registry-keyed values are opaque integers; `minecraft_26_3_remaining.bps:3-5` stops at opaque byte arrays | One claim is true: either name tables/registries are modeled, or both docs say ids are opaque and the README claim is narrowed |
+| C6 | Reconcile registry claims | `README.md` says all vanilla registries are fully modeled; `schemas/versions/README.md` says registry-keyed values are opaque integers; `minecraft_26_3_remaining.bml:3-5` stops at opaque byte arrays | One claim is true: either name tables/registries are modeled, or both docs say ids are opaque and the README claim is narrowed |
 
 ### P3 — rstom / Minestom downstream
 
@@ -78,7 +78,7 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 | ID | Goal | Evidence (current tree) | Done when |
 |---|---|---|---|
 | E1 | Remove or restore the Python parity reference | `schemas/versions/README.md` cites `scripts/python_parity_versions.py`, which does not exist (the prototype was removed in `779d185`) | The README reference matches the tree, or the script is restored and runnable |
-| E2 | Fix stale schema comments and missing root docs | `schemas/minecraft_26_3_play.bps:3` claims `body: rest` fallbacks that no longer exist; `minecraft_26_3_play_serverbound.bps`/`remaining.bps` are unlisted in READMEs; `schemas/hytale/README.md` documents only the root, not `connection.bps`/`core.bps` | Comments match the schema; every root is listed where a reader looks |
+| E2 | Fix stale schema comments and missing root docs | `schemas/minecraft_26_3_play.bml:3` claims `body: rest` fallbacks that no longer exist; `minecraft_26_3_play_serverbound.bml`/`remaining.bml` are unlisted in READMEs; `schemas/hytale/README.md` documents only the root, not `connection.bml`/`core.bml` | Comments match the schema; every root is listed where a reader looks |
 | E3 | Keep the nine-language claims exact | README language/registry claims must match C6/B3 outcomes | README statements are covered by a test or a named spec section |
 | E4 | Maintain this file | — | Every merged change that closes a goal updates its row in the same PR; new deferrals add a row instead of a comment |
 

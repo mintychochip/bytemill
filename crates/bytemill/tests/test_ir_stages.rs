@@ -22,7 +22,7 @@ fn schema_source() -> String {
              }}\n\
              route play.clientbound 0x01 => ping\n\
          }}\n",
-        include_str!("../../../schemas/std/varint.bps")
+        include_str!("../../../schemas/std/varint.bml")
     )
 }
 
@@ -148,7 +148,7 @@ fn stages_json_keeps_every_phase() {
 fn bml_stages_prints_every_phase() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = Command::new(env!("CARGO_BIN_EXE_bml"))
-        .args(["stages", "schemas/std/varint.bps"])
+        .args(["stages", "schemas/std/varint.bml"])
         .current_dir(root)
         .output()
         .expect("run bml stages");

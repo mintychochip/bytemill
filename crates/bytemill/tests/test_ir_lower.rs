@@ -10,7 +10,7 @@ fn repo(rel: &str) -> String {
 
 #[test]
 fn i32be_calls_u32be_and_u8_is_one_read() {
-    let source = repo("schemas/std/integers.bps") + "packet probe { n: i32be }\n";
+    let source = repo("schemas/std/integers.bml") + "packet probe { n: i32be }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let ir = lower(&resolved).unwrap();
 
@@ -49,7 +49,7 @@ fn i32be_calls_u32be_and_u8_is_one_read() {
 }
 
 fn std_schema() -> bytemill::ast::ResolvedSchema {
-    let source = repo("schemas/std/integers.bps") + &repo("schemas/std/varint.bps");
+    let source = repo("schemas/std/integers.bml") + &repo("schemas/std/varint.bml");
     bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap()
 }
 
@@ -89,8 +89,8 @@ fn scalars_roundtrip_known_bytes() {
 }
 
 fn string_schema() -> bytemill::ast::ResolvedSchema {
-    let source = repo("schemas/std/integers.bps")
-        + &repo("schemas/std/varint.bps")
+    let source = repo("schemas/std/integers.bml")
+        + &repo("schemas/std/varint.bml")
         + r#"
 encoding string(max_chars = 32767) {
     byte_len: varint
@@ -131,7 +131,7 @@ fn string_shaped_is_one_string_not_a_record() {
 fn minecraft_core_string_shapes_are_exactly_these() {
     use bytemill::ir::TypeDef;
     let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../"))
-        .join("schemas/minecraft_core.bps");
+        .join("schemas/minecraft_core.bml");
     let resolved = bytemill::analyze(&bytemill::load_schema(&[path]).unwrap()).unwrap();
     let ir = lower(&resolved).unwrap();
     let mut names: Vec<&str> = ir
@@ -153,7 +153,7 @@ fn position_is_a_record_of_computed_signed_fields() {
     use bytemill::Value;
     use bytemill::ir::{Storage, Ty, TypeDef, exec_decode};
     let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../"))
-        .join("schemas/minecraft_core.bps");
+        .join("schemas/minecraft_core.bml");
     let resolved = bytemill::analyze(&bytemill::load_schema(&[path]).unwrap()).unwrap();
     let ir = lower(&resolved).unwrap();
     let TypeDef::Record { fields } = ir.types.get("position").unwrap() else {
@@ -177,8 +177,8 @@ fn repeats_optionals_matches_and_open_enums() {
     use bytemill::Value;
     use bytemill::ir::{TypeDef, exec_decode, exec_encode};
     use bytemill::value::Env;
-    let source = repo("schemas/std/integers.bps")
-        + &repo("schemas/std/varint.bps")
+    let source = repo("schemas/std/integers.bml")
+        + &repo("schemas/std/varint.bml")
         + r#"
 enum intent : varint { status = 1 login = 2 }
 packet opt { flag: boolean  extra: u8 if flag }
@@ -239,7 +239,7 @@ packet tagged { tag: u8  value: match tag { 1 => u8  _ => u16be } }
 
     // Same-name bindings with different types rename instead of erroring:
     // the first keeps `a`, the later conflicting one becomes `a_2`.
-    let bad = repo("schemas/std/integers.bps")
+    let bad = repo("schemas/std/integers.bml")
         + "packet bad { kind: u8  match kind { 1 => { a: u8 }  2 => { a: u16be } } }\n";
     let bad_ir = lower(&bytemill::analyze(&bytemill::parse(&bad).unwrap()).unwrap()).unwrap();
     let fields = match bad_ir.types.get("bad") {
@@ -269,7 +269,7 @@ fn handshake_frame_roundtrips_and_a_missing_frame_is_an_error() {
     use bytemill::value::Env;
     use bytemill::Value;
     let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../"))
-        .join("schemas/minecraft_26_3_wiki.bps");
+        .join("schemas/minecraft_26_3_wiki.bml");
     let resolved = bytemill::analyze(&bytemill::load_schema(&[path]).unwrap()).unwrap();
     let ir = lower(&resolved).unwrap();
     assert_eq!(ir.routes.len(), resolved.routes.len());

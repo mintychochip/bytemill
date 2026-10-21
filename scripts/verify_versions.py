@@ -3,10 +3,10 @@
 
 Both directions, for every entry of schemas/versions/manifest.json:
 
-  JS -> BPS   the oracle compiles the version's protocol.json (with the manifest's patches) with
+  JS -> BML   the oracle compiles the version's protocol.json (with the manifest's patches) with
               ProtoDef and generates random packets; `bml wire-check` must decode each strictly
               and encode it back to the same bytes.
-  BPS -> JS   bytes drawn from the generated schema itself (the `write_generated_vectors` test)
+  BML -> JS   bytes drawn from the generated schema itself (the `write_generated_vectors` test)
               must decode in ProtoDef with every byte consumed and re-serialise identically.
 
     scripts/verify_versions.py [--count 20] [--seeds 20] [--only 1.20.1] [--keep DIR]
@@ -16,7 +16,7 @@ Both directions, for every entry of schemas/versions/manifest.json:
 cargo test `oracle_vectors_round_trip` decodes and re-encodes them with no Node needed.
 
 Needs `npm ci` in tools/protodef-oracle and a built `target/debug/bml` (cargo build -p bytemill). Node and
-cargo run under the same memory cap as scripts/bytemill_cargo.sh (BPS_MEM_MAX, default 8G).
+cargo run under the same memory cap as scripts/bytemill_cargo.sh (BML_MEM_MAX, default 8G).
 """
 import argparse
 import atexit
@@ -35,7 +35,7 @@ if not DATA.is_dir():
     sys.exit("minecraft-data not fetched; run scripts/fetch_minecraft_data.py")
 BPSC = ROOT / "target/debug/bml"
 
-# BPS -> JS: random bytes drawn from a BPS schema are valid wire bytes, but ProtoDef's JS value model
+# BML -> JS: random bytes drawn from a BML schema are valid wire bytes, but ProtoDef's JS value model
 # is lossy for a few shapes, so JS cannot always write back what it read. A packet with one of these
 # shapes is still required to DECODE in ProtoDef with every byte consumed; only a difference in the JS
 # re-serialisation is put down to the oracle, and only for the causes below (each was confirmed by
@@ -60,7 +60,7 @@ def js_lossy_cause(f):
 def capped(cmd):
     if shutil.which("systemd-run") is None:
         return cmd
-    mem = os.environ.get("BPS_MEM_MAX", "8G")
+    mem = os.environ.get("BML_MEM_MAX", "8G")
     return ["systemd-run", "--user", "--scope", "-q", "-p", f"MemoryMax={mem}", "-p", "MemorySwapMax=0"] + cmd
 
 
@@ -71,7 +71,7 @@ def run(cmd, **kw):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=20, help="JS-generated packets per packet type")
-    ap.add_argument("--seeds", type=int, default=20, help="BPS-generated packets per packet type")
+    ap.add_argument("--seeds", type=int, default=20, help="BML-generated packets per packet type")
     ap.add_argument("--only", help="a release from the manifest, e.g. 1.20.1")
     ap.add_argument("--keep", help="write vectors here instead of a temporary directory")
     ap.add_argument("--pin", action="store_true", help="refresh the committed oracle vectors and stop")
@@ -96,26 +96,26 @@ def main():
     if args.keep:
         work = Path(args.keep)
     else:
-        work = Path(tempfile.mkdtemp(prefix="bps-verify-"))
+        work = Path(tempfile.mkdtemp(prefix="bml-verify-"))
         atexit.register(shutil.rmtree, work, ignore_errors=True)
-    (work / "bps").mkdir(parents=True, exist_ok=True)
+    (work / "bml").mkdir(parents=True, exist_ok=True)
 
-    # BPS -> JS vectors, drawn once for all versions by the cargo test.
-    env = dict(os.environ, BPS_VECTORS_OUT=str(work / "bps"), BPS_SEEDS=str(args.seeds))
+    # BML -> JS vectors, drawn once for all versions by the cargo test.
+    env = dict(os.environ, BML_VECTORS_OUT=str(work / "bml"), BML_SEEDS=str(args.seeds))
     if args.only:
-        env["BPS_ONLY"] = args.only
+        env["BML_ONLY"] = args.only
     r = subprocess.run(
-        [str(ROOT / "scripts/bytemill_cargo.sh"), "test", "-p", "bps", "--test", "test_versions", "--",
+        [str(ROOT / "scripts/bytemill_cargo.sh"), "test", "-p", "bytemill", "--test", "test_versions", "--",
          "--ignored", "write_generated_vectors"], capture_output=True, text=True, env=env, cwd=ROOT)
     if r.returncode != 0:
         sys.exit(r.stdout + r.stderr)
 
     failed = 0
     causes = {}
-    print(f"{'release':9s} {'protocol':8s} {'JS->BPS':>22s}   {'BPS->JS':>34s}")
+    print(f"{'release':9s} {'protocol':8s} {'JS->BML':>22s}   {'BML->JS':>34s}")
     for e in entries:
         rel = e["release"]
-        schema = ROOT / "schemas/versions" / f"v{rel.replace('.', '_')}.bps"
+        schema = ROOT / "schemas/versions" / f"v{rel.replace('.', '_')}.bml"
         proto = ROOT / "data/minecraft-data" / e["data"] / "protocol.json"
         patches = ["--patches", str(ROOT / "schemas/versions" / e["patches"])] if e.get("patches") else []
 
@@ -129,8 +129,8 @@ def main():
         w = subprocess.run([str(BPSC), "wire-check", str(schema), "--file", str(js_out)], capture_output=True, text=True)
         a = w.stdout.strip() or w.stderr.strip()[:60]
 
-        c = run(["node", str(ORACLE), "check", "--protocol", str(proto), *patches, "--file", str(work / "bps" / f"{rel}.jsonl")])
-        total = sum(1 for _ in open(work / "bps" / f"{rel}.jsonl"))
+        c = run(["node", str(ORACLE), "check", "--protocol", str(proto), *patches, "--file", str(work / "bml" / f"{rel}.jsonl")])
+        total = sum(1 for _ in open(work / "bml" / f"{rel}.jsonl"))
         lossy, real = 0, []
         for line in c.stdout.splitlines():
             f = json.loads(line)
@@ -146,9 +146,9 @@ def main():
         print(f"{rel:9s} {e['protocol']:<8d} {a:>22s}   {b:>34s}{'   <-- FAIL' if bad else ''}")
         if bad:
             for line in w.stderr.strip().splitlines()[:3]:
-                print("    JS->BPS:", line[:180])
+                print("    JS->BML:", line[:180])
             for line in real[:3]:
-                print("    BPS->JS:", line[:180])
+                print("    BML->JS:", line[:180])
     for cause, n in sorted(causes.items(), key=lambda kv: -kv[1]):
         print(f"js-lossy x{n}: {cause}")
     print(f"vectors kept in {work}" if args.keep else "")

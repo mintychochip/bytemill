@@ -9,14 +9,14 @@ fn repo(rel: &str) -> PathBuf {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-cs-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-cs-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
 
 fn std_source() -> String {
-    std::fs::read_to_string(repo("schemas/std/integers.bps")).unwrap()
-        + &std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
 }
 
 /// Every generated `.cs` file under `BmlGen`, concatenated, so assertions see
@@ -259,7 +259,7 @@ fn build_gate(dir: &Path, dotnet: &Path, lang: &str) {
 #[test]
 fn csharp_26_3_packets_roundtrip() {
     let dir = emit_schema(
-        "schemas/minecraft_26_3_wiki.bps",
+        "schemas/minecraft_26_3_wiki.bml",
         "26-3",
         bytemill::CSharpVersion::CSharp12,
     );
@@ -280,7 +280,7 @@ fn csharp_26_3_packets_roundtrip() {
 #[test]
 fn csharp_hytale_packets_roundtrip() {
     let dir = emit_schema(
-        "schemas/hytale/2026_02_17.bps",
+        "schemas/hytale/2026_02_17.bml",
         "hytale",
         bytemill::CSharpVersion::CSharp12,
     );
@@ -314,7 +314,7 @@ fn csharp_8_probe_builds() {
 #[test]
 fn csharp_26_3_runtime_roundtrip() {
     let dir = emit_schema(
-        "schemas/minecraft_26_3_wiki.bps",
+        "schemas/minecraft_26_3_wiki.bml",
         "26-3-rt",
         bytemill::CSharpVersion::CSharp12,
     );

@@ -10,7 +10,7 @@ use bytemill::interp::{decode_packet, encode_packet};
 use bytemill::{analyze, load_schema, Value};
 
 fn load() -> bytemill::ResolvedSchema {
-    analyze(&load_schema(&[common::schema_path("hytale/2026_02_17.bps")]).unwrap()).unwrap()
+    analyze(&load_schema(&[common::schema_path("hytale/2026_02_17.bml")]).unwrap()).unwrap()
 }
 
 fn roundtrip(resolved: &bytemill::ResolvedSchema, packet: &str, raw: &[u8]) -> bytemill::Env {

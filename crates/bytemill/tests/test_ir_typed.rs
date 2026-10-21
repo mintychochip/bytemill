@@ -16,8 +16,8 @@ fn load(rel: &str) -> Program {
 }
 
 fn source(text: &str) -> Program {
-    let std = std::fs::read_to_string(repo("schemas/std/integers.bps")).unwrap()
-        + &std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap();
+    let std = std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap();
     let resolved = bytemill::analyze(&bytemill::parse(&(std + text)).unwrap()).unwrap();
     typed(&resolved).unwrap()
 }
@@ -58,13 +58,13 @@ fn all(stmts: &[Stmt]) -> Vec<&Stmt> {
 #[test]
 fn builds_for_every_shipped_schema() {
     let mut roots = vec![
-        "schemas/minecraft_26_3_wiki.bps".to_string(),
-        "schemas/hytale/2026_02_17.bps".to_string(),
+        "schemas/minecraft_26_3_wiki.bml".to_string(),
+        "schemas/hytale/2026_02_17.bml".to_string(),
     ];
     let mut versions: Vec<String> = std::fs::read_dir(repo("schemas/versions"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with('v') && n.ends_with(".bps"))
+        .filter(|n| n.starts_with('v') && n.ends_with(".bml"))
         .map(|n| format!("schemas/versions/{n}"))
         .collect();
     versions.sort();
@@ -94,7 +94,7 @@ fn builds_for_every_shipped_schema() {
 
 #[test]
 fn names_are_unique_and_structural() {
-    let p = load("schemas/minecraft_26_3_wiki.bps");
+    let p = load("schemas/minecraft_26_3_wiki.bml");
     let mut seen = std::collections::HashSet::new();
     for t in &p.types {
         assert!(
@@ -126,7 +126,7 @@ fn names_are_unique_and_structural() {
 
 #[test]
 fn a_fragment_gets_no_codec() {
-    let p = load("schemas/minecraft_26_3_wiki.bps");
+    let p = load("schemas/minecraft_26_3_wiki.bml");
     assert!(p.codec_by_ir("nbt_payload").is_none());
     assert!(p.type_by_ir("nbt_payload_value").is_none());
     assert!(p.codec_by_ir("nbt").is_some());
@@ -134,7 +134,7 @@ fn a_fragment_gets_no_codec() {
 
 #[test]
 fn scalar_codecs_zero_only_conditionally_read_wire_names() {
-    let p = load("schemas/std/varint.bps");
+    let p = load("schemas/std/varint.bml");
     let c = codec(&p, "varint");
     assert_eq!(c.kind, CodecKind::Scalar);
     assert_eq!(c.value, Ty::Int(IntTy::I32));
@@ -172,7 +172,7 @@ fn scalar_codecs_zero_only_conditionally_read_wire_names() {
 
 #[test]
 fn narrow_operations_stay_narrow_and_wide_ones_widen() {
-    let p = load("schemas/std/varint.bps");
+    let p = load("schemas/std/varint.bml");
     let c = codec(&p, "varint");
     // `(b0 & 128) != 0` compares a u8 without a cast.
     let guard = all(&c.decode.stmts)
@@ -207,7 +207,7 @@ fn narrow_operations_stay_narrow_and_wide_ones_widen() {
 
 #[test]
 fn strings_rebind_bytes_into_a_fresh_local() {
-    let p = load("schemas/minecraft_core.bps");
+    let p = load("schemas/minecraft_core.bml");
     let c = codec(&p, "string");
     assert_eq!(c.kind, CodecKind::String);
     assert_eq!(c.params.len(), 1);
@@ -363,7 +363,7 @@ fn negation_flips_integer_comparisons_but_not_float_ones() {
 
 #[test]
 fn enums_cast_from_their_base() {
-    let p = load("schemas/minecraft_26_3.bps");
+    let p = load("schemas/minecraft_26_3.bml");
     let c = codec(&p, "intent");
     assert_eq!(c.kind, CodecKind::Enum);
     let Some(Stmt::Return(Expr::Cast {
@@ -384,7 +384,7 @@ fn enums_cast_from_their_base() {
 #[test]
 #[ignore = "prints the typed program of a few 26.3 codecs"]
 fn dump_samples() {
-    let p = load("schemas/minecraft_26_3_wiki.bps");
+    let p = load("schemas/minecraft_26_3_wiki.bml");
     for ir in [
         "varint",
         "varlong",

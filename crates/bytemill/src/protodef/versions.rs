@@ -24,7 +24,7 @@ pub struct VersionEntry {
 
 impl VersionEntry {
     pub fn file_name(&self) -> String {
-        format!("{}.bps", version_ident(&self.release))
+        format!("{}.bml", version_ident(&self.release))
     }
 }
 

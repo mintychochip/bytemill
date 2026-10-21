@@ -124,7 +124,7 @@ fn packet(
     .join("\n")
 }
 
-fn extract(source: &str, packet_path: Option<&Path>) -> bytemill::BpsResult<Shape> {
+fn extract(source: &str, packet_path: Option<&Path>) -> bytemill::BmlResult<Shape> {
     extract_shape(source, "ProbePacket", PACKET_PATH, packet_path)
 }
 
@@ -162,7 +162,7 @@ fn base_shape() -> Shape {
 
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "bps-v2-{tag}-{}-{:?}",
+        "bml-v2-{tag}-{}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

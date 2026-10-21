@@ -29,7 +29,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::ResolvedSchema;
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ir::typed::{
     BinOp, Bind, Body, Codec, CodecIdx, CodecKind, Expr, Failure, Func, IntTy, LocalId, ParamRole,
     Program, ReadOp, RepeatMode, Stmt, Ty, TypeIdx, WriteOp,
@@ -264,7 +264,7 @@ def _missing_(cls, value: object) -> Self | None:
 "#;
 
 /// Emit the `bmlgen` package for `resolved` into `out_dir`.
-pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     emit_python_with_version(resolved, out_dir, crate::PythonVersion::default())
 }
 
@@ -272,7 +272,7 @@ pub fn emit_python_with_version(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     ver: crate::PythonVersion,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let program = crate::ir::typed(resolved)?;
     let parts = emit_program(&program, ver)?;
     let pkg = out_dir.join("bmlgen");
@@ -313,7 +313,7 @@ pub fn emit_python_with_version(
         fs::write(pkg.join(format!("{stem}.py")), src).map_err(|e| emit(e.to_string()))?;
     }
     let mut init =
-        String::from("\"\"\"Generated BPS codecs, one module per route category.\"\"\"\n\n");
+        String::from("\"\"\"Generated BML codecs, one module per route category.\"\"\"\n\n");
     for name in &names {
         init.push_str(&format!("from bmlgen.{name} import *\n"));
     }
@@ -777,7 +777,7 @@ pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
     }
 }
 
-fn emit_program(prog: &Program, ver: crate::PythonVersion) -> BpsResult<BTreeMap<String, String>> {
+fn emit_program(prog: &Program, ver: crate::PythonVersion) -> BmlResult<BTreeMap<String, String>> {
     let mut e = Emitter::new(prog, ver);
     e.set_raw("runtime");
     e.runtime();
@@ -1201,7 +1201,7 @@ impl<'a> Emitter<'a> {
     // Codecs
     // ---------------------------------------------------------------
 
-    fn codecs(&mut self) -> BpsResult<()> {
+    fn codecs(&mut self) -> BmlResult<()> {
         for idx in 0..self.prog.codecs.len() {
             if self.prog.codecs[idx].kind == CodecKind::Record {
                 continue;
@@ -1306,7 +1306,7 @@ impl<'a> Emitter<'a> {
         self.indent -= 1;
     }
 
-    fn codec(&mut self, codec: CodecIdx) -> BpsResult<()> {
+    fn codec(&mut self, codec: CodecIdx) -> BmlResult<()> {
         let c = self.prog.codecs[codec].clone();
         if c.kind == CodecKind::Record {
             return Ok(());
@@ -1815,7 +1815,7 @@ impl<'a> Emitter<'a> {
 
     /// One argument per line, with a magic trailing comma (`ruff format`
     /// keeps exploded calls that have one). `head` ends just before `(`.
-    fn explode(&mut self, line: &str) -> BpsResult<()> {
+    fn explode(&mut self, line: &str) -> BmlResult<()> {
         let mark = self.buf.len();
         let indent = self.indent;
         let out = self.explode_inner(line);
@@ -1826,7 +1826,7 @@ impl<'a> Emitter<'a> {
         out
     }
 
-    fn explode_inner(&mut self, line: &str) -> BpsResult<()> {
+    fn explode_inner(&mut self, line: &str) -> BmlResult<()> {
         let (head, args, trailer) =
             split_call(line).ok_or_else(|| emit("emit python: cannot split line".to_string()))?;
         self.line(&format!("{head}("));

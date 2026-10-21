@@ -1,5 +1,5 @@
-//! 26.3 twice: the hand-written, vanilla-derived schema (`schemas/minecraft_26_3*.bps`) and the
-//! one imported from minecraft-data (`schemas/versions/v26_3.bps`). Bytes the hand-written schema
+//! 26.3 twice: the hand-written, vanilla-derived schema (`schemas/minecraft_26_3*.bml`) and the
+//! one imported from minecraft-data (`schemas/versions/v26_3.bml`). Bytes the hand-written schema
 //! encodes for a synthetic packet must decode strictly under the imported one, and re-encode
 //! to the same bytes.
 
@@ -10,11 +10,11 @@ use bytemill::wiregen::generate;
 use bytemill::{ResolvedSchema, analyze, load_schema};
 
 fn imported() -> ResolvedSchema {
-    analyze(&load_schema(&[common::schema_path("versions/v26_3.bps")]).unwrap()).unwrap()
+    analyze(&load_schema(&[common::schema_path("versions/v26_3.bml")]).unwrap()).unwrap()
 }
 
 fn seeds() -> u64 {
-    std::env::var("BPS_SEEDS")
+    std::env::var("BML_SEEDS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(24)

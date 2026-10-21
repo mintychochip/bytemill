@@ -21,7 +21,7 @@ fn node(dir: &Path, script: &str) -> std::process::Output {
 }
 
 fn scratch(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-ts-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-ts-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -69,7 +69,7 @@ fn check_ok(dir: &Path, main: &str) {
 
 #[test]
 fn ts_varint_roundtrip() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let dir = scratch("varint");
@@ -101,9 +101,9 @@ console.log("ok");
 
 #[test]
 fn ts_scalars_floats_and_strings() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
-        + &std::fs::read_to_string(repo("schemas/std/integers.bps")).unwrap()
-        + &std::fs::read_to_string(repo("schemas/minecraft_core.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/minecraft_core.bml")).unwrap()
         + r#"
 packet probe {
   a: boolean
@@ -144,7 +144,7 @@ console.log("ok");
 
 #[test]
 fn ts_short_buffer_and_require_failures() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + r#"
 packet probe {
   n: varint
@@ -264,7 +264,7 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) {
 
 #[test]
 fn ts_26_3_packets_roundtrip() {
-    roundtrip_schema("schemas/minecraft_26_3_wiki.bps", "all", 100);
+    roundtrip_schema("schemas/minecraft_26_3_wiki.bml", "all", 100);
 }
 
 /// Interface and import idioms a reviewer would rewrite:
@@ -274,7 +274,7 @@ fn ts_26_3_packets_roundtrip() {
 #[test]
 fn ts_type_and_import_idioms() {
     let resolved =
-        bytemill::analyze(&bytemill::load_schema(&[repo("schemas/minecraft_26_3_wiki.bps")]).unwrap())
+        bytemill::analyze(&bytemill::load_schema(&[repo("schemas/minecraft_26_3_wiki.bml")]).unwrap())
             .unwrap();
     let dir = scratch("idioms");
     bytemill::emit_ts::emit_typescript(&resolved, &dir).unwrap();
@@ -309,14 +309,14 @@ fn ts_type_and_import_idioms() {
 
 #[test]
 fn ts_hytale_packets_roundtrip() {
-    roundtrip_schema("schemas/hytale/2026_02_17.bps", "hytale", 1);
+    roundtrip_schema("schemas/hytale/2026_02_17.bml", "hytale", 1);
 }
 
 /// `emit_typescript_with_target` writes a `tsconfig.json` with the requested
 /// target, `ESNext` modules, and strict mode. Text-only: no node run here.
 #[test]
 fn ts_target_option() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     for (tag, target) in [

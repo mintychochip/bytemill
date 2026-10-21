@@ -4,7 +4,7 @@ use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-const SCHEMA: &str = "schemas/minecraft_26_3_wiki.bps";
+const SCHEMA: &str = "schemas/minecraft_26_3_wiki.bml";
 
 fn run(args: &[&str], stdin: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_bml"))
@@ -144,7 +144,7 @@ fn rejects_non_minecraft_frames() {
     let output = run(
         &[
             "decode",
-            "schemas/hytale/2026_02_17.bps",
+            "schemas/hytale/2026_02_17.bml",
             "--state",
             "default",
             "--direction",

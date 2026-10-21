@@ -1,14 +1,14 @@
 //! Shape model: the hand-struct description, its JSON form and the error type.
 //! Ports `bps/shapes/model.py`.
 
-use crate::errors::{BpsError, BpsResult, ErrorKind};
+use crate::errors::{BmlError, BmlResult, ErrorKind};
 use crate::json::{Value, dumps_pretty, loads};
 use crate::ordmap::OrderedMap;
 
-pub type ShapeError = BpsError;
+pub type ShapeError = BmlError;
 
-pub fn shape_error(message: impl Into<String>) -> BpsError {
-    BpsError::new(ErrorKind::Shape, message)
+pub fn shape_error(message: impl Into<String>) -> BmlError {
+    BmlError::new(ErrorKind::Shape, message)
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -214,7 +214,7 @@ fn str_list(v: Option<&Value>) -> Vec<String> {
     }
 }
 
-fn get_str(map: &OrderedMap<Value>, key: &str) -> BpsResult<String> {
+fn get_str(map: &OrderedMap<Value>, key: &str) -> BmlResult<String> {
     match map.get(key) {
         Some(Value::Str(s)) => Ok(s.to_string()),
         _ => Err(shape_error(format!("shape json: missing string {key:?}"))),
@@ -228,7 +228,7 @@ fn opt_str(map: &OrderedMap<Value>, key: &str) -> Option<String> {
     }
 }
 
-pub fn shape_from_json(text: &str) -> BpsResult<Shape> {
+pub fn shape_from_json(text: &str) -> BmlResult<Shape> {
     let Value::Map(root) = loads(text)? else {
         return Err(shape_error("shape json: expected an object"));
     };
@@ -255,7 +255,7 @@ pub fn shape_from_json(text: &str) -> BpsResult<Shape> {
                     wire: opt_str(m, "wire"),
                 })
             })
-            .collect::<BpsResult<Vec<_>>>()?,
+            .collect::<BmlResult<Vec<_>>>()?,
         _ => Vec::new(),
     };
     let Value::Map(new) = root.get("new").cloned().unwrap_or(Value::Null) else {
@@ -317,7 +317,7 @@ pub fn shape_from_json(text: &str) -> BpsResult<Shape> {
                     reason: get_str(m, "reason")?,
                 })
             })
-            .collect::<BpsResult<Vec<_>>>()?,
+            .collect::<BmlResult<Vec<_>>>()?,
         _ => Vec::new(),
     };
     let drops = str_list(root.get("drops"));

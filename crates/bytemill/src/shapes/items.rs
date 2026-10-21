@@ -10,7 +10,7 @@
 
 use super::model::shape_error;
 use super::scan::{attr_block_end, find_from, skip_block_comment, skip_rust_string, sub, sw};
-use crate::errors::BpsResult;
+use crate::errors::BmlResult;
 
 /// A top-level item: `struct`, `impl`, `use`, `fn`, ...
 #[derive(Debug, Clone, PartialEq)]
@@ -306,7 +306,7 @@ fn entries(
     mut pos: usize,
     limit: usize,
     indent: &str,
-) -> BpsResult<Vec<(usize, usize, usize)>> {
+) -> BmlResult<Vec<(usize, usize, usize)>> {
     let mut out = Vec::new();
     let mut pending: Option<usize> = None;
     while pos < limit {
@@ -386,7 +386,7 @@ fn cfg_test_in(s: &str) -> bool {
 }
 
 /// `scan_items`.
-pub fn scan_items(src: &str) -> BpsResult<Vec<Item>> {
+pub fn scan_items(src: &str) -> BmlResult<Vec<Item>> {
     let mut items = Vec::new();
     for (start, code, end) in entries(src, 0, src.len(), "")? {
         let (kind, name, trait_) = classify(sub(src, code, end));
@@ -404,7 +404,7 @@ pub fn scan_items(src: &str) -> BpsResult<Vec<Item>> {
 }
 
 /// `impl_members`.
-pub fn impl_members(item: &Item) -> BpsResult<Vec<Member>> {
+pub fn impl_members(item: &Item) -> BmlResult<Vec<Member>> {
     if item.kind != "impl" {
         return Ok(Vec::new());
     }
@@ -425,7 +425,7 @@ pub fn impl_members(item: &Item) -> BpsResult<Vec<Member>> {
 }
 
 /// `impl_body_bounds`: offsets of the impl body inside an impl item's text (between its braces).
-pub fn impl_body_bounds(text: &str) -> BpsResult<(usize, usize)> {
+pub fn impl_body_bounds(text: &str) -> BmlResult<(usize, usize)> {
     let header = impl_header_line(text).ok_or_else(|| shape_error("malformed impl"))?;
     let open = find_from(text, header, "{").ok_or_else(|| shape_error("substring not found"))?;
     let close = text

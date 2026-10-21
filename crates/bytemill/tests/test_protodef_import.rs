@@ -41,7 +41,7 @@ fn generate(types: &str, body: &str) -> Result<String, String> {
 
 fn resolve(source: &str) -> ResolvedSchema {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/std/");
-    let std = load_schema(&[format!("{root}integers.bps"), format!("{root}varint.bps")]).unwrap();
+    let std = load_schema(&[format!("{root}integers.bml"), format!("{root}varint.bml")]).unwrap();
     let generated = parse(source).unwrap_or_else(|e| panic!("{e}\n{source}"));
     analyze(&Schema {
         encodings: std

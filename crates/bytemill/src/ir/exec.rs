@@ -1,19 +1,19 @@
 //! Run an [`IrSchema`] procedure. Scalar procs only; records and repeats come later.
 
 use crate::ast::Expr;
-use crate::errors::{BpsResult, encode};
+use crate::errors::{BmlResult, encode};
 use crate::interp::cursor::{Cursor, WriteCursor};
 use crate::interp::expr::int_of;
 use crate::value::{Env, Value};
 
 use super::schema::{IrSchema, Stmt, TypeDef, WireOp};
 
-pub fn exec_decode(ir: &IrSchema, ty: &str, args: &[Value], bytes: &[u8]) -> BpsResult<Value> {
+pub fn exec_decode(ir: &IrSchema, ty: &str, args: &[Value], bytes: &[u8]) -> BmlResult<Value> {
     let mut cur = Cursor::new(bytes);
     exec_decode_at(ir, ty, args, &mut cur)
 }
 
-pub fn exec_encode(ir: &IrSchema, ty: &str, args: &[Value], value: &Value) -> BpsResult<Vec<u8>> {
+pub fn exec_encode(ir: &IrSchema, ty: &str, args: &[Value], value: &Value) -> BmlResult<Vec<u8>> {
     let proc = ir
         .encode
         .get(ty)
@@ -39,7 +39,7 @@ pub fn exec_decode_frame(
     state: &str,
     direction: &str,
     frame: &[u8],
-) -> BpsResult<(i128, Value)> {
+) -> BmlResult<(i128, Value)> {
     let frame_name = ir
         .routes
         .iter()
@@ -76,7 +76,7 @@ pub fn exec_encode_frame(
     direction: &str,
     packet: &str,
     fields: &Env,
-) -> BpsResult<Vec<u8>> {
+) -> BmlResult<Vec<u8>> {
     let route = ir
         .routes
         .iter()
@@ -106,7 +106,7 @@ fn exec_decode_at(
     ty: &str,
     args: &[Value],
     cur: &mut Cursor<'_>,
-) -> BpsResult<Value> {
+) -> BmlResult<Value> {
     let proc = ir
         .decode
         .get(ty)
@@ -124,7 +124,7 @@ fn exec_decode_at(
     }
 }
 
-fn bind_args(params: &[String], args: &[Value], env: &mut Env) -> BpsResult<()> {
+fn bind_args(params: &[String], args: &[Value], env: &mut Env) -> BmlResult<()> {
     if args.len() < params.len() {
         return Err(encode(format!(
             "need {} arguments, got {}",
@@ -184,7 +184,7 @@ fn run_decode(
     env: &mut Env,
     out: &mut Env,
     cur: &mut Cursor<'_>,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     for stmt in stmts {
         match stmt {
             Stmt::Let { name, expr } => {
@@ -296,7 +296,7 @@ fn run_decode(
     Ok(())
 }
 
-fn decode_elem(ir: &IrSchema, elem: &[Stmt], env: &Env, cur: &mut Cursor<'_>) -> BpsResult<Value> {
+fn decode_elem(ir: &IrSchema, elem: &[Stmt], env: &Env, cur: &mut Cursor<'_>) -> BmlResult<Value> {
     let mut child = env.clone();
     let mut produced = Env::new();
     run_decode(ir, elem, &mut child, &mut produced, cur)?;
@@ -306,7 +306,7 @@ fn decode_elem(ir: &IrSchema, elem: &[Stmt], env: &Env, cur: &mut Cursor<'_>) ->
     Ok(Value::map(produced))
 }
 
-fn run_encode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, w: &mut WriteCursor) -> BpsResult<()> {
+fn run_encode(ir: &IrSchema, stmts: &[Stmt], env: &mut Env, w: &mut WriteCursor) -> BmlResult<()> {
     for stmt in stmts {
         match stmt {
             Stmt::Let { name, expr } => {
@@ -393,7 +393,7 @@ fn encode_list(
     env: &mut Env,
     w: &mut WriteCursor,
     dst: &str,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let list = env
         .get(dst)
         .cloned()
@@ -447,11 +447,11 @@ fn stmt_names_present(stmts: &[Stmt], env: &Env) -> bool {
     walk(stmts, env)
 }
 
-fn eval_args(args: &[Expr], env: &Env) -> BpsResult<Vec<Value>> {
+fn eval_args(args: &[Expr], env: &Env) -> BmlResult<Vec<Value>> {
     args.iter().map(|a| eval_expr(a, env)).collect()
 }
 
-fn read_op(op: &WireOp, env: &Env, cur: &mut Cursor<'_>) -> BpsResult<Value> {
+fn read_op(op: &WireOp, env: &Env, cur: &mut Cursor<'_>) -> BmlResult<Value> {
     match op {
         WireOp::U8 => Ok(Value::Int(i128::from(cur.read(1)?[0]))),
         WireOp::F32be => {
@@ -473,7 +473,7 @@ fn read_op(op: &WireOp, env: &Env, cur: &mut Cursor<'_>) -> BpsResult<Value> {
     }
 }
 
-fn write_op(op: &WireOp, value: &Value, env: &Env, w: &mut WriteCursor) -> BpsResult<()> {
+fn write_op(op: &WireOp, value: &Value, env: &Env, w: &mut WriteCursor) -> BmlResult<()> {
     match op {
         WireOp::U8 => {
             w.emit(&[(int_of(value)? & 0xFF) as u8]);
@@ -500,12 +500,12 @@ fn write_op(op: &WireOp, value: &Value, env: &Env, w: &mut WriteCursor) -> BpsRe
     }
 }
 
-fn usize_len(v: &Value) -> BpsResult<usize> {
+fn usize_len(v: &Value) -> BmlResult<usize> {
     let n = int_of(v)?;
     usize::try_from(n).map_err(|_| encode(format!("negative length {n}")))
 }
 
-fn as_f64(v: &Value) -> BpsResult<f64> {
+fn as_f64(v: &Value) -> BmlResult<f64> {
     match v {
         Value::Float(f) => Ok(*f),
         Value::Int(i) => Ok(*i as f64),
@@ -514,7 +514,7 @@ fn as_f64(v: &Value) -> BpsResult<f64> {
     }
 }
 
-fn fit_bytes(value: &Value, n: usize) -> BpsResult<Vec<u8>> {
+fn fit_bytes(value: &Value, n: usize) -> BmlResult<Vec<u8>> {
     let mut raw = raw_bytes(value).ok_or_else(|| encode("bytes need a byte string"))?;
     if raw.len() > n {
         return Err(encode(format!("bytes({n}) got {} bytes", raw.len())));
@@ -544,7 +544,7 @@ fn raw_bytes(value: &Value) -> Option<Vec<u8>> {
 
 /// Schema calls go to the interpreter. `utf8_len` is emitted by the lowerer for
 /// string-shaped encodings: UTF-8 byte length, not Unicode scalars (`len`).
-fn eval_expr(expr: &Expr, env: &Env) -> BpsResult<Value> {
+fn eval_expr(expr: &Expr, env: &Env) -> BmlResult<Value> {
     if let Expr::Call(name, args) = expr
         && name == "utf8_len"
         && args.len() == 1

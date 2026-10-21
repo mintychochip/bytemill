@@ -60,7 +60,7 @@ fn every_route_decodes_its_packet() {
     for (route, pkt) in &resolved.routes {
         match decode_packet(&resolved, &pkt.name, &payload, false) {
             Ok(_) => {}
-            // A clean BpsError is a pass; a crash is not.
+            // A clean BmlError is a pass; a crash is not.
             Err(e) => {
                 if e.kind != bytemill::errors::ErrorKind::Decode
                     && e.kind != bytemill::errors::ErrorKind::Encode

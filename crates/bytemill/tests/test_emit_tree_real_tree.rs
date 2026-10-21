@@ -21,7 +21,7 @@ impl TempRoot {
         static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "bps-tree-real-{tag}-{}-{n}-{:?}",
+            "bml-tree-real-{tag}-{}-{n}-{:?}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

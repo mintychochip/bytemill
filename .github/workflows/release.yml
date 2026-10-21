@@ -80,13 +80,13 @@ jobs:
       - name: Smoke test (Unix)
         if: runner.os != 'Windows'
         run: |
-          target/${{ matrix.target }}/release/${{ matrix.binary }} check schemas/std/varint.bps
+          target/${{ matrix.target }}/release/${{ matrix.binary }} check schemas/std/varint.bml
 
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          & "target/${{ matrix.target }}/release/${{ matrix.binary }}" check schemas/std/varint.bps
+          & "target/${{ matrix.target }}/release/${{ matrix.binary }}" check schemas/std/varint.bml
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Package (Unix)

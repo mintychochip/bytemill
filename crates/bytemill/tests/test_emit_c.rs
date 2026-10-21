@@ -21,15 +21,15 @@ fn program_of(resolved: &bytemill::ResolvedSchema) -> Program {
 }
 
 fn probe_program(text: &str) -> (bytemill::ResolvedSchema, Program) {
-    let std = std::fs::read_to_string(repo("schemas/std/integers.bps")).unwrap()
-        + &std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap();
+    let std = std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap();
     let resolved = bytemill::analyze(&bytemill::parse(&(std + text)).unwrap()).unwrap();
     let program = typed(&resolved).unwrap();
     (resolved, program)
 }
 
 fn emit_dir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-c-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-c-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -141,7 +141,7 @@ fn scalar_ty(ty: &Ty) -> &'static str {
 
 #[test]
 fn c_varint_values() {
-    let text = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap();
+    let text = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap();
     let resolved = bytemill::analyze(&bytemill::parse(&text).unwrap()).unwrap();
     let program = program_of(&resolved);
     let dir = emit_dir("varint");
@@ -365,7 +365,7 @@ fn packet_harness(resolved: &bytemill::ResolvedSchema, program: &Program) -> (St
 
 #[test]
 fn c_26_3_packets_roundtrip() {
-    let resolved = analyzed("schemas/minecraft_26_3_wiki.bps");
+    let resolved = analyzed("schemas/minecraft_26_3_wiki.bml");
     let program = program_of(&resolved);
     let dir = emit_dir("all");
     emit(&resolved, &dir);
@@ -382,7 +382,7 @@ fn c_26_3_packets_roundtrip() {
 
 #[test]
 fn c_hytale_packets_roundtrip() {
-    let resolved = analyzed("schemas/hytale/2026_02_17.bps");
+    let resolved = analyzed("schemas/hytale/2026_02_17.bml");
     let program = program_of(&resolved);
     let dir = emit_dir("hytale");
     emit(&resolved, &dir);
@@ -399,7 +399,7 @@ fn c_hytale_packets_roundtrip() {
 /// it: the body renames the local, and the strict compile gate proves it.
 #[test]
 fn c_field_names_never_collide_with_codec_locals() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet clash { s: varint\n r: varint\n a: varint\n out: varint\n w: varint\n value: varint }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let dir = emit_dir("clash");

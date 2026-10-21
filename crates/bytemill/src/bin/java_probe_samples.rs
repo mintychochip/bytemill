@@ -1,4 +1,4 @@
-//! `java_probe_samples`, porting `scripts/java_probe_samples.py`: compare BPS packet layouts
+//! `java_probe_samples`, porting `scripts/java_probe_samples.py`: compare BML packet layouts
 //! with the bytes real Minestom writes.
 //!
 //! ```text
@@ -23,13 +23,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage: java_probe_samples [-h] [--schema SCHEMA] [packets ...]\n\n\
-Compare BPS packet layouts with the bytes real Minestom writes.\n\n\
+Compare BML packet layouts with the bytes real Minestom writes.\n\n\
     cargo run -q -p bytemill --bin java_probe_samples                    # packets the schema cannot reproduce\n\
     cargo run -q -p bytemill --bin java_probe_samples -- set_objective   # every recorded sample for one packet\n\n\
 The samples come from rstom's `probes/expected/*.json`. For a packet it shows the\n\
 bytes Java wrote, the field values Java built it from (when recorded), and either\n\
 how the schema decoded them or why it could not.\n\n\
-positional arguments:\n  packets          BPS packet names; none lists the failing ones\n\n\
+positional arguments:\n  packets          BML packet names; none lists the failing ones\n\n\
 options:\n  -h, --help       show this help message and exit\n  \
 --schema SCHEMA  root schema file (default: the whole protocol)";
 
@@ -43,7 +43,7 @@ fn parse_args(argv: &[String]) -> Result<Option<Args>, String> {
     let usage_error = |message: String| format!("{USAGE}\njava_probe_samples: error: {message}");
     let mut args = Args {
         packets: Vec::new(),
-        schema: common::repo_root().join("schemas/minecraft_26_3_wiki.bps"),
+        schema: common::repo_root().join("schemas/minecraft_26_3_wiki.bml"),
     };
     let mut i = 0;
     while i < argv.len() {

@@ -12,7 +12,7 @@ fn repo(rel: &str) -> PathBuf {
 }
 
 fn temp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-cpp-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-cpp-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -116,7 +116,7 @@ fn display_name(name: &str) -> String {
 
 #[test]
 fn cpp_varint_roundtrip() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint, f: f32be, d: f64be }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let program = bytemill::ir::typed::typed(&resolved).unwrap();
@@ -227,7 +227,7 @@ int main() {{
 
 #[test]
 fn cpp_string_rejects_bad_utf8() {
-    let path = repo("schemas/minecraft_core.bps");
+    let path = repo("schemas/minecraft_core.bml");
     let resolved = bytemill::analyze(&bytemill::load_schema(&[path]).unwrap()).unwrap();
     let program = bytemill::ir::typed::typed(&resolved).unwrap();
     let dir = temp("string");
@@ -355,13 +355,13 @@ fn roundtrip_suite(schema_rel: &str, dir_name: &str, min_packets: usize) {
 
 #[test]
 fn cpp_26_3_packets_roundtrip() {
-    roundtrip_suite("schemas/minecraft_26_3_wiki.bps", "all-26-3", 100);
+    roundtrip_suite("schemas/minecraft_26_3_wiki.bml", "all-26-3", 100);
 }
 
 #[test]
 fn cpp_hytale_packets_roundtrip() {
     // Connection carries 4 packets; every synthesizable one must survive.
-    roundtrip_suite("schemas/hytale/2026_02_17.bps", "hytale", 3);
+    roundtrip_suite("schemas/hytale/2026_02_17.bml", "hytale", 3);
 }
 
 /// Probe round-trip under one `g++ -std=...` flag, emitted with the matching
@@ -369,7 +369,7 @@ fn cpp_hytale_packets_roundtrip() {
 /// `nullptr`, braced init, or range-for), so the same source proves every
 /// standard from C++98 to C++23.
 fn probe_roundtrip_std(std_ver: bytemill::CppStandard, flag: &str, dir_name: &str) {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint, f: f32be, d: f64be }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let program = bytemill::ir::typed::typed(&resolved).unwrap();

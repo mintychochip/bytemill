@@ -5,14 +5,14 @@ use crate::ast::{
     self, BlockItem, EncBody, EncodingDecl, Expr, FieldType, PacketDecl, ResolvedSchema, RouteDecl,
     TypeRef, WireField,
 };
-use crate::errors::{BpsError, BpsResult, emit, py_repr_str};
+use crate::errors::{BmlError, BmlResult, emit, py_repr_str};
 use crate::minestom::{ClassTable, Unit};
 use crate::ordmap::OrderedMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-/// BPS type -> (NetworkBuffer type constant, Rust type).
+/// BML type -> (NetworkBuffer type constant, Rust type).
 pub const WIRE_TYPES: &[(&str, &str, &str)] = &[
     ("u8", "BYTE", "i8"),
     ("i8", "BYTE", "i8"),
@@ -281,7 +281,7 @@ pub struct FramesPlan {
 }
 
 /// The plan for `resolved`, computed once and cached like Python's `_bps_frames`.
-pub fn frames(resolved: &ResolvedSchema) -> BpsResult<Rc<FramesPlan>> {
+pub fn frames(resolved: &ResolvedSchema) -> BmlResult<Rc<FramesPlan>> {
     if let Some(plan) = resolved.frames_cache.borrow().clone() {
         return Ok(plan);
     }
@@ -341,7 +341,7 @@ pub fn frames(resolved: &ResolvedSchema) -> BpsResult<Rc<FramesPlan>> {
 }
 
 /// The scanner for a self-delimiting payload field, if it is one (`_frame_walker`).
-fn frame_walker(f: &PacketShape, resolved: Option<&ResolvedSchema>) -> BpsResult<Option<String>> {
+fn frame_walker(f: &PacketShape, resolved: Option<&ResolvedSchema>) -> BmlResult<Option<String>> {
     let r = match (&f.ref_, f.opaque) {
         (Some(r), true) => r,
         _ => return Ok(None),
@@ -355,7 +355,7 @@ fn frame_walker(f: &PacketShape, resolved: Option<&ResolvedSchema>) -> BpsResult
 }
 
 /// The smallest valid payload of a self-delimiting kind, for a field's default (`_frame_default`).
-fn frame_default(name: &str, resolved: Option<&ResolvedSchema>) -> BpsResult<Option<Vec<u8>>> {
+fn frame_default(name: &str, resolved: Option<&ResolvedSchema>) -> BmlResult<Option<Vec<u8>>> {
     if let Some(hand) = self_delimiting_default(name) {
         return Ok(Some(hand.to_vec()));
     }
@@ -379,7 +379,7 @@ fn frame_default(name: &str, resolved: Option<&ResolvedSchema>) -> BpsResult<Opt
 }
 
 /// How one repeat element's payload is framed (`_elem_frame_mode`).
-fn elem_frame_mode(e: &PacketShape, resolved: &ResolvedSchema) -> BpsResult<String> {
+fn elem_frame_mode(e: &PacketShape, resolved: &ResolvedSchema) -> BmlResult<String> {
     if let Some(w) = frame_walker(e, Some(resolved))? {
         return Ok(w);
     }
@@ -421,7 +421,7 @@ fn len_value(f: &PacketShape, types: &OrderedMap<String>) -> String {
 }
 
 /// `_elem_needs_prefix`: only the `prefix` frame mode.
-fn elem_needs_prefix(e: &PacketShape, resolved: &ResolvedSchema) -> BpsResult<bool> {
+fn elem_needs_prefix(e: &PacketShape, resolved: &ResolvedSchema) -> BmlResult<bool> {
     Ok(elem_frame_mode(e, resolved)? == "prefix")
 }
 
@@ -528,7 +528,7 @@ fn elem_writes(
     resolved: &ResolvedSchema,
     var: &str,
     top: Option<&[PacketShape]>,
-) -> BpsResult<Vec<String>> {
+) -> BmlResult<Vec<String>> {
     let types = scope_types(f, top);
     let mut out = Vec::new();
     for (name, expr) in &f.elem_computed {
@@ -607,7 +607,7 @@ fn elem_reads(
     resolved: &ResolvedSchema,
     var: &str,
     top: Option<&[PacketShape]>,
-) -> BpsResult<Vec<String>> {
+) -> BmlResult<Vec<String>> {
     let mut out: Vec<String> = Vec::new();
     let mut computed: Vec<(String, Expr)> = f.elem_computed.clone();
     let mut bound: BTreeSet<String> = BTreeSet::new();
@@ -618,7 +618,7 @@ fn elem_reads(
         bound: &BTreeSet<String>,
         types: &OrderedMap<String>,
         out: &mut Vec<String>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let mut i = 0;
         while i < computed.len() {
             let ready = expr_idents(&computed[i].1)
@@ -740,7 +740,7 @@ fn repeat_write(
     top: Option<&[PacketShape]>,
     optional_vec: bool,
     iterable: Option<&str>,
-) -> BpsResult<String> {
+) -> BmlResult<String> {
     let is_count = f.repeat_mode.as_deref() == Some("count");
     if is_count {
         let body = elem_writes(f, resolved, "item", top)?.join("\n");
@@ -819,7 +819,7 @@ fn repeat_read(
     top: Option<&[PacketShape]>,
     bind: bool,
     outer_scope: Option<&[PacketShape]>,
-) -> BpsResult<String> {
+) -> BmlResult<String> {
     let reads = elem_reads(f, resolved, var, top)?.join("\n");
     if f.repeat_mode.as_deref() == Some("count") {
         let count = match &f.count {
@@ -893,7 +893,7 @@ fn destructure(f: &PacketShape, var: &str) -> String {
 }
 
 /// The `Type` expression for a payload field, or None for a plain wire type (`_frame_expr`).
-fn frame_expr(f: &PacketShape, resolved: &ResolvedSchema) -> BpsResult<Option<String>> {
+fn frame_expr(f: &PacketShape, resolved: &ResolvedSchema) -> BmlResult<Option<String>> {
     if f.wire == "FIXED_BYTES" || f.opaque {
         let n = opaque_len(f.ref_.as_ref(), Some(resolved), Some(&f.params));
         return Ok(Some(match n {
@@ -1092,7 +1092,7 @@ fn arm_int_tags(arm: &ast::MatchArm) -> Vec<i128> {
         .collect()
 }
 
-fn match_tag_name(expr: &Expr) -> BpsResult<String> {
+fn match_tag_name(expr: &Expr) -> BmlResult<String> {
     match expr {
         Expr::Ident(n) if !n.is_empty() => Ok(n.clone()),
         _ => Err(emit(format!("unsupported match tag expression: {expr:?}"))),
@@ -1137,7 +1137,7 @@ fn rust_field_access(name: &str, types: &OrderedMap<String>, mode: &str) -> Stri
 }
 
 /// Rust scalar expression for a guard operand (`_rust_operand`).
-fn rust_operand(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BpsResult<String> {
+fn rust_operand(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BmlResult<String> {
     match expr {
         Expr::Int(i) => Ok(i.to_string()),
         Expr::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
@@ -1159,7 +1159,7 @@ fn is_zero_int(e: &Expr) -> bool {
 }
 
 /// Rust boolean expression for a schema guard; `None` is `true` (`_rust_guard`).
-fn rust_guard(expr: Option<&Expr>, types: &OrderedMap<String>, mode: &str) -> BpsResult<String> {
+fn rust_guard(expr: Option<&Expr>, types: &OrderedMap<String>, mode: &str) -> BmlResult<String> {
     let Some(expr) = expr else {
         return Ok("true".to_string());
     };
@@ -1231,12 +1231,12 @@ fn strip_outer_parens(text: &str) -> String {
 }
 
 /// `_rust_guard` as a top-level `if` condition, without the wrapper parens (`_rust_cond`).
-fn rust_cond(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BpsResult<String> {
+fn rust_cond(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BmlResult<String> {
     Ok(strip_outer_parens(&rust_guard(Some(expr), types, mode)?))
 }
 
 /// Whether a guard is true for synthesized default values (`_guard_holds`).
-fn guard_holds(expr: Option<&Expr>, env: &Env, types: &OrderedMap<String>) -> BpsResult<bool> {
+fn guard_holds(expr: Option<&Expr>, env: &Env, types: &OrderedMap<String>) -> BmlResult<bool> {
     let Some(expr) = expr else {
         return Ok(true);
     };
@@ -1282,7 +1282,7 @@ fn guard_holds(expr: Option<&Expr>, env: &Env, types: &OrderedMap<String>) -> Bp
 }
 
 /// Integer view of a synthesized value, as Python's `int()` (`bool` is `0`/`1`).
-fn value_int(v: &Value) -> BpsResult<i128> {
+fn value_int(v: &Value) -> BmlResult<i128> {
     match v {
         Value::Bool(b) => Ok(*b as i128),
         Value::Float(f) => crate::value::float_to_int(*f).map_err(emit),
@@ -1291,7 +1291,7 @@ fn value_int(v: &Value) -> BpsResult<i128> {
 }
 
 /// Python floor division of integers (`//`).
-fn floordiv(a: i128, b: i128) -> BpsResult<i128> {
+fn floordiv(a: i128, b: i128) -> BmlResult<i128> {
     if b == 0 {
         return Err(emit("integer division or modulo by zero"));
     }
@@ -1303,7 +1303,7 @@ fn floordiv(a: i128, b: i128) -> BpsResult<i128> {
     }
 }
 
-fn guard_holds_value(expr: &Expr, env: &Env) -> BpsResult<i128> {
+fn guard_holds_value(expr: &Expr, env: &Env) -> BmlResult<i128> {
     match expr {
         Expr::Int(i) => Ok(*i),
         Expr::Ident(n) if !n.is_empty() => match env.get(n) {
@@ -1326,7 +1326,7 @@ fn guard_holds_value(expr: &Expr, env: &Env) -> BpsResult<i128> {
 }
 
 /// The generated struct has one namespace per packet; a clash cannot be merged (`_declared_twice`).
-fn declared_twice(ident_name: &str, first: &str, second: &str) -> BpsError {
+fn declared_twice(ident_name: &str, first: &str, second: &str) -> BmlError {
     if first == second {
         return emit(format!(
             "repeated field {} is declared more than once in one scope; declare it once under a combined condition",
@@ -1356,7 +1356,7 @@ fn merge_declared(
     idx: usize,
     guard: Option<Expr>,
     parent: &str,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let existing_parent = out[idx].parent.clone();
     if !existing_parent.is_empty() && !parent.is_empty() && existing_parent != parent {
         return Err(declared_twice(&out[idx].ident, &existing_parent, parent));
@@ -1382,7 +1382,7 @@ fn expand_encoding(
     guard: Option<&Expr>,
     field_types: &mut OrderedMap<String>,
     parent: &str,
-) -> BpsResult<bool> {
+) -> BmlResult<bool> {
     let Some(resolved) = resolved else {
         return Ok(false);
     };
@@ -1433,7 +1433,7 @@ fn repeat_shape(
     guard: Option<&Expr>,
     _field_types: &mut OrderedMap<String>,
     parent: &str,
-) -> BpsResult<PacketShape> {
+) -> BmlResult<PacketShape> {
     let repeat = wf.repeat.as_ref();
     let mut count = None;
     if let Some(rep) = repeat
@@ -1519,7 +1519,7 @@ fn append_field(
     field_types: &mut OrderedMap<String>,
     parent: &str,
     expand_payloads: bool,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     if wf.repeat.is_some() {
         let shape = repeat_shape(wf, resolved, bind, guard, field_types, parent)?;
         if let Some(clash) = out.iter().find(|f| f.ident == shape.ident) {
@@ -1647,7 +1647,7 @@ fn flatten_match(
     parent_guard: Option<&Expr>,
     field_types: &mut OrderedMap<String>,
     parent: &str,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let tag = match_tag_name(&mt.tag_expr)?;
     let is_default_arm = |a: &ast::MatchArm| {
         let default_tag = match &a.tag {
@@ -1757,7 +1757,7 @@ fn flatten(
     field_types: &mut OrderedMap<String>,
     parent: &str,
     expand_payloads: bool,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     for item in items {
         match item {
             BlockItem::Group { cond, items: inner } => {
@@ -1853,7 +1853,7 @@ pub fn contiguous_registry_entries(mut entries: Vec<(RouteDecl, Unit)>) -> Vec<(
 pub fn packet_fields(
     pkt: &PacketDecl,
     resolved: &ResolvedSchema,
-) -> BpsResult<(Vec<PacketShape>, OrderedMap<String>)> {
+) -> BmlResult<(Vec<PacketShape>, OrderedMap<String>)> {
     let mut fields: Vec<PacketShape> = Vec::new();
     let mut flatten_types: OrderedMap<String> = OrderedMap::new();
     if let Err(err) = flatten(
@@ -1927,7 +1927,7 @@ fn payload_mode(
     index: usize,
     count: usize,
     resolved: &ResolvedSchema,
-) -> BpsResult<&'static str> {
+) -> BmlResult<&'static str> {
     if frame_walker(f, Some(resolved))?.is_some_and(|w| !w.is_empty()) {
         return Ok("scan");
     }
@@ -1947,7 +1947,7 @@ fn payload_mode(
 }
 
 /// `_frame_expr(f, resolved) or f.wire`.
-fn frame_or_wire(f: &PacketShape, resolved: &ResolvedSchema) -> BpsResult<String> {
+fn frame_or_wire(f: &PacketShape, resolved: &ResolvedSchema) -> BmlResult<String> {
     Ok(match frame_expr(f, resolved)? {
         Some(s) if !s.is_empty() => s,
         _ => f.wire.clone(),
@@ -1955,7 +1955,7 @@ fn frame_or_wire(f: &PacketShape, resolved: &ResolvedSchema) -> BpsResult<String
 }
 
 /// Build the wire body for a unit's packet (`_packet_body`).
-pub fn packet_body(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<PacketBody> {
+pub fn packet_body(unit: &Unit, resolved: &ResolvedSchema) -> BmlResult<PacketBody> {
     let (fields, field_types) = packet_fields(&unit.pkt, resolved)?;
     let n = fields.len();
 
@@ -2241,7 +2241,7 @@ fn needs_default_impl(items: &[PacketShape]) -> bool {
 }
 
 /// The Rust source for one packet's serializer module (`_emit_packet`).
-pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> {
+pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BmlResult<String> {
     let pkt = &unit.pkt;
     let body = packet_body(unit, resolved)?;
     let fields = &body.fields;
@@ -2407,9 +2407,9 @@ pub fn emit_packet(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> 
     let init = &body.init;
     let pkt_name = &pkt.name;
     Ok(format!(
-        "//! Generated by `bml emit rust` from a resolved BPS schema.\n\
+        "//! Generated by `bml emit rust` from a resolved BML schema.\n\
 //!\n\
-//! Wire layout transcribed from `schemas/minecraft_26_3*.bps`: BPS packet\n\
+//! Wire layout transcribed from `schemas/minecraft_26_3*.bml`: BML packet\n\
 //! `{pkt_name}`, routed {routes}.\n\
 \n\
 use std::sync::Arc;\n\
@@ -2418,7 +2418,7 @@ use std::sync::Arc;\n\
 use rstom::network::packet::packet::Packet;\n\
 use rstom::network::packet::serializer::{{PacketSerializer, PacketValue, downcast}};\n\
 \n\
-/// The wire fields of BPS packet `{pkt_name}`, in wire order.\n\
+/// The wire fields of BML packet `{pkt_name}`, in wire order.\n\
 {derive}\n\
 pub struct {name} {{\n\
 {field_decls}\n\
@@ -2446,7 +2446,7 @@ impl Packet for {name} {{\n\
     const CLASS_NAME: &'static str = \"{java_class}\";\n\
 }}\n\
 {marker_impl}\n\
-/// The serializer of `{name}`, generated from the BPS schema.\n\
+/// The serializer of `{name}`, generated from the BML schema.\n\
 pub struct {ser};\n\
 \n\
 impl PacketSerializer for {ser} {{\n\
@@ -2524,7 +2524,7 @@ fn rust_element(
     value: &Value,
     resolved: &ResolvedSchema,
     env: Option<&Env>,
-) -> BpsResult<Option<String>> {
+) -> BmlResult<Option<String>> {
     if e.guard.is_some() && matches!(value, Value::Null) {
         return Ok(None);
     }
@@ -2537,7 +2537,7 @@ fn rust_literal(
     value: &Value,
     resolved: &ResolvedSchema,
     env: Option<&Env>,
-) -> BpsResult<Option<String>> {
+) -> BmlResult<Option<String>> {
     if f.guard.is_some() && matches!(value, Value::Null) {
         return Ok(Some("None".to_string()));
     }
@@ -2557,7 +2557,7 @@ fn rust_inner(
     value: &Value,
     resolved: &ResolvedSchema,
     env: Option<&Env>,
-) -> BpsResult<Option<String>> {
+) -> BmlResult<Option<String>> {
     if f.repeat_mode.is_some() {
         let Value::List(items) = value else {
             return Ok(None);
@@ -2713,8 +2713,8 @@ pub fn parity_args(
     pkt: &PacketDecl,
     fields: &[PacketShape],
     resolved: &ResolvedSchema,
-) -> BpsResult<Option<(Vec<String>, Vec<u8>)>> {
-    let attempt = || -> BpsResult<Option<(Vec<String>, Vec<u8>)>> {
+) -> BmlResult<Option<(Vec<String>, Vec<u8>)>> {
+    let attempt = || -> BmlResult<Option<(Vec<String>, Vec<u8>)>> {
         for (i, f) in fields.iter().enumerate() {
             if f.repeat_mode.is_some() {
                 let mut any = false;
@@ -2749,7 +2749,7 @@ pub fn parity_args(
 }
 
 /// `_emit_roundtrip_test`: one test per struct.
-fn emit_roundtrip_test(unit: &Unit, resolved: &ResolvedSchema) -> BpsResult<String> {
+fn emit_roundtrip_test(unit: &Unit, resolved: &ResolvedSchema) -> BmlResult<String> {
     let cls = &unit.cls;
     let name = &cls.name;
     let (fields, _types) = packet_fields(&unit.pkt, resolved)?;
@@ -3258,7 +3258,7 @@ pub fn slot_len(bytes: &[u8]) -> usize {
 const LIB_RS: &str = r#"//! Generated by `bml emit rust`: packet payloads, `ported`, and `packet_vanilla`.
 //!
 //! The module tree, class names and registry functions of `rstom-packets`, with
-//! each payload's wire layout generated from the BPS schema instead of ported
+//! each payload's wire layout generated from the BML schema instead of ported
 //! by hand. A packet's fields are the schema's, not the Java record's.
 
 pub mod client;
@@ -3291,7 +3291,7 @@ const TRANSITIONS: &[&str] = &[
 ];
 
 /// `_transition_uses`.
-fn transition_uses(units: &[Unit]) -> BpsResult<String> {
+fn transition_uses(units: &[Unit]) -> BmlResult<String> {
     let mut uses = Vec::new();
     for name in TRANSITIONS {
         // Python's dict keeps the last unit for a repeated class name.
@@ -3328,7 +3328,7 @@ fn parser_methods(group: &str) -> String {
 }
 
 /// `_vanilla_mod_rs`.
-fn vanilla_mod_rs(registries: &[String], units: &[Unit]) -> BpsResult<String> {
+fn vanilla_mod_rs(registries: &[String], units: &[Unit]) -> BmlResult<String> {
     let reexport: Vec<String> = registries
         .iter()
         .map(|k| format!("mod {k};\npub use {k}::{k}_registry;"))
@@ -3371,7 +3371,7 @@ pub fn is_generated(path: &Path) -> bool {
 }
 
 /// `_drop_stale`: remove generated files an earlier emit left behind.
-fn drop_stale(out_dir: &Path, written: &[PathBuf]) -> BpsResult<()> {
+fn drop_stale(out_dir: &Path, written: &[PathBuf]) -> BmlResult<()> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
             return;
@@ -3423,7 +3423,7 @@ pub fn emit_rstom(
     out_dir: &Path,
     classes: &ClassTable,
     rstom_path: &str,
-) -> BpsResult<Vec<PathBuf>> {
+) -> BmlResult<Vec<PathBuf>> {
     let lowered: HashSet<String> = WIRE_TYPES
         .iter()
         .map(|(n, _, _)| n.to_string())
@@ -3435,7 +3435,7 @@ pub fn emit_rstom(
     let src = out_dir.join("src");
     let mut written: Vec<PathBuf> = Vec::new();
 
-    fn write(written: &mut Vec<PathBuf>, path: PathBuf, text: &str) -> BpsResult<()> {
+    fn write(written: &mut Vec<PathBuf>, path: PathBuf, text: &str) -> BmlResult<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| emit(e.to_string()))?;
         }

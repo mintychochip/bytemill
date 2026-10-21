@@ -10,7 +10,7 @@ fn repo(rel: &str) -> PathBuf {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-java-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-java-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -20,8 +20,8 @@ fn scratch(tag: &str) -> PathBuf {
 /// sum. Self-contained: varint/integer definitions plus a small UTF-8 string
 /// encoding, so no std imports are needed.
 fn unit_source() -> String {
-    std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
-        + &std::fs::read_to_string(repo("schemas/std/integers.bps")).unwrap()
+    std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
         + r#"
 encoding short_string(max_chars = 100) {
     byte_len: varint
@@ -504,12 +504,12 @@ fn roundtrip_schema_packets(schema_rel: &str, tag: &str, min_packets: usize) {
 
 #[test]
 fn java_26_3_packets_roundtrip() {
-    roundtrip_schema_packets("schemas/minecraft_26_3_wiki.bps", "26-3", 100);
+    roundtrip_schema_packets("schemas/minecraft_26_3_wiki.bml", "26-3", 100);
 }
 
 #[test]
 fn java_hytale_packets_roundtrip() {
-    roundtrip_schema_packets("schemas/hytale/2026_02_17.bps", "hytale", 1);
+    roundtrip_schema_packets("schemas/hytale/2026_02_17.bml", "hytale", 1);
 }
 #[test]
 fn java_8_26_3_builds() {
@@ -519,7 +519,7 @@ fn java_8_26_3_builds() {
     };
     let java = javac.with_file_name("java");
     let resolved =
-        bytemill::analyze(&bytemill::load_schema(&[repo("schemas/minecraft_26_3_wiki.bps")]).unwrap())
+        bytemill::analyze(&bytemill::load_schema(&[repo("schemas/minecraft_26_3_wiki.bml")]).unwrap())
             .unwrap();
     let dir = scratch("jdk8-26-3");
     bytemill::emit_java::emit_java_with_version(&resolved, &dir, JavaVersion::Java8).unwrap();

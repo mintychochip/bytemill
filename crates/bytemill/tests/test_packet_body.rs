@@ -8,12 +8,12 @@ use bytemill::minestom::build_units;
 fn probe_unit(body: &str) -> (bytemill::minestom::Unit, bytemill::ResolvedSchema) {
     let source = format!(
         "import \"{}\"\n{}",
-        common::repo_root().join("schemas/minecraft_core.bps").display(),
+        common::repo_root().join("schemas/minecraft_core.bml").display(),
         common::rstom_tables::probe_source(&common::repo_root(), body)
     );
-    let dir = std::env::temp_dir().join(format!("bps-body-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-body-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     std::fs::write(&schema, &source).unwrap();
     let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
     let units = build_units(&resolved, &common::rstom_tables::probe_table()).unwrap();

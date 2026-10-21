@@ -13,8 +13,8 @@ cargo build --bin bml
 scripts/extract_rstom_shapes.sh --rstom <path-to-rstom-worktree>
 ```
 
-`--packets-json` (or `BPS_CLASS_TABLE`) and `--schema` (default
-`schemas/minecraft_26_3_wiki.bps`) are optional; see
+`--packets-json` (or `BML_CLASS_TABLE`) and `--schema` (default
+`schemas/minecraft_26_3_wiki.bml`) are optional; see
 `scripts/extract_rstom_shapes.sh --help`.
 
 Tests that need the ledger skip until it exists:

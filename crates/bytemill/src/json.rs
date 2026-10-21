@@ -2,7 +2,7 @@
 //! `decode`/`encode` paths, `dump-json`, the shape ledger, the pin gate and
 //! rstom's `packets.json` all depend on byte-identical formatting.
 
-use crate::errors::{BpsError, BpsResult};
+use crate::errors::{BmlError, BmlResult};
 pub use crate::value::Value;
 use std::fmt::Write as _;
 
@@ -317,7 +317,7 @@ pub fn float_repr(f: f64) -> String {
 // Reader: `json.loads`, strict like Python's default scanner.
 // ---------------------------------------------------------------------------
 
-pub fn loads(text: &str) -> BpsResult<Value> {
+pub fn loads(text: &str) -> BmlResult<Value> {
     let mut p = JsonParser {
         chars: text.chars().collect(),
         pos: 0,
@@ -331,8 +331,8 @@ pub fn loads(text: &str) -> BpsResult<Value> {
     Ok(v)
 }
 
-fn json_err(msg: &str) -> BpsError {
-    BpsError::new(
+fn json_err(msg: &str) -> BmlError {
+    BmlError::new(
         crate::errors::ErrorKind::Shape,
         format!("json error: {msg}"),
     )
@@ -386,7 +386,7 @@ impl JsonParser {
         }
     }
 
-    fn expect(&mut self, c: char) -> BpsResult<()> {
+    fn expect(&mut self, c: char) -> BmlResult<()> {
         if self.peek() == Some(c) {
             self.pos += 1;
             Ok(())
@@ -395,7 +395,7 @@ impl JsonParser {
         }
     }
 
-    fn parse_value(&mut self) -> BpsResult<Value> {
+    fn parse_value(&mut self) -> BmlResult<Value> {
         self.skip_ws();
         match self.peek() {
             Some('{') => self.parse_object(),
@@ -418,7 +418,7 @@ impl JsonParser {
         }
     }
 
-    fn parse_lit(&mut self, lit: &str, val: Value) -> BpsResult<Value> {
+    fn parse_lit(&mut self, lit: &str, val: Value) -> BmlResult<Value> {
         for expected in lit.chars() {
             if self.bump() != Some(expected) {
                 return Err(json_err(&format!("Expecting {lit}")));
@@ -427,7 +427,7 @@ impl JsonParser {
         Ok(val)
     }
 
-    fn parse_object(&mut self) -> BpsResult<Value> {
+    fn parse_object(&mut self) -> BmlResult<Value> {
         self.expect('{')?;
         let mut map = crate::ordmap::OrderedMap::new();
         self.skip_ws();
@@ -452,7 +452,7 @@ impl JsonParser {
         Ok(Value::map(map))
     }
 
-    fn parse_array(&mut self) -> BpsResult<Value> {
+    fn parse_array(&mut self) -> BmlResult<Value> {
         self.expect('[')?;
         let mut items = Vec::new();
         self.skip_ws();
@@ -472,7 +472,7 @@ impl JsonParser {
         Ok(Value::list(items))
     }
 
-    fn parse_string(&mut self) -> BpsResult<String> {
+    fn parse_string(&mut self) -> BmlResult<String> {
         self.expect('"')?;
         let mut out = String::new();
         loop {
@@ -528,7 +528,7 @@ impl JsonParser {
         Ok(out)
     }
 
-    fn parse_hex4(&mut self) -> BpsResult<u32> {
+    fn parse_hex4(&mut self) -> BmlResult<u32> {
         let mut v: u32 = 0;
         for _ in 0..4 {
             let c = self
@@ -542,7 +542,7 @@ impl JsonParser {
         Ok(v)
     }
 
-    fn parse_number(&mut self) -> BpsResult<Value> {
+    fn parse_number(&mut self) -> BmlResult<Value> {
         let start = self.pos;
         let mut is_float = false;
         if self.peek() == Some('-') {

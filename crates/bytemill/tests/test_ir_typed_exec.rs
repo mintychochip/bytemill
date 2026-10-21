@@ -583,13 +583,13 @@ fn check(rel: &str) -> (usize, Vec<String>) {
 #[test]
 fn every_schema_round_trips_through_the_typed_program() {
     let mut roots = vec![
-        "schemas/minecraft_26_3_wiki.bps".to_string(),
-        "schemas/hytale/2026_02_17.bps".to_string(),
+        "schemas/minecraft_26_3_wiki.bml".to_string(),
+        "schemas/hytale/2026_02_17.bml".to_string(),
     ];
     let mut versions: Vec<String> = std::fs::read_dir(repo("schemas/versions"))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with('v') && n.ends_with(".bps"))
+        .filter(|n| n.starts_with('v') && n.ends_with(".bml"))
         .map(|n| format!("schemas/versions/{n}"))
         .collect();
     versions.sort();

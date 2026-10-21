@@ -67,10 +67,10 @@ fn check(path: &str) {
 
 #[test]
 fn wiki_26_3_matches_the_interpreter() {
-    check("schemas/minecraft_26_3_wiki.bps");
+    check("schemas/minecraft_26_3_wiki.bml");
 }
 
 #[test]
 fn version_1_20_1_matches_the_interpreter() {
-    check("schemas/versions/v1_20_1.bps");
+    check("schemas/versions/v1_20_1.bml");
 }

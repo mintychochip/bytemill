@@ -11,7 +11,7 @@ use crate::ast::{
     BlockItem, EncBody, EncodingDecl, Expr, FieldType, MatchArm as AstArm, RepeatMode,
     ResolvedSchema, Tag, TypeRef, WireField,
 };
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ordmap::OrderedMap;
 use crate::primitives::is_bare_primitive;
 
@@ -19,7 +19,7 @@ use super::width::{Storage, storage_of};
 
 const BUILTINS: &[&str] = &["u8", "f32be", "f64be", "bytes", "rest"];
 
-pub fn lower(resolved: &ResolvedSchema) -> BpsResult<IrSchema> {
+pub fn lower(resolved: &ResolvedSchema) -> BmlResult<IrSchema> {
     let mut ir = IrSchema {
         types: OrderedMap::new(),
         decode: OrderedMap::new(),
@@ -144,7 +144,7 @@ fn u8_locals(body: &EncBody) -> HashMap<String, Storage> {
     locals
 }
 
-fn lower_scalar(enc: &EncodingDecl, resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+fn lower_scalar(enc: &EncodingDecl, resolved: &ResolvedSchema, ir: &mut IrSchema) -> BmlResult<()> {
     let EncBody::Block(block) = &enc.body else {
         return Err(emit(format!(
             "encoding {}: a scalar alias is not lowered",
@@ -184,7 +184,7 @@ fn install_record(
     items: &[BlockItem],
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let items = disambiguate_nested(&expand_spreads(items, resolved)?);
     // The collect walk and both procedure walks visit bindings in the same
     // order, so each fresh renamer assigns identical final names.
@@ -343,7 +343,7 @@ impl RecCx {
         }
     }
 
-    fn check(&self, expr: &Expr, owner: &str) -> BpsResult<()> {
+    fn check(&self, expr: &Expr, owner: &str) -> BmlResult<()> {
         check_no_renamed_read(expr, &self.scopes, owner)
     }
 }
@@ -399,7 +399,7 @@ struct RecScope {
     bound: HashMap<String, String>,
 }
 
-fn check_no_renamed_read(expr: &Expr, scopes: &[RecScope], owner: &str) -> BpsResult<()> {
+fn check_no_renamed_read(expr: &Expr, scopes: &[RecScope], owner: &str) -> BmlResult<()> {
     let mut bad: Option<(String, String)> = None;
     read_idents(expr, &mut |name| {
         if bad.is_some() {
@@ -457,7 +457,7 @@ fn lower_items(
     owner: &str,
     ir: &IrSchema,
     cx: &mut RecCx,
-) -> BpsResult<Vec<Stmt>> {
+) -> BmlResult<Vec<Stmt>> {
     let mut out = Vec::new();
     for item in items {
         match item {
@@ -552,7 +552,7 @@ fn decode_field(
     owner: &str,
     ir: &IrSchema,
     cx: &mut RecCx,
-) -> BpsResult<Vec<Stmt>> {
+) -> BmlResult<Vec<Stmt>> {
     match ty {
         FieldType::Ref(r) => ref_decode(dst, r, resolved, owner, cx),
         FieldType::Match(mt) => {
@@ -582,7 +582,7 @@ fn ref_decode(
     resolved: &ResolvedSchema,
     owner: &str,
     cx: &RecCx,
-) -> BpsResult<Vec<Stmt>> {
+) -> BmlResult<Vec<Stmt>> {
     check_transform(r, owner)?;
     let args = call_args(resolved, r, owner)?;
     for arg in &args {
@@ -610,7 +610,7 @@ fn encode_field(
     owner: &str,
     ir: &IrSchema,
     cx: &mut RecCx,
-) -> BpsResult<Vec<Stmt>> {
+) -> BmlResult<Vec<Stmt>> {
     match ty {
         FieldType::Ref(r) => ref_encode(name, r, value, resolved, owner, cx),
         FieldType::Match(mt) => {
@@ -641,7 +641,7 @@ fn ref_encode(
     resolved: &ResolvedSchema,
     owner: &str,
     cx: &RecCx,
-) -> BpsResult<Vec<Stmt>> {
+) -> BmlResult<Vec<Stmt>> {
     check_transform(r, owner)?;
     // `value` was already checked by the caller (explicit `= expr`); the
     // default `Ident(field)` it substitutes needs no check.
@@ -662,7 +662,7 @@ fn ref_encode(
     ])
 }
 
-fn check_transform(r: &TypeRef, owner: &str) -> BpsResult<()> {
+fn check_transform(r: &TypeRef, owner: &str) -> BmlResult<()> {
     for t in &r.transforms {
         if t != "utf8" {
             return Err(emit(format!("{owner}: transform {t} is not utf8")));
@@ -671,7 +671,7 @@ fn check_transform(r: &TypeRef, owner: &str) -> BpsResult<()> {
     Ok(())
 }
 
-fn call_args(resolved: &ResolvedSchema, r: &TypeRef, owner: &str) -> BpsResult<Vec<Expr>> {
+fn call_args(resolved: &ResolvedSchema, r: &TypeRef, owner: &str) -> BmlResult<Vec<Expr>> {
     if is_builtin(&r.name) || is_bare_primitive(&r.name) || resolved.enums.contains_key(&r.name) {
         return Ok(r.args.clone());
     }
@@ -701,7 +701,7 @@ fn is_builtin(name: &str) -> bool {
 }
 
 /// Encodings whose wire is a length plus `bytes(length) as utf8`, and spreads of those.
-fn lower_strings(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+fn lower_strings(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BmlResult<()> {
     let mut progressed = true;
     while progressed {
         progressed = false;
@@ -721,7 +721,7 @@ fn install_string(
     enc: &EncodingDecl,
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
-) -> BpsResult<bool> {
+) -> BmlResult<bool> {
     let EncBody::Block(block) = &enc.body else {
         return Ok(false);
     };
@@ -840,7 +840,7 @@ fn string_spread(
     resolved: &ResolvedSchema,
     ir: &IrSchema,
     owner: &str,
-) -> BpsResult<Option<(String, Vec<Expr>)>> {
+) -> BmlResult<Option<(String, Vec<Expr>)>> {
     if items.len() != 1 {
         return Ok(None);
     }
@@ -913,7 +913,7 @@ fn string_procs(shape: &StringShape, params: &[String]) -> (Proc, Proc) {
     (decode, encode)
 }
 
-fn lower_enums(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+fn lower_enums(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BmlResult<()> {
     for en in resolved.enums.values() {
         let base = match ir.types.get(&en.base) {
             Some(TypeDef::Scalar(class)) => *class,
@@ -953,7 +953,7 @@ fn lower_enums(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
     Ok(())
 }
 
-fn lower_records(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+fn lower_records(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BmlResult<()> {
     let mut progress = true;
     while progress {
         progress = false;
@@ -1014,7 +1014,7 @@ fn install_alias(enc: &EncodingDecl, inner: &TypeRef, ir: &mut IrSchema) {
     );
 }
 
-fn lower_frames(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BpsResult<()> {
+fn lower_frames(resolved: &ResolvedSchema, ir: &mut IrSchema) -> BmlResult<()> {
     for proto in resolved.protocols.values() {
         if proto.frames.is_empty() && !proto.routes.is_empty() {
             return Err(emit(format!("protocol {}: no frame", proto.name)));
@@ -1055,7 +1055,7 @@ fn repeat_stmt(
     owner: &str,
     ir: &IrSchema,
     cx: &mut RecCx,
-) -> BpsResult<Stmt> {
+) -> BmlResult<Stmt> {
     let rep = wf.repeat.as_ref().unwrap();
     let elem = if decode {
         decode_field("__elem", &wf.type_ref, resolved, owner, ir, cx)?
@@ -1089,7 +1089,7 @@ fn encode_element(
     owner: &str,
     ir: &IrSchema,
     cx: &mut RecCx,
-) -> BpsResult<Vec<Stmt>> {
+) -> BmlResult<Vec<Stmt>> {
     match ty {
         FieldType::Ref(r) => {
             let args = call_args(resolved, r, owner)?;
@@ -1129,7 +1129,7 @@ fn typed_match(
     owner: &str,
     ir: &IrSchema,
     cx: &mut RecCx,
-) -> BpsResult<Stmt> {
+) -> BmlResult<Stmt> {
     let mut arms = Vec::new();
     let mut default = None;
     for arm in &mt.arms {
@@ -1157,7 +1157,7 @@ fn stmt_match(
     owner: &str,
     ir: &IrSchema,
     cx: &mut RecCx,
-) -> BpsResult<Stmt> {
+) -> BmlResult<Stmt> {
     let mut arms = Vec::new();
     let mut default = None;
     for arm in &mt.arms {
@@ -1188,7 +1188,7 @@ fn stmt_match(
 
 /// Every tag of an arm, once each: `tag` is the first of `tags` when both
 /// are set.
-fn arm_tags(arm: &AstArm) -> BpsResult<Option<Vec<i128>>> {
+fn arm_tags(arm: &AstArm) -> BmlResult<Option<Vec<i128>>> {
     if arm.tag.is_none() && arm.tags.is_empty() {
         return Ok(None);
     }
@@ -1202,14 +1202,14 @@ fn arm_tags(arm: &AstArm) -> BpsResult<Option<Vec<i128>>> {
     Ok(Some(tags))
 }
 
-fn tag_int(tag: &Tag) -> BpsResult<i128> {
+fn tag_int(tag: &Tag) -> BmlResult<i128> {
     match tag {
         Tag::Int(v) => Ok(*v),
         Tag::Str(s) => Err(emit(format!("string match tag {s} is not lowered"))),
     }
 }
 
-fn expand_spreads(items: &[BlockItem], resolved: &ResolvedSchema) -> BpsResult<Vec<BlockItem>> {
+fn expand_spreads(items: &[BlockItem], resolved: &ResolvedSchema) -> BmlResult<Vec<BlockItem>> {
     let mut out = Vec::new();
     for item in items {
         if let BlockItem::Spread { name, args } = item {
@@ -1333,7 +1333,7 @@ fn collect_fields(
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
     renamer: &mut Renamer,
-) -> BpsResult<Vec<Field>> {
+) -> BmlResult<Vec<Field>> {
     let mut fields = Vec::new();
     for item in items {
         match item {
@@ -1388,7 +1388,7 @@ fn add_field(
     fields: &mut Vec<Field>,
     renamer: &mut Renamer,
     field: Field,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let _ = owner;
     let final_name = renamer.dst_for(&field.name, &field.ty);
     if let Some(existing) = fields.iter_mut().find(|have| have.name == final_name) {
@@ -1409,7 +1409,7 @@ fn field_desc(
     force_opt: bool,
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
-) -> BpsResult<Field> {
+) -> BmlResult<Field> {
     match &wf.type_ref {
         FieldType::Ref(_) => {}
         FieldType::Match(mt) => {
@@ -1474,7 +1474,7 @@ fn sum_arms(
     mt: &crate::ast::MatchType,
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
-) -> BpsResult<Vec<Variant>> {
+) -> BmlResult<Vec<Variant>> {
     let mut arms = Vec::new();
     for (i, arm) in mt.arms.iter().enumerate() {
         let ty = match &arm.type_ref {
@@ -1509,7 +1509,7 @@ fn match_stmt_fields(
     resolved: &ResolvedSchema,
     ir: &mut IrSchema,
     renamer: &mut Renamer,
-) -> BpsResult<Vec<Field>> {
+) -> BmlResult<Vec<Field>> {
     let mut per_arm = Vec::new();
     for arm in &mt.arms {
         let items = match &arm.type_ref {

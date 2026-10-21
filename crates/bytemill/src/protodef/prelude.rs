@@ -1,4 +1,4 @@
-//! The BPS text of the native protodef types that have no definition in `protocol.json`:
+//! The BML text of the native protodef types that have no definition in `protocol.json`:
 //! UUID, the four NBT flavours and `lpVec3`. Emitted on demand, with their helpers.
 //!
 //! The NBT encodings follow prismarine-nbt's `nbt.json` (the definition node-minecraft-protocol
@@ -21,7 +21,7 @@ pub enum Pre {
 
 impl Pre {
     /// The encoding name the protodef native maps to.
-    pub fn bps_name(self) -> &'static str {
+    pub fn bml_name(self) -> &'static str {
         match self {
             Pre::Uuid => "uuid",
             Pre::Nbt => "nbt",

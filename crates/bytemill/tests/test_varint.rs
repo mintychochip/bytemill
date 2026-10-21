@@ -36,7 +36,7 @@ fn handshake_frame() {
 #[test]
 fn position_decode() {
     use bytemill::ast::Schema;
-    let core = bytemill::load_schema(&[common::schema_path("minecraft_core.bps")]).unwrap();
+    let core = bytemill::load_schema(&[common::schema_path("minecraft_core.bml")]).unwrap();
     let extra = bytemill::parse("packet pos { p: position }").unwrap();
     let merged = bytemill::analyze(&Schema {
         encodings: core.encodings,
@@ -60,7 +60,7 @@ fn position_decode() {
 #[test]
 fn entity_metadata_sample() {
     use bytemill::ast::Schema;
-    let core = bytemill::load_schema(&[common::schema_path("minecraft_core.bps")]).unwrap();
+    let core = bytemill::load_schema(&[common::schema_path("minecraft_core.bml")]).unwrap();
     let extra = bytemill::parse("packet md { m: entity_metadata }").unwrap();
     let merged = bytemill::analyze(&Schema {
         encodings: core.encodings,

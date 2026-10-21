@@ -40,7 +40,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::ResolvedSchema;
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ir::typed::{
     BinOp, Bind, Body, CodecIdx, Expr, Failure, Func, IntTy, LocalId, Origin, Program, ReadOp,
     RepeatMode, Stmt, Ty, TypeIdx, TypeKind, WriteOp, byte_literal, diverges, escape, hex_literal,
@@ -173,7 +173,7 @@ fn uint_of(ty: IntTy) -> &'static str {
 }
 
 /// The C spelling of a plain (non-list) value type.
-fn ctype(program: &Program, ty: &Ty) -> BpsResult<String> {
+fn ctype(program: &Program, ty: &Ty) -> BmlResult<String> {
     match ty {
         Ty::Int(t) => {
             if *t == IntTy::I128 {
@@ -192,7 +192,7 @@ fn ctype(program: &Program, ty: &Ty) -> BpsResult<String> {
 }
 
 /// A named type through aliases to its definition.
-fn resolved_name(program: &Program, ty: TypeIdx) -> BpsResult<String> {
+fn resolved_name(program: &Program, ty: TypeIdx) -> BmlResult<String> {
     match &program.types[ty].kind {
         TypeKind::Alias { target } => resolved_name(program, *target),
         _ => Ok(type_name(program, ty)),
@@ -225,7 +225,7 @@ fn owns_ty(program: &Program, ty: &Ty) -> bool {
 }
 
 /// The zero initializer of a plain value type.
-fn zero_of(program: &Program, ty: &Ty) -> BpsResult<String> {
+fn zero_of(program: &Program, ty: &Ty) -> BmlResult<String> {
     match ty {
         Ty::Int(_) => Ok("0".to_string()),
         Ty::Bool => Ok("false".to_string()),
@@ -285,7 +285,7 @@ fn esc(text: &str) -> String {
     out
 }
 
-pub fn emit_c(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+pub fn emit_c(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     emit_c_with_standard(resolved, out_dir, crate::CStandard::default())
 }
 
@@ -293,7 +293,7 @@ pub fn emit_c_with_standard(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     std: crate::CStandard,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let program = crate::ir::typed(resolved)?;
     let printer = Gen::new(&program, std)?;
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
@@ -334,7 +334,7 @@ struct Gen<'a> {
 }
 
 impl<'a> Gen<'a> {
-    fn new(program: &'a Program, std: crate::CStandard) -> BpsResult<Self> {
+    fn new(program: &'a Program, std: crate::CStandard) -> BmlResult<Self> {
         // Reject types C cannot spell before emitting anything.
         no_nested_lists(program)?;
         for (i, decl) in program.types.iter().enumerate() {
@@ -406,7 +406,7 @@ fn inner(ty: &Ty) -> &Ty {
 
 /// Every expression's integer casts must target spellable types; lists never
 /// nest, so one `inner` step reaches the element type for declarations.
-fn check_body(program: &Program, body: &Body) -> BpsResult<()> {
+fn check_body(program: &Program, body: &Body) -> BmlResult<()> {
     for local in &body.locals {
         if matches!(local.ty, Ty::List(_)) {
             let _ = ctype(program, inner(&local.ty))?;
@@ -1020,7 +1020,7 @@ impl<'a> Gen<'a> {
         !self.std.supports_mixed_decls()
     }
 
-    fn header(&self) -> BpsResult<String> {
+    fn header(&self) -> BmlResult<String> {
         let p = self.program;
         let mut h = String::new();
         h.push_str("#ifndef BMLGEN_H\n#define BMLGEN_H\n");
@@ -1101,7 +1101,7 @@ impl<'a> Gen<'a> {
         Ok(h)
     }
 
-    fn decl_type(&self, h: &mut String, ty: TypeIdx) -> BpsResult<()> {
+    fn decl_type(&self, h: &mut String, ty: TypeIdx) -> BmlResult<()> {
         let p = self.program;
         let decl = &p.types[ty];
         let name = type_name(p, ty);
@@ -1197,7 +1197,7 @@ impl<'a> Gen<'a> {
     /// `int32_t name;`, `bml_foo *items; size_t items_len;` for lists (the
     /// length is the resolved member name, which may have bumped), and
     /// `bml_foo *next;` for boxed recursive fields (no length).
-    fn member_decl(&self, ty: &Ty, c: &str, len: Option<&str>, boxed: bool) -> BpsResult<String> {
+    fn member_decl(&self, ty: &Ty, c: &str, len: Option<&str>, boxed: bool) -> BmlResult<String> {
         match ty {
             Ty::List(_) => {
                 let ln = len.ok_or_else(|| emit("emit c: a list member without a length"))?;
@@ -1213,7 +1213,7 @@ impl<'a> Gen<'a> {
 
     /// One codec parameter (optional scalars take a presence flag first).
     /// Centralized C names for one function body (see [`name_map`]).
-    fn param_decls(&self, codec: CodecIdx, decode: bool) -> BpsResult<Vec<String>> {
+    fn param_decls(&self, codec: CodecIdx, decode: bool) -> BmlResult<Vec<String>> {
         let p = self.program;
         let body = if decode {
             &p.codecs[codec].decode
@@ -1240,7 +1240,7 @@ impl<'a> Gen<'a> {
         Ok(out)
     }
 
-    fn decode_sig(&self, codec: CodecIdx) -> BpsResult<String> {
+    fn decode_sig(&self, codec: CodecIdx) -> BmlResult<String> {
         let p = self.program;
         let mut parts = vec!["bml_reader *r".to_string()];
         if self.dec_alloc[codec] {
@@ -1255,7 +1255,7 @@ impl<'a> Gen<'a> {
         ))
     }
 
-    fn encode_sig(&self, codec: CodecIdx) -> BpsResult<String> {
+    fn encode_sig(&self, codec: CodecIdx) -> BmlResult<String> {
         let p = self.program;
         let body = &p.codecs[codec].encode;
         let nm = name_map(p, codec, false);
@@ -1278,7 +1278,7 @@ impl<'a> Gen<'a> {
         ))
     }
 
-    fn free_sig(&self, ty: TypeIdx) -> BpsResult<String> {
+    fn free_sig(&self, ty: TypeIdx) -> BmlResult<String> {
         let _ = resolved_name(self.program, ty)?;
         Ok(format!(
             "void {}(const bml_alloc *a, {} *v)",
@@ -1297,7 +1297,7 @@ fn c_preamble() -> String {
 }
 
 impl<'a> Gen<'a> {
-    fn sources(&self) -> BpsResult<BTreeMap<String, String>> {
+    fn sources(&self) -> BmlResult<BTreeMap<String, String>> {
         let mut files: BTreeMap<String, String> = BTreeMap::new();
         let mut runtime = format!(
             "/* Generated by bml emit c. Do not edit. */\n#include \"bmlgen.h\"\n#include <string.h>\n\n{RUNTIME_IMPLS}\n"
@@ -1322,7 +1322,7 @@ impl<'a> Gen<'a> {
         Ok(files)
     }
 
-    fn emit_free(&self, s: &mut String, ty: TypeIdx) -> BpsResult<()> {
+    fn emit_free(&self, s: &mut String, ty: TypeIdx) -> BmlResult<()> {
         let p = self.program;
         let decl = &p.types[ty];
         let doc = origin_doc(&decl.origin, p);
@@ -1420,7 +1420,7 @@ impl<'a> Gen<'a> {
 
     /// Free a boxed (pointer) record member `target`: the pointee, then the
     /// pointer itself. Mirrors [`free_value`]'s `Named` arm without the `&`.
-    fn free_boxed(&self, ty: &Ty, target: &str, depth: usize) -> BpsResult<String> {
+    fn free_boxed(&self, ty: &Ty, target: &str, depth: usize) -> BmlResult<String> {
         let p = self.program;
         let pad: String = "    ".repeat(depth);
         let Ty::Named(t) = ty else {
@@ -1450,7 +1450,7 @@ impl<'a> Gen<'a> {
         len: Option<&str>,
         depth: usize,
         hoist: &mut Vec<String>,
-    ) -> BpsResult<String> {
+    ) -> BmlResult<String> {
         let p = self.program;
         let pad: String = "    ".repeat(depth);
         match ty {
@@ -1686,7 +1686,7 @@ fn collect_repeats(stmts: &[Stmt], out: &mut HashSet<LocalId>) {
 // ----------------------------------------------------------------------
 
 impl<'a> Gen<'a> {
-    fn emit_decode(&self, s: &mut String, codec: CodecIdx) -> BpsResult<()> {
+    fn emit_decode(&self, s: &mut String, codec: CodecIdx) -> BmlResult<()> {
         let p = self.program;
         let doc = origin_doc(&p.codecs[codec].origin, p);
         let mut f = FnEmit::new(p, &self.dec_alloc, &self.boxed, codec, true, self.std);
@@ -1699,7 +1699,7 @@ impl<'a> Gen<'a> {
         Ok(())
     }
 
-    fn emit_encode(&self, s: &mut String, codec: CodecIdx) -> BpsResult<()> {
+    fn emit_encode(&self, s: &mut String, codec: CodecIdx) -> BmlResult<()> {
         let p = self.program;
         let doc = origin_doc(&p.codecs[codec].origin, p);
         let mut f = FnEmit::new(p, &self.dec_alloc, &self.boxed, codec, false, self.std);
@@ -1846,7 +1846,7 @@ impl<'p> FnEmit<'p> {
         if self.decode { "r" } else { "w" }
     }
 
-    fn function(&mut self) -> BpsResult<()> {
+    fn function(&mut self) -> BmlResult<()> {
         let uses = local_uses(self.body);
         let addr = addr_taken(&self.body.stmts);
         for l in 0..self.body.locals.len() {
@@ -1952,7 +1952,7 @@ impl<'p> FnEmit<'p> {
         l: LocalId,
         uses: &HashSet<LocalId>,
         addr: &HashSet<LocalId>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let ty = self.body.locals[l].ty.clone();
         let c = self.nm.local[l].clone();
         if self.decode && owns_ty(self.p, &ty) {
@@ -2032,7 +2032,7 @@ impl<'p> FnEmit<'p> {
 // ----------------------------------------------------------------------
 
 impl<'p> FnEmit<'p> {
-    fn dec_stmts(&mut self, stmts: &[Stmt]) -> BpsResult<()> {
+    fn dec_stmts(&mut self, stmts: &[Stmt]) -> BmlResult<()> {
         for s in stmts {
             self.dec_stmt(s)?;
             note_stores(s, &mut self.stored);
@@ -2040,7 +2040,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn dec_stmt(&mut self, s: &Stmt) -> BpsResult<()> {
+    fn dec_stmt(&mut self, s: &Stmt) -> BmlResult<()> {
         match s {
             Stmt::Declare { .. } => Ok(()),
             Stmt::Let { dst, value } => self.dec_let(dst, value),
@@ -2109,7 +2109,7 @@ impl<'p> FnEmit<'p> {
         }
     }
 
-    fn dec_let(&mut self, dst: &Bind, value: &Expr) -> BpsResult<()> {
+    fn dec_let(&mut self, dst: &Bind, value: &Expr) -> BmlResult<()> {
         let Bind { local, some, .. } = *dst;
         let lhs = self.nm.local[local].clone();
         if some {
@@ -2159,7 +2159,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn dec_read(&mut self, dst: &Bind, op: &ReadOp) -> BpsResult<()> {
+    fn dec_read(&mut self, dst: &Bind, op: &ReadOp) -> BmlResult<()> {
         let Bind { local, some, .. } = *dst;
         let lhs = self.nm.local[local].clone();
         let call = match op {
@@ -2176,7 +2176,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn dec_decode(&mut self, dst: &Bind, codec: CodecIdx, args: &[Expr]) -> BpsResult<()> {
+    fn dec_decode(&mut self, dst: &Bind, codec: CodecIdx, args: &[Expr]) -> BmlResult<()> {
         let Bind { local, some, .. } = *dst;
         let lhs = self.nm.local[local].clone();
         let mut argv = vec!["r".to_string()];
@@ -2196,7 +2196,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn dec_utf8(&mut self, dst: &Bind, src: &Expr) -> BpsResult<()> {
+    fn dec_utf8(&mut self, dst: &Bind, src: &Expr) -> BmlResult<()> {
         let Expr::Local(l) = src else {
             return Err(emit("emit c: utf8 of a non-local"));
         };
@@ -2218,7 +2218,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn dec_unwrap(&mut self, dst: &Bind, src: &Expr, field: &str) -> BpsResult<()> {
+    fn dec_unwrap(&mut self, dst: &Bind, src: &Expr, field: &str) -> BmlResult<()> {
         let Expr::Local(l) = src else {
             return Err(emit("emit c: unwrap of a non-local in decode"));
         };
@@ -2255,7 +2255,7 @@ impl<'p> FnEmit<'p> {
         scrutinee: &Expr,
         arms: &[crate::ir::typed::MatchArm],
         other: &Option<Vec<Stmt>>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let s = self.expr(scrutinee)?;
         // Each arm starts from what was stored before the `switch`; the
         // statement loop adds every arm's stores after it.
@@ -2297,7 +2297,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// A `case` body, with the `break` only when control can reach it.
-    fn arm_body(&mut self, body: &[Stmt]) -> BpsResult<()> {
+    fn arm_body(&mut self, body: &[Stmt]) -> BmlResult<()> {
         if self.decode {
             self.dec_stmts(body)?;
         } else {
@@ -2315,7 +2315,7 @@ impl<'p> FnEmit<'p> {
         list: LocalId,
         item: LocalId,
         body: &[Stmt],
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         match mode {
             RepeatMode::Count(n) => {
                 let cnt = self.temp("count");
@@ -2372,7 +2372,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// Grow `list` if full, copy `item` in, clear `item`.
-    fn append(&mut self, list: LocalId, item: LocalId) -> BpsResult<()> {
+    fn append(&mut self, list: LocalId, item: LocalId) -> BmlResult<()> {
         let lc = self.nm.local[list].clone();
         let ln = self.nm.len[&list].clone();
         let cp = self
@@ -2414,7 +2414,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn dec_return(&mut self, e: &Expr) -> BpsResult<()> {
+    fn dec_return(&mut self, e: &Expr) -> BmlResult<()> {
         let mut consumed = HashSet::new();
         match e {
             Expr::Construct { ty, fields } => {
@@ -2523,7 +2523,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn free_local(&mut self, l: LocalId) -> BpsResult<()> {
+    fn free_local(&mut self, l: LocalId) -> BmlResult<()> {
         let ty = self.body.locals[l].ty.clone();
         let c = self.nm.local[l].clone();
         let opt = self.body.locals[l].optional;
@@ -2564,7 +2564,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn free_elem(&mut self, ty: &Ty, target: &str) -> BpsResult<()> {
+    fn free_elem(&mut self, ty: &Ty, target: &str) -> BmlResult<()> {
         match ty {
             Ty::Str => self.line(&format!("bml_free_str(a, {});", addr_of(target))),
             Ty::Bytes => self.line(&format!("bml_free_bytes(a, {});", addr_of(target))),
@@ -2584,14 +2584,14 @@ impl<'p> FnEmit<'p> {
     }
 }
 impl<'p> FnEmit<'p> {
-    fn enc_stmts(&mut self, stmts: &[Stmt]) -> BpsResult<()> {
+    fn enc_stmts(&mut self, stmts: &[Stmt]) -> BmlResult<()> {
         for s in stmts {
             self.enc_stmt(s)?;
         }
         Ok(())
     }
 
-    fn enc_stmt(&mut self, s: &Stmt) -> BpsResult<()> {
+    fn enc_stmt(&mut self, s: &Stmt) -> BmlResult<()> {
         match s {
             Stmt::Declare { .. } => Ok(()),
             Stmt::Let { dst, value } => self.enc_let(dst, value),
@@ -2660,7 +2660,7 @@ impl<'p> FnEmit<'p> {
 
     /// Encode binds borrow: values are read through the caller's memory and
     /// never freed here.
-    fn enc_let(&mut self, dst: &Bind, value: &Expr) -> BpsResult<()> {
+    fn enc_let(&mut self, dst: &Bind, value: &Expr) -> BmlResult<()> {
         let Bind { local, some, .. } = *dst;
         let lhs = self.nm.local[local].clone();
         if some {
@@ -2687,7 +2687,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn enc_write(&mut self, op: &WriteOp, value: &Expr) -> BpsResult<()> {
+    fn enc_write(&mut self, op: &WriteOp, value: &Expr) -> BmlResult<()> {
         let call = match op {
             WriteOp::U8 => {
                 let v = match byte_literal(value, true) {
@@ -2718,7 +2718,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn enc_encode(&mut self, codec: CodecIdx, args: &[Expr], value: &Expr) -> BpsResult<()> {
+    fn enc_encode(&mut self, codec: CodecIdx, args: &[Expr], value: &Expr) -> BmlResult<()> {
         let mut argv = vec!["w".to_string(), "a".to_string()];
         argv.extend(self.call_args(codec, args)?);
         argv.push(self.encode_ref(value)?);
@@ -2732,7 +2732,7 @@ impl<'p> FnEmit<'p> {
 
     /// How the encode input passes to a nested call: scalars and enums by
     /// value, owned values by const pointer.
-    fn encode_ref(&mut self, value: &Expr) -> BpsResult<String> {
+    fn encode_ref(&mut self, value: &Expr) -> BmlResult<String> {
         let (ty, _) = self.p.expr_ty(self.body, value);
         match value {
             Expr::Local(l) if self.nm.ptr.contains(l) => {
@@ -2749,7 +2749,7 @@ impl<'p> FnEmit<'p> {
         }
     }
 
-    fn enc_unwrap(&mut self, dst: &Bind, src: &Expr, field: &str) -> BpsResult<()> {
+    fn enc_unwrap(&mut self, dst: &Bind, src: &Expr, field: &str) -> BmlResult<()> {
         let Bind { local, .. } = *dst;
         let h = self.has_of(src)?;
         let v = self.val_of(src)?;
@@ -2769,7 +2769,7 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    fn enc_foreach(&mut self, list: &Expr, item: LocalId, body: &[Stmt]) -> BpsResult<()> {
+    fn enc_foreach(&mut self, list: &Expr, item: LocalId, body: &[Stmt]) -> BmlResult<()> {
         let lv = self.list_ptr(list)?;
         let ln = self.len_of(list)?;
         let ic = self.nm.local[item].clone();
@@ -2789,7 +2789,7 @@ impl<'p> FnEmit<'p> {
         sum: &Expr,
         ty: TypeIdx,
         variant: usize,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let Expr::Local(l) = sum else {
             return Err(emit("emit c: expect-variant of a non-local"));
         };
@@ -2820,7 +2820,7 @@ impl<'p> FnEmit<'p> {
 // ----------------------------------------------------------------------
 
 impl<'p> FnEmit<'p> {
-    fn expr(&mut self, e: &Expr) -> BpsResult<String> {
+    fn expr(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Int { value, .. } => Ok(value.to_string()),
             Expr::Bool(b) => Ok(b.to_string()),
@@ -2887,7 +2887,7 @@ impl<'p> FnEmit<'p> {
         rhs: &Expr,
         ty: &Ty,
         wraps: bool,
-    ) -> BpsResult<String> {
+    ) -> BmlResult<String> {
         if op.is_logical() {
             return Ok(format!(
                 "{} {} {}",
@@ -2961,7 +2961,7 @@ impl<'p> FnEmit<'p> {
     /// where C precedence needs them. Mixed `&`/`|`/`^` and `&&` inside
     /// `||` keep theirs: the strict gate (`-Wparentheses`) rejects the bare
     /// mix even though it parses unambiguously.
-    fn operand(&mut self, child: &Expr, parent: BinOp, right: bool) -> BpsResult<String> {
+    fn operand(&mut self, child: &Expr, parent: BinOp, right: bool) -> BmlResult<String> {
         let s = self.expr(child)?;
         let Expr::Binary { op: cop, .. } = child else {
             // Calls, casts, and atoms bind tighter than every binary
@@ -2997,7 +2997,7 @@ impl<'p> FnEmit<'p> {
     /// An operand of `&`, `|`, `^`: masks print hex, and a flag ternary
     /// (`cond ? 128 : 0`) prints its set-bit branch hex too, as in the
     /// guide's `((v >> 7) != 0 ? 0x80 : 0)`.
-    fn bitwise_operand(&mut self, child: &Expr, parent: BinOp, right: bool) -> BpsResult<String> {
+    fn bitwise_operand(&mut self, child: &Expr, parent: BinOp, right: bool) -> BmlResult<String> {
         if let Expr::Cond {
             cond,
             then,
@@ -3015,7 +3015,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// A flag-bit ternary branch: a set-bit constant prints hex.
-    fn flag_branch(&mut self, e: &Expr) -> BpsResult<String> {
+    fn flag_branch(&mut self, e: &Expr) -> BmlResult<String> {
         if let Expr::Int { value, .. } = e
             && *value > 9
         {
@@ -3024,7 +3024,7 @@ impl<'p> FnEmit<'p> {
         self.expr(e)
     }
 
-    fn cast(&mut self, inner: &Expr, to: &Ty) -> BpsResult<String> {
+    fn cast(&mut self, inner: &Expr, to: &Ty) -> BmlResult<String> {
         let (from, _) = self.p.expr_ty(self.body, inner);
         let v = self.expr(inner)?;
         // A cast binds tighter than every binary operator: only binary and
@@ -3069,7 +3069,7 @@ impl<'p> FnEmit<'p> {
         }
     }
 
-    fn call(&mut self, func: Func, args: &[Expr]) -> BpsResult<String> {
+    fn call(&mut self, func: Func, args: &[Expr]) -> BmlResult<String> {
         match func {
             Func::SignExtend => Ok(format!(
                 "bml_sign_extend({}, {})",
@@ -3101,7 +3101,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// Field access with `->` past a pointer base, `.` otherwise.
-    fn acc(&mut self, e: &Expr) -> BpsResult<(String, bool)> {
+    fn acc(&mut self, e: &Expr) -> BmlResult<(String, bool)> {
         match e {
             Expr::Local(l) => Ok((self.nm.local[*l].clone(), self.nm.ptr.contains(l))),
             Expr::Get(x) => {
@@ -3121,7 +3121,7 @@ impl<'p> FnEmit<'p> {
         }
     }
 
-    fn field_full(&mut self, e: &Expr) -> BpsResult<String> {
+    fn field_full(&mut self, e: &Expr) -> BmlResult<String> {
         let Expr::Field { base, ty, field } = e else {
             return Err(emit("emit c: not a field"));
         };
@@ -3134,7 +3134,7 @@ impl<'p> FnEmit<'p> {
         })
     }
 
-    fn has_of(&mut self, e: &Expr) -> BpsResult<String> {
+    fn has_of(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Local(l) => self
                 .nm
@@ -3160,7 +3160,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// The value of an optional already known to be present.
-    fn val_of(&mut self, e: &Expr) -> BpsResult<String> {
+    fn val_of(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Local(l) => {
                 let c = self.nm.local[*l].clone();
@@ -3185,7 +3185,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// An addressable place for `&`.
-    fn place(&mut self, e: &Expr) -> BpsResult<String> {
+    fn place(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Local(l) => {
                 if self.nm.ptr.contains(l) {
@@ -3208,7 +3208,7 @@ impl<'p> FnEmit<'p> {
         }
     }
 
-    fn list_ptr(&mut self, e: &Expr) -> BpsResult<String> {
+    fn list_ptr(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Local(l) => Ok(self.nm.local[*l].clone()),
             Expr::Field { .. } => self.field_full(e),
@@ -3218,7 +3218,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// The length variable of a list local.
-    fn len_name(&self, id: &LocalId) -> BpsResult<String> {
+    fn len_name(&self, id: &LocalId) -> BmlResult<String> {
         self.nm
             .len
             .get(id)
@@ -3226,7 +3226,7 @@ impl<'p> FnEmit<'p> {
             .ok_or_else(|| emit("emit c: a list without length"))
     }
 
-    fn len_of(&mut self, e: &Expr) -> BpsResult<String> {
+    fn len_of(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Local(l) => self
                 .nm
@@ -3252,7 +3252,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// The `(data, len)` of a string: literals decay, pointers dereference.
-    fn str_parts(&mut self, e: &Expr) -> BpsResult<(String, String)> {
+    fn str_parts(&mut self, e: &Expr) -> BmlResult<(String, String)> {
         match e {
             Expr::Local(l) => {
                 let c = self.nm.local[*l].clone();
@@ -3276,7 +3276,7 @@ impl<'p> FnEmit<'p> {
     }
 
     /// The `(data, len)` of bytes.
-    fn bytes_parts(&mut self, e: &Expr) -> BpsResult<(String, String)> {
+    fn bytes_parts(&mut self, e: &Expr) -> BmlResult<(String, String)> {
         match e {
             Expr::Local(l) => {
                 let c = self.nm.local[*l].clone();
@@ -3298,7 +3298,7 @@ impl<'p> FnEmit<'p> {
 
     /// A string as a value: locals and fields pass through, literals become
     /// compound literals.
-    fn str_val(&mut self, e: &Expr) -> BpsResult<String> {
+    fn str_val(&mut self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Local(l) => {
                 let c = self.nm.local[*l].clone();
@@ -3575,7 +3575,7 @@ pub fn decode_takes_alloc(program: &Program, codec: CodecIdx) -> bool {
 }
 
 /// Lists never nest: every list is a pointer plus a length, one level only.
-fn no_nested_lists(program: &Program) -> BpsResult<()> {
+fn no_nested_lists(program: &Program) -> BmlResult<()> {
     fn bad(ty: &Ty) -> bool {
         match ty {
             Ty::List(t) => matches!(**t, Ty::List(_)),
@@ -3718,7 +3718,7 @@ impl<'p> FnEmit<'p> {
     /// Call arguments: presence flags for optional parameters, pointers (and
     /// lengths) for owned ones. Arguments are present values unless the
     /// callee takes an optional parameter.
-    fn call_args(&mut self, codec: CodecIdx, args: &[Expr]) -> BpsResult<Vec<String>> {
+    fn call_args(&mut self, codec: CodecIdx, args: &[Expr]) -> BmlResult<Vec<String>> {
         let cparams = self.p.codecs[codec].params.clone();
         let mut argv = Vec::new();
         for (a, prm) in args.iter().zip(cparams.iter()) {

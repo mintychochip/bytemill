@@ -8,11 +8,11 @@ Usage: scripts/extract_rstom_shapes.sh [--rstom <dir>] [--packets-json <file>] [
 
 Regenerates the shape ledger at targets/rstom/shapes from an rstom worktree.
 
-  --rstom <dir>          rstom worktree (or BPS_RSTOM_DIR)
-  --packets-json <file>  packets_gen schema (or BPS_CLASS_TABLE); defaults to
+  --rstom <dir>          rstom worktree (or BML_RSTOM_DIR)
+  --packets-json <file>  packets_gen schema (or BML_CLASS_TABLE); defaults to
                          <rstom>/tools/packets_gen/schema/packets.json
   --schema <file>        schema to extract against
-                         (default: schemas/minecraft_26_3_wiki.bps)
+                         (default: schemas/minecraft_26_3_wiki.bml)
   -h, --help             this text
 
 Requires a built CLI (BML, default target/debug/bml); run
@@ -20,9 +20,9 @@ Requires a built CLI (BML, default target/debug/bml); run
 EOF
 }
 
-RSTOM="${BPS_RSTOM_DIR:-}"
-PACKETS_JSON="${BPS_CLASS_TABLE:-}"
-SCHEMA="schemas/minecraft_26_3_wiki.bps"
+RSTOM="${BML_RSTOM_DIR:-}"
+PACKETS_JSON="${BML_CLASS_TABLE:-}"
+SCHEMA="schemas/minecraft_26_3_wiki.bml"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$RSTOM" ]; then
-    echo "error: rstom worktree not given (pass --rstom or set BPS_RSTOM_DIR)" >&2
+    echo "error: rstom worktree not given (pass --rstom or set BML_RSTOM_DIR)" >&2
     usage >&2
     exit 2
 fi

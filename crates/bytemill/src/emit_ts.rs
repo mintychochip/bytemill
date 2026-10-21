@@ -38,7 +38,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::ResolvedSchema;
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Func, IntTy, Origin, ParamRole, Program, ReadOp, RepeatMode, Stmt,
     Ty, TypeIdx, WriteOp, byte_literal, escape, hex_literal,
@@ -384,7 +384,7 @@ pub fn type_name(program: &Program, ty: TypeIdx) -> String {
     escape(program.types[ty].name.pascal(), TS_KEYWORDS)
 }
 
-pub fn emit_typescript(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+pub fn emit_typescript(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     emit_typescript_with_target(resolved, out_dir, crate::TsTarget::default())
 }
 
@@ -392,7 +392,7 @@ pub fn emit_typescript_with_target(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     target: crate::TsTarget,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let program = crate::ir::typed(resolved)?;
     let printer = Printer { program: &program };
     let mut parts: BTreeMap<String, String> = BTreeMap::new();

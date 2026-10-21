@@ -1,6 +1,6 @@
 //! Probe the vanilla Minecraft client and server jars for every schema version.
 //!
-//! The server probe boots Mojang's dedicated server and speaks status and login with the BPS
+//! The server probe boots Mojang's dedicated server and speaks status and login with the BML
 //! schema. `--client` also launches the real client binary (`net.minecraft.client.main.Main`)
 //! against that server, through a recording proxy, and checks that the bytes the client sends
 //! and the bytes the server sends back decode.

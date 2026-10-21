@@ -30,12 +30,12 @@ const CHAINS: &[(&str, &str, &str, &str)] = &[
     ("play", "clientbound", "game/GameProtocols.java", "CLIENTBOUND_TEMPLATE"),
 ];
 
-// BPS names a packet as the wiki does; vanilla registers these under another name.
+// BML names a packet as the wiki does; vanilla registers these under another name.
 const ALIASES: &[(&str, &str)] = &[
     ("handshake", "intention"),
     ("login_start", "hello"),
     ("encryption_response", "key"),
-    // Vanilla's one `show_dialog` has two wire forms by state; BPS has a packet for each.
+    // Vanilla's one `show_dialog` has two wire forms by state; BML has a packet for each.
     ("show_dialog_configuration", "show_dialog"),
 ];
 
@@ -223,7 +223,7 @@ fn registered(
     out
 }
 
-fn bps_names(resolved: &bytemill::ResolvedSchema, state: &str, direction: &str) -> BTreeMap<i128, String> {
+fn bml_names(resolved: &bytemill::ResolvedSchema, state: &str, direction: &str) -> BTreeMap<i128, String> {
     let mut out = BTreeMap::new();
     for (route, pkt) in &resolved.routes {
         if route.state == state && route.direction == direction {
@@ -246,13 +246,13 @@ fn every_route_is_the_packet_vanilla_registers_at_that_id() {
     for &(state, direction, file, template) in CHAINS.iter() {
         let case = format!("state={state} direction={direction}");
         let vanilla = registered(&protocol, file, template, &names);
-        let bps = bps_names(&resolved, state, direction);
+        let bml = bml_names(&resolved, state, direction);
         let got: Vec<Option<String>> =
-            (0..vanilla.len()).map(|id| bps.get(&(id as i128)).cloned()).collect();
+            (0..vanilla.len()).map(|id| bml.get(&(id as i128)).cloned()).collect();
         let want: Vec<Option<String>> = vanilla.iter().map(|n| Some(n.clone())).collect();
         assert_eq!(got, want, "{case}");
-        // The only id vanilla does not register is the pre-1.7 ping BPS also describes.
-        let mut extra: Vec<i128> = bps
+        // The only id vanilla does not register is the pre-1.7 ping BML also describes.
+        let mut extra: Vec<i128> = bml
             .keys()
             .copied()
             .filter(|id| *id < 0 || *id as usize >= vanilla.len())

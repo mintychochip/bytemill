@@ -42,7 +42,7 @@ fn u16be_is_two_bytes_built_from_u8() {
 
 #[test]
 fn signed_widths_roundtrip_negative_one() {
-    let source = repo_file("schemas/std/integers.bps")
+    let source = repo_file("schemas/std/integers.bml")
         + "\npacket probe { a: i8  b: i16be  c: i32be  d: i64be  e: u16le }\n";
     let resolved = analyze(&parse(&source).unwrap()).unwrap();
     let mut value = bytemill::Env::new();
@@ -61,7 +61,7 @@ fn signed_widths_roundtrip_negative_one() {
 
 #[test]
 fn varint_matches_wiki_samples() {
-    let source = repo_file("schemas/std/varint.bps") + "packet probe { n: varint  m: varlong }\n";
+    let source = repo_file("schemas/std/varint.bml") + "packet probe { n: varint  m: varlong }\n";
     let resolved = analyze(&parse(&source).unwrap()).unwrap();
     let mut v = bytemill::Env::new();
     v.insert("n", Value::Int(25565));
@@ -84,7 +84,7 @@ fn varint_matches_wiki_samples() {
 
 #[test]
 fn overlong_varint_is_rejected() {
-    let source = repo_file("schemas/std/varint.bps") + "packet probe { n: varint }\n";
+    let source = repo_file("schemas/std/varint.bml") + "packet probe { n: varint }\n";
     let resolved = analyze(&parse(&source).unwrap()).unwrap();
     let err = decode_packet(&resolved, "probe", &hex("ffffffffff"), false).unwrap_err();
     assert_eq!(err.kind, bytemill::errors::ErrorKind::Decode, "{err}");
@@ -92,7 +92,7 @@ fn overlong_varint_is_rejected() {
 
 #[test]
 fn minecraft_core_imports_std_schemas() {
-    let loaded = load_schema(&[concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/minecraft_core.bps")])
+    let loaded = load_schema(&[concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/minecraft_core.bml")])
         .unwrap();
     let names: std::collections::HashSet<&str> =
         loaded.encodings.iter().map(|e| e.name.as_str()).collect();
@@ -111,7 +111,7 @@ fn leb128_is_not_a_type() {
 
 #[test]
 fn imported_varint_feeds_the_handshake_port() {
-    let loaded = load_schema(&[concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/minecraft_core.bps")])
+    let loaded = load_schema(&[concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/minecraft_core.bml")])
         .unwrap();
     let extra = parse("packet probe { n: varint }").unwrap();
     let resolved = analyze(&Schema {
@@ -135,7 +135,7 @@ static TEMP_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicU
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let n = TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!(
-        "bps-std-{tag}-{}-{n}-{:?}",
+        "bml-std-{tag}-{}-{n}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -156,7 +156,7 @@ const U24_PROBE: &str = "
 ";
 
 fn std_resolved(source: &str) -> bytemill::ResolvedSchema {
-    let std = repo_file("schemas/std/integers.bps") + &repo_file("schemas/std/varint.bps");
+    let std = repo_file("schemas/std/integers.bml") + &repo_file("schemas/std/varint.bml");
     analyze(&parse(&(std + source)).unwrap()).unwrap()
 }
 
@@ -211,7 +211,7 @@ fn rstom_keeps_std_scalar_default_arm_as_one_value() {
     let body = "packet probe { kind: varint  value: match kind { 0 => i8, _ => varint } }";
     let source = common::rstom_tables::probe_source(&common::repo_root(), body);
     let dir = temp_dir("default-arm");
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     std::fs::write(&schema, &source).unwrap();
     let resolved = analyze(&load_schema(&[schema]).unwrap()).unwrap();
     let table = common::rstom_tables::probe_table();

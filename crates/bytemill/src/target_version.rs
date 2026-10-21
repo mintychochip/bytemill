@@ -1,6 +1,6 @@
-//! Target language versions and standards configuration across BPS emitters.
+//! Target language versions and standards configuration across BML emitters.
 
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use std::fmt;
 
 /// C++ language standards supported by `emit cpp`.
@@ -18,7 +18,7 @@ pub enum CppStandard {
 }
 
 impl CppStandard {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s.to_ascii_lowercase().replace(['-', '_'], "");
         match norm.as_str() {
             "c++98" | "cpp98" | "98" => Ok(Self::Cpp98),
@@ -144,7 +144,7 @@ pub enum GoVersion {
 }
 
 impl GoVersion {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s.to_ascii_lowercase().trim_start_matches("go").to_string();
         match norm.as_str() {
             "1.16" => Ok(Self::V1_16),
@@ -205,7 +205,7 @@ pub enum PythonVersion {
 }
 
 impl PythonVersion {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s
             .to_ascii_lowercase()
             .trim_start_matches("python")
@@ -281,7 +281,7 @@ pub enum CStandard {
 }
 
 impl CStandard {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s.to_ascii_lowercase().replace(['-', '_'], "");
         match norm.as_str() {
             "c89" | "89" | "ansi" => Ok(Self::C89),
@@ -360,7 +360,7 @@ pub enum RustEdition {
 }
 
 impl RustEdition {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         match s.trim() {
             "2015" => Ok(Self::Edition2015),
             "2018" => Ok(Self::Edition2018),
@@ -400,7 +400,7 @@ pub enum TsTarget {
 }
 
 impl TsTarget {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s.to_ascii_lowercase().replace('-', "");
         match norm.as_str() {
             "es2015" | "es6" => Ok(Self::ES2015),
@@ -442,7 +442,7 @@ pub enum ZigVersion {
 }
 
 impl ZigVersion {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s.trim_start_matches('v').trim();
         match norm {
             "0.11" => Ok(Self::V0_11),
@@ -481,7 +481,7 @@ pub enum JavaVersion {
 }
 
 impl JavaVersion {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s
             .to_ascii_lowercase()
             .trim_start_matches("java")
@@ -534,7 +534,7 @@ pub enum CSharpVersion {
 }
 
 impl CSharpVersion {
-    pub fn parse(s: &str) -> BpsResult<Self> {
+    pub fn parse(s: &str) -> BmlResult<Self> {
         let norm = s
             .to_ascii_lowercase()
             .replace(['#', '-'], "")
@@ -595,7 +595,7 @@ pub struct EmitOptions {
 
 impl EmitOptions {
     /// Configure from an optional standard string for a specific target name.
-    pub fn for_target(target: &str, std_opt: Option<&str>) -> BpsResult<Self> {
+    pub fn for_target(target: &str, std_opt: Option<&str>) -> BmlResult<Self> {
         let mut opts = Self::default();
         let Some(s) = std_opt else {
             return Ok(opts);

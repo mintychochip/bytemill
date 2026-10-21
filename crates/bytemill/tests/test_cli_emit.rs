@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 fn temp_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "bps-cliemit-{tag}-{}-{:?}",
+        "bml-cliemit-{tag}-{}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -33,7 +33,7 @@ fn write_table(path: &Path) -> PathBuf {
 #[test]
 fn the_table_is_read_from_the_workspace_the_crate_is_written_into() {
     let dir = temp_dir("ws");
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     write(&schema, &common::rstom_tables::probe_source_default(&common::repo_root()));
     let workspace = dir.join("rstom");
     write_table(&workspace.join("tools/packets_gen/schema/packets.json"));
@@ -53,7 +53,7 @@ fn the_table_is_read_from_the_workspace_the_crate_is_written_into() {
 #[test]
 fn a_flag_names_the_table_for_a_crate_outside_a_workspace() {
     let dir = temp_dir("flag");
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     write(&schema, &common::rstom_tables::probe_source_default(&common::repo_root()));
     let table = write_table(&dir.join("elsewhere/packets.json"));
     let out = dir.join("scratch");
@@ -74,7 +74,7 @@ fn a_flag_names_the_table_for_a_crate_outside_a_workspace() {
 #[test]
 fn without_a_table_the_emit_says_where_it_looked() {
     let dir = temp_dir("notable");
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     write(&schema, &common::rstom_tables::probe_source_default(&common::repo_root()));
     let out = dir.join("scratch");
     let code = bytemill::cli::main(&[
@@ -93,7 +93,7 @@ fn without_a_table_the_emit_says_where_it_looked() {
 #[test]
 fn without_a_table_the_error_names_the_flag_and_file() {
     let dir = temp_dir("notable2");
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     write(&schema, &common::rstom_tables::probe_source_default(&common::repo_root()));
     let out = dir.join("scratch");
     let result = std::process::Command::new(env!("CARGO_BIN_EXE_bml"))

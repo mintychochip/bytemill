@@ -1,5 +1,5 @@
 //! The wiki route scraper, porting `scripts/scrape_wiki_routes.py`: the packet id tables of
-//! minecraft.wiki's "Java Edition protocol/Packets" page become a `.bps` route file, a stub
+//! minecraft.wiki's "Java Edition protocol/Packets" page become a `.bml` route file, a stub
 //! `packet` for every routed packet no hand-written file declares plus one `route` per row.
 //!
 //! The Python version reads the page with three regexes. This crate has no regex dependency,
@@ -24,10 +24,10 @@ const STATE_MAP: [(&str, &str); 5] = [
     ("Play", "play"),
 ];
 
-/// Official Mojang names -> hand-maintained BPS packet names (richer field layouts).
+/// Official Mojang names -> hand-maintained BML packet names (richer field layouts).
 const PACKET_ALIASES: [(&str, &str); 1] = [("intention", "handshake")];
 
-/// Packets defined with full layouts in minecraft_26_3.bps (no stub generated).
+/// Packets defined with full layouts in minecraft_26_3.bml (no stub generated).
 const MANUAL_PACKETS: [&str; 9] = [
     "handshake",
     "legacy_server_list_ping",
@@ -40,7 +40,7 @@ const MANUAL_PACKETS: [&str; 9] = [
     "keep_alive",
 ];
 
-/// Routes whose official name needs a different BPS packet: a serverbound packet that
+/// Routes whose official name needs a different BML packet: a serverbound packet that
 /// collides with a clientbound one (the hand-transcribed declarations use a `_serverbound`
 /// suffix), and packets whose wire form differs between states.
 const SERVERBOUND_ALIASES: [((&str, &str, &str), &str); 5] = [
@@ -251,7 +251,7 @@ pub fn parse_tables(html: &str) -> Vec<RouteRow> {
     rows
 }
 
-/// The BPS packet an official packet name routes to.
+/// The BML packet an official packet name routes to.
 pub fn packet_name(official: &str, state: &str, direction: &str, packet_id: u64) -> String {
     if let Some((_, name)) = SERVERBOUND_ALIASES
         .iter()
@@ -279,7 +279,7 @@ pub fn packet_name(official: &str, state: &str, direction: &str, packet_id: u64)
 /// The route file. `imports` are paths relative to the output file: the file declaring
 /// `varint` (the frame uses it) and each file declaring packets that routes bind to. A name
 /// the output uses without importing it will not load.
-pub fn emit_bps(
+pub fn emit_bml(
     rows: &[RouteRow],
     extra_routes: &[String],
     manual: &BTreeSet<String>,
@@ -299,7 +299,7 @@ pub fn emit_bps(
 
     let mut lines: Vec<String> = vec![
         "// Packet stubs + routes transcribed from minecraft.wiki (protocol 777 / 26.3).".into(),
-        "// Regenerate: cargo run -q -p bytemill --bin scrape_wiki_routes -- -o schemas/minecraft_26_3_wiki.bps"
+        "// Regenerate: cargo run -q -p bytemill --bin scrape_wiki_routes -- -o schemas/minecraft_26_3_wiki.bml"
             .into(),
         String::new(),
     ];
@@ -370,9 +370,9 @@ fn relative_to(path: &Path, base: &Path) -> PathBuf {
 }
 
 const USAGE: &str = "usage: scrape_wiki_routes [-h] [-o OUT] [--manual-replace [MANUAL_REPLACE ...]]\n\n\
-Scrape minecraft.wiki's packet id tables into a .bps route file.\n\n\
+Scrape minecraft.wiki's packet id tables into a .bml route file.\n\n\
 options:\n  -h, --help            show this help message and exit\n  \
--o OUT, --out OUT     write .bps fragment (default: stdout)\n  \
+-o OUT, --out OUT     write .bml fragment (default: stdout)\n  \
 --manual-replace [MANUAL_REPLACE ...]\n                        schema files whose packet declarations replace generated stubs";
 
 struct Args {
@@ -458,7 +458,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
         Some(out) => resolve(out.parent().unwrap_or(Path::new(""))),
         None => resolve(Path::new("")),
     };
-    let std_varint = Path::new(PROTOC_ROOT).join("schemas/std/varint.bps");
+    let std_varint = Path::new(PROTOC_ROOT).join("schemas/std/varint.bml");
     let imports: Vec<String> = packet_files
         .iter()
         .chain(std::iter::once(&std_varint))
@@ -468,7 +468,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                 .into_owned()
         })
         .collect();
-    let text = emit_bps(&rows, &extra, &manual, &imports);
+    let text = emit_bml(&rows, &extra, &manual, &imports);
     eprintln!("parsed {} wiki routes", rows.len());
     match &args.out {
         Some(out) => {

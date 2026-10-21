@@ -15,7 +15,7 @@ use std::sync::{Mutex, MutexGuard};
 /// 2024, and another test must never observe a half-swapped environment.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// Restores `BPS_RSTOM_DIR` on drop so a failure cannot leak into other tests.
+/// Restores `BML_RSTOM_DIR` on drop so a failure cannot leak into other tests.
 struct RestoreEnv {
     old: Option<OsString>,
 }
@@ -24,8 +24,8 @@ impl Drop for RestoreEnv {
     fn drop(&mut self) {
         unsafe {
             match &self.old {
-                Some(v) => std::env::set_var("BPS_RSTOM_DIR", v),
-                None => std::env::remove_var("BPS_RSTOM_DIR"),
+                Some(v) => std::env::set_var("BML_RSTOM_DIR", v),
+                None => std::env::remove_var("BML_RSTOM_DIR"),
             }
         }
     }
@@ -33,15 +33,15 @@ impl Drop for RestoreEnv {
 
 fn hold_env() -> (MutexGuard<'static, ()>, RestoreEnv) {
     let guard = ENV_LOCK.lock().unwrap();
-    let old = std::env::var_os("BPS_RSTOM_DIR");
+    let old = std::env::var_os("BML_RSTOM_DIR");
     (guard, RestoreEnv { old })
 }
 
 #[test]
-fn bps_rstom_dir_overrides_default() {
+fn bml_rstom_dir_overrides_default() {
     let (_lock, _restore) = hold_env();
     unsafe {
-        std::env::set_var("BPS_RSTOM_DIR", "/tmp/custom");
+        std::env::set_var("BML_RSTOM_DIR", "/tmp/custom");
     }
     assert_eq!(common::rstom_tables::rstom_dir(), PathBuf::from("/tmp/custom"));
 }
@@ -50,7 +50,7 @@ fn bps_rstom_dir_overrides_default() {
 fn prefers_rstom_bps_sibling_when_present() {
     let (_lock, _restore) = hold_env();
     unsafe {
-        std::env::remove_var("BPS_RSTOM_DIR");
+        std::env::remove_var("BML_RSTOM_DIR");
     }
     let parent = common::repo_root().parent().unwrap().to_path_buf();
     let expected = if parent.join("rstom-bps").is_dir() {

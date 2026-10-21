@@ -7,7 +7,7 @@
 //! gives the same bytes back.
 
 use crate::ast::ResolvedSchema;
-use crate::errors::BpsResult;
+use crate::errors::BmlResult;
 use crate::interp::{decode_packet, encode_packet};
 use crate::json::{dumps_sorted, loads};
 use crate::value::{Env, Value};
@@ -125,7 +125,7 @@ pub fn check_vectors(
     Ok(report)
 }
 
-fn step<T>(what: &str, r: BpsResult<T>) -> Result<T, String> {
+fn step<T>(what: &str, r: BmlResult<T>) -> Result<T, String> {
     r.map_err(|e| format!("{what}: {e}"))
 }
 

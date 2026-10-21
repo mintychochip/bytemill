@@ -785,7 +785,7 @@ fn worktree_present() -> bool {
 }
 
 #[test]
-fn eligible_packets_extract_and_match_bps() {
+fn eligible_packets_extract_and_match_bml() {
     if !worktree_present() {
         eprintln!("rstom worktree packet sources not present; skipping");
         return;
@@ -816,8 +816,8 @@ fn eligible_packets_extract_and_match_bps() {
                 continue;
             }
         };
-        let bps = bytemill::shapes::bps_field_pairs(&unit.pkt, &resolved).unwrap();
-        let reasons = mismatch(&shape, &bps);
+        let bml = bytemill::shapes::bml_field_pairs(&unit.pkt, &resolved).unwrap();
+        let reasons = mismatch(&shape, &bml);
         if !reasons.is_empty() {
             ineligible.insert(unit.cls.name.clone(), reasons.join("; "));
             continue;
@@ -928,12 +928,12 @@ fn shapes_extract_eligible_keeps_committed_packets_with_worktree() {
         eprintln!("{}", common::MISSING_SHAPES_MSG);
         return;
     }
-    let out = std::env::temp_dir().join(format!("bps-shapes-{}", std::process::id()));
+    let out = std::env::temp_dir().join(format!("bml-shapes-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out);
     let (code, _) = run_cli(&[
         "shapes".into(),
         "extract".into(),
-        common::schema_path("minecraft_26_3_wiki.bps").to_string_lossy().into_owned(),
+        common::schema_path("minecraft_26_3_wiki.bml").to_string_lossy().into_owned(),
         "--rstom".into(),
         common::rstom_tables::rstom_dir().to_string_lossy().into_owned(),
         "--eligible".into(),
@@ -965,7 +965,7 @@ fn shapes_report_runs() {
     let (code, out) = run_cli(&[
         "shapes".into(),
         "report".into(),
-        common::schema_path("minecraft_26_3_wiki.bps").to_string_lossy().into_owned(),
+        common::schema_path("minecraft_26_3_wiki.bml").to_string_lossy().into_owned(),
         "--rstom".into(),
         common::rstom_tables::rstom_dir().to_string_lossy().into_owned(),
     ]);
@@ -987,7 +987,7 @@ fn shapes_extract_eligible_skips_unrepresentable() {
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let tmp = std::env::temp_dir().join(format!(
-        "bps-shapes-unrepresentable-{}-{n}-{:?}",
+        "bml-shapes-unrepresentable-{}-{n}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1018,7 +1018,7 @@ fn shapes_extract_eligible_skips_unrepresentable() {
     let (code, _) = run_cli(&[
         "shapes".into(),
         "extract".into(),
-        common::schema_path("minecraft_26_3_wiki.bps")
+        common::schema_path("minecraft_26_3_wiki.bml")
             .to_string_lossy()
             .into_owned(),
         "--rstom".into(),

@@ -5,7 +5,7 @@
 //! positions are identical for ASCII sources. Character-level checks
 //! (`isalnum`, char literals) decode code points, matching Python.
 
-use crate::errors::{BpsResult, shape};
+use crate::errors::{BmlResult, shape};
 
 /// Substring `s[a..b]` with Python slice clamping; never panics.
 pub(crate) fn sub(s: &str, a: usize, b: usize) -> &str {
@@ -121,7 +121,7 @@ pub(crate) fn line_start(src: &str, pos: usize) -> usize {
 }
 
 /// `_attr_block_end`: index after the `]` closing `#[` at `hash_pos`.
-pub(crate) fn attr_block_end(src: &str, hash_pos: usize) -> BpsResult<usize> {
+pub(crate) fn attr_block_end(src: &str, hash_pos: usize) -> BmlResult<usize> {
     if !sw(src, hash_pos, "#[") {
         return Err(shape("expected #["));
     }
@@ -147,7 +147,7 @@ pub(crate) fn attr_block_end(src: &str, hash_pos: usize) -> BpsResult<usize> {
 }
 
 /// `_line_in_attr_prefix`.
-fn line_in_attr_prefix(src: &str, line_begin: usize, item_line: usize) -> BpsResult<bool> {
+fn line_in_attr_prefix(src: &str, line_begin: usize, item_line: usize) -> BmlResult<bool> {
     let mut i = 0;
     while i < item_line {
         if sw(src, i, "#[") {
@@ -164,7 +164,7 @@ fn line_in_attr_prefix(src: &str, line_begin: usize, item_line: usize) -> BpsRes
 }
 
 /// `_docs_and_attrs_before`: (doc lines, attribute start) for the item at `item_pos`.
-pub fn docs_and_attrs_before(src: &str, item_pos: usize) -> BpsResult<(Vec<String>, usize)> {
+pub fn docs_and_attrs_before(src: &str, item_pos: usize) -> BmlResult<(Vec<String>, usize)> {
     let item = advance_item_start(src, item_pos)?;
     let item_line = line_start(src, item);
     let mut attr_start = item;
@@ -204,7 +204,7 @@ fn is_ident_cont(c: u8) -> bool {
 }
 
 /// `_read_ident`: identifier at `pos` (after trivia) and the offset past it.
-pub(crate) fn read_ident(src: &str, pos: usize) -> BpsResult<(String, usize)> {
+pub(crate) fn read_ident(src: &str, pos: usize) -> BmlResult<(String, usize)> {
     let pos = skip_trivia(src, pos);
     let b = src.as_bytes();
     if pos >= b.len() || !is_ident_start(b[pos]) {
@@ -333,7 +333,7 @@ pub(crate) fn parse_struct_attrs(
     src: &str,
     attr_start: usize,
     struct_pos: usize,
-) -> BpsResult<Vec<String>> {
+) -> BmlResult<Vec<String>> {
     let mut derives: Vec<String> = Vec::new();
     let mut pos = attr_start;
     while pos < struct_pos {
@@ -420,7 +420,7 @@ fn split_derives(inner: &str) -> Vec<String> {
 }
 
 /// `_advance_item_start`: skip trivia, attributes and doc lines before an item.
-pub fn advance_item_start(src: &str, mut pos: usize) -> BpsResult<usize> {
+pub fn advance_item_start(src: &str, mut pos: usize) -> BmlResult<usize> {
     loop {
         pos = skip_trivia(src, pos);
         if pos >= src.len() {
@@ -473,7 +473,7 @@ pub(crate) fn read_type(src: &str, pos: usize) -> (String, usize) {
 pub(crate) fn parse_impl_header(
     src: &str,
     pos: usize,
-) -> BpsResult<(Option<String>, String, usize, usize, usize)> {
+) -> BmlResult<(Option<String>, String, usize, usize, usize)> {
     let mut pos = pos + "impl ".len();
     pos = skip_trivia(src, pos);
     let trait_: Option<String>;
@@ -505,7 +505,7 @@ pub(crate) fn parse_impl_header(
 }
 
 /// `_lookahead_impl_for`.
-fn lookahead_impl_for(src: &str, pos: usize) -> BpsResult<bool> {
+fn lookahead_impl_for(src: &str, pos: usize) -> BmlResult<bool> {
     let (_, after) = read_ident(src, pos)?;
     let after = skip_trivia(src, after);
     Ok(sw(src, after, "for "))
@@ -599,7 +599,7 @@ pub(crate) fn find_fn_body_start(src: &str, pos: usize) -> usize {
 }
 
 /// `_skip_item`.
-pub(crate) fn skip_item(src: &str, pos: usize) -> BpsResult<usize> {
+pub(crate) fn skip_item(src: &str, pos: usize) -> BmlResult<usize> {
     let pos = skip_trivia(src, pos);
     if sw(src, pos, "use ") {
         return Ok(match find_from(src, pos, ";") {
@@ -692,7 +692,7 @@ pub(crate) fn skip_until_top_level(src: &str, mut pos: usize, stop: &str) -> usi
 }
 
 /// `_skip_function_decl`.
-pub(crate) fn skip_function_decl(src: &str, pos: usize) -> BpsResult<usize> {
+pub(crate) fn skip_function_decl(src: &str, pos: usize) -> BmlResult<usize> {
     let mut pos = skip_trivia(src, pos);
     if !sw(src, pos, "fn ") {
         return Err(shape("malformed function"));
@@ -727,7 +727,7 @@ pub(crate) fn skip_function_decl(src: &str, pos: usize) -> BpsResult<usize> {
 }
 
 /// `_skip_const_item`.
-fn skip_const_item(src: &str, pos: usize) -> BpsResult<usize> {
+fn skip_const_item(src: &str, pos: usize) -> BmlResult<usize> {
     let mut pos = skip_trivia(src, pos);
     if !sw(src, pos, "const ") {
         return Err(shape("malformed const"));
@@ -753,7 +753,7 @@ fn skip_const_item(src: &str, pos: usize) -> BpsResult<usize> {
 }
 
 /// `_skip_type_decl`.
-fn skip_type_decl(src: &str, pos: usize) -> BpsResult<usize> {
+fn skip_type_decl(src: &str, pos: usize) -> BmlResult<usize> {
     let mut pos = skip_trivia(src, pos);
     if sw(src, pos, "pub ") {
         pos += 4;
@@ -795,7 +795,7 @@ fn skip_type_decl(src: &str, pos: usize) -> BpsResult<usize> {
 }
 
 /// `_skip_declaration`.
-pub(crate) fn skip_declaration(src: &str, pos: usize) -> BpsResult<usize> {
+pub(crate) fn skip_declaration(src: &str, pos: usize) -> BmlResult<usize> {
     let pos = skip_trivia(src, pos);
     if sw(src, pos, "pub ") {
         let after_pub = pos + 4;

@@ -1,13 +1,13 @@
 //! Schema resolution, porting `bps/analyze.py`.
 
 use crate::ast::*;
-use crate::errors::{BpsResult, emit, py_repr_str, resolve};
+use crate::errors::{BmlResult, emit, py_repr_str, resolve};
 use crate::ordmap::OrderedMap;
 use crate::primitives::is_bare_primitive;
 use crate::refs::{Ref, RefKind, item_refs, references, type_refs};
 use std::collections::HashSet;
 
-fn dedupe<V>(kind: &str, decls: &[V], name_of: impl Fn(&V) -> &str) -> BpsResult<OrderedMap<V>>
+fn dedupe<V>(kind: &str, decls: &[V], name_of: impl Fn(&V) -> &str) -> BmlResult<OrderedMap<V>>
 where
     V: Clone,
 {
@@ -22,7 +22,7 @@ where
     Ok(table)
 }
 
-pub fn analyze(schema: &Schema) -> BpsResult<ResolvedSchema> {
+pub fn analyze(schema: &Schema) -> BmlResult<ResolvedSchema> {
     let encodings = dedupe("encoding", &schema.encodings, |e| &e.name)?;
     let enums = dedupe("enum", &schema.enums, |e| &e.name)?;
     let packets = dedupe("packet", &schema.packets, |p| &p.name)?;
@@ -76,7 +76,7 @@ pub fn reject_unlowered_scalars(
     resolved: &ResolvedSchema,
     lowered: &HashSet<String>,
     target: &str,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut unlowered: Vec<String> = Vec::new();
 
@@ -134,7 +134,7 @@ fn resolve_one(
     encodings: &OrderedMap<EncodingDecl>,
     enums: &OrderedMap<EnumDecl>,
     packets: &OrderedMap<PacketDecl>,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     match ref_.kind {
         RefKind::Packet => {
             if !packets.contains_key(&ref_.name) {

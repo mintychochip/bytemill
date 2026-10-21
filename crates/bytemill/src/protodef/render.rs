@@ -105,7 +105,7 @@ fn packet_names(proto: &Protocol) -> Res<HashMap<(usize, usize), String>> {
     Ok(out)
 }
 
-/// The BPS source of one protocol.
+/// The BML source of one protocol.
 pub fn import(proto: &Protocol, spec: &FileSpec<'_>) -> Res<String> {
     let mut imp = Importer::new(proto);
     let pkt_names = packet_names(proto)?;
@@ -161,7 +161,7 @@ pub fn import(proto: &Protocol, spec: &FileSpec<'_>) -> Res<String> {
             out.push_str(&format!("// {line}\n"));
         }
     }
-    out.push_str("\nimport \"../std/integers.bps\"\nimport \"../std/varint.bps\"\n\n");
+    out.push_str("\nimport \"../std/integers.bml\"\nimport \"../std/varint.bml\"\n\n");
     let pre = prelude::text(&imp.prelude);
     if !pre.is_empty() {
         out.push_str(&pre);

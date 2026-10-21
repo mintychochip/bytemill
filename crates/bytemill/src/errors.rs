@@ -1,6 +1,6 @@
 //! Error types, mirroring `bps/errors.py`.
 //!
-//! `BpsError` carries an optional byte/char offset; `Display` matches the Python
+//! `BmlError` carries an optional byte/char offset; `Display` matches the Python
 //! wire format exactly: `"{message}"` or `"{message} (offset {offset})"`.
 
 use std::fmt;
@@ -29,15 +29,15 @@ impl ErrorKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BpsError {
+pub struct BmlError {
     pub kind: ErrorKind,
     pub message: String,
     pub offset: Option<usize>,
 }
 
-impl BpsError {
+impl BmlError {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        BpsError {
+        BmlError {
             kind,
             message: message.into(),
             offset: None,
@@ -45,7 +45,7 @@ impl BpsError {
     }
 
     pub fn with_offset(kind: ErrorKind, message: impl Into<String>, offset: usize) -> Self {
-        BpsError {
+        BmlError {
             kind,
             message: message.into(),
             offset: Some(offset),
@@ -53,35 +53,35 @@ impl BpsError {
     }
 
     pub fn parse(message: impl Into<String>) -> Self {
-        BpsError::new(ErrorKind::Parse, message)
+        BmlError::new(ErrorKind::Parse, message)
     }
 
     pub fn parse_at(message: impl Into<String>, offset: usize) -> Self {
-        BpsError::with_offset(ErrorKind::Parse, message, offset)
+        BmlError::with_offset(ErrorKind::Parse, message, offset)
     }
 
     pub fn resolve(message: impl Into<String>) -> Self {
-        BpsError::new(ErrorKind::Resolve, message)
+        BmlError::new(ErrorKind::Resolve, message)
     }
 
     pub fn decode(message: impl Into<String>) -> Self {
-        BpsError::new(ErrorKind::Decode, message)
+        BmlError::new(ErrorKind::Decode, message)
     }
 
     pub fn decode_at(message: impl Into<String>, offset: usize) -> Self {
-        BpsError::with_offset(ErrorKind::Decode, message, offset)
+        BmlError::with_offset(ErrorKind::Decode, message, offset)
     }
 
     pub fn encode(message: impl Into<String>) -> Self {
-        BpsError::new(ErrorKind::Encode, message)
+        BmlError::new(ErrorKind::Encode, message)
     }
 
     pub fn emit(message: impl Into<String>) -> Self {
-        BpsError::new(ErrorKind::Emit, message)
+        BmlError::new(ErrorKind::Emit, message)
     }
 
     pub fn shape(message: impl Into<String>) -> Self {
-        BpsError::new(ErrorKind::Shape, message)
+        BmlError::new(ErrorKind::Shape, message)
     }
 
     pub fn is(&self, kind: ErrorKind) -> bool {
@@ -89,7 +89,7 @@ impl BpsError {
     }
 }
 
-impl fmt::Display for BpsError {
+impl fmt::Display for BmlError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.offset {
             Some(off) => write!(f, "{} (offset {})", self.message, off),
@@ -98,41 +98,41 @@ impl fmt::Display for BpsError {
     }
 }
 
-impl std::error::Error for BpsError {}
+impl std::error::Error for BmlError {}
 
-pub type BpsResult<T> = Result<T, BpsError>;
+pub type BmlResult<T> = Result<T, BmlError>;
 
 /// Free constructors, named after the Python exception classes.
-pub fn parse(message: impl Into<String>) -> BpsError {
-    BpsError::new(ErrorKind::Parse, message)
+pub fn parse(message: impl Into<String>) -> BmlError {
+    BmlError::new(ErrorKind::Parse, message)
 }
 
-pub fn parse_at(message: impl Into<String>, offset: usize) -> BpsError {
-    BpsError::with_offset(ErrorKind::Parse, message, offset)
+pub fn parse_at(message: impl Into<String>, offset: usize) -> BmlError {
+    BmlError::with_offset(ErrorKind::Parse, message, offset)
 }
 
-pub fn resolve(message: impl Into<String>) -> BpsError {
-    BpsError::new(ErrorKind::Resolve, message)
+pub fn resolve(message: impl Into<String>) -> BmlError {
+    BmlError::new(ErrorKind::Resolve, message)
 }
 
-pub fn decode(message: impl Into<String>) -> BpsError {
-    BpsError::new(ErrorKind::Decode, message)
+pub fn decode(message: impl Into<String>) -> BmlError {
+    BmlError::new(ErrorKind::Decode, message)
 }
 
-pub fn decode_at(message: impl Into<String>, offset: usize) -> BpsError {
-    BpsError::with_offset(ErrorKind::Decode, message, offset)
+pub fn decode_at(message: impl Into<String>, offset: usize) -> BmlError {
+    BmlError::with_offset(ErrorKind::Decode, message, offset)
 }
 
-pub fn encode(message: impl Into<String>) -> BpsError {
-    BpsError::new(ErrorKind::Encode, message)
+pub fn encode(message: impl Into<String>) -> BmlError {
+    BmlError::new(ErrorKind::Encode, message)
 }
 
-pub fn emit(message: impl Into<String>) -> BpsError {
-    BpsError::new(ErrorKind::Emit, message)
+pub fn emit(message: impl Into<String>) -> BmlError {
+    BmlError::new(ErrorKind::Emit, message)
 }
 
-pub fn shape(message: impl Into<String>) -> BpsError {
-    BpsError::new(ErrorKind::Shape, message)
+pub fn shape(message: impl Into<String>) -> BmlError {
+    BmlError::new(ErrorKind::Shape, message)
 }
 
 /// Python `repr(str)`: single quotes unless the text contains `'` and no `"`,

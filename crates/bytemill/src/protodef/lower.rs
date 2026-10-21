@@ -1,4 +1,4 @@
-//! Protodef -> BPS lowering: one packet or named type at a time into [`IBlock`] trees.
+//! Protodef -> BML lowering: one packet or named type at a time into [`IBlock`] trees.
 //!
 //! The decode semantics are those of the compiled ProtoDef in node-minecraft-protocol, which is
 //! what minecraft-data's descriptions are tested against; where that differs from the
@@ -39,7 +39,7 @@ enum Class<'p> {
 pub struct Cx {
     pub arena: Arena,
     owner: String,
-    /// The BPS name of the root being lowered: helper encodings are named after it.
+    /// The BML name of the root being lowered: helper encodings are named after it.
     slug: String,
     path: Vec<String>,
 }
@@ -303,24 +303,24 @@ impl<'p> Importer<'p> {
     // -- names ------------------------------------------------------------------------------
 
     fn classify(&self, name: &str) -> Res<Class<'p>> {
-        if let Some((bps, kind)) = kind_of_scalar(name) {
-            return Ok(Class::Scalar(bps, kind));
+        if let Some((bml, kind)) = kind_of_scalar(name) {
+            return Ok(Class::Scalar(bml, kind));
         }
-        let special = |bps, pre| Ok(Class::Special(bps, pre));
+        let special = |bml, pre| Ok(Class::Special(bml, pre));
         match name {
             "void" => return Ok(Class::Void),
             "restBuffer" => return special("rest", None),
-            "UUID" => return special(Pre::Uuid.bps_name(), Some(Pre::Uuid)),
-            "nbt" => return special(Pre::Nbt.bps_name(), Some(Pre::Nbt)),
-            "optionalNbt" => return special(Pre::OptionalNbt.bps_name(), Some(Pre::OptionalNbt)),
+            "UUID" => return special(Pre::Uuid.bml_name(), Some(Pre::Uuid)),
+            "nbt" => return special(Pre::Nbt.bml_name(), Some(Pre::Nbt)),
+            "optionalNbt" => return special(Pre::OptionalNbt.bml_name(), Some(Pre::OptionalNbt)),
             "anonymousNbt" => {
-                return special(Pre::AnonymousNbt.bps_name(), Some(Pre::AnonymousNbt));
+                return special(Pre::AnonymousNbt.bml_name(), Some(Pre::AnonymousNbt));
             }
             "anonOptionalNbt" => {
-                return special(Pre::AnonOptionalNbt.bps_name(), Some(Pre::AnonOptionalNbt));
+                return special(Pre::AnonOptionalNbt.bml_name(), Some(Pre::AnonOptionalNbt));
             }
-            "lpVec3" => return special(Pre::LpVec3.bps_name(), Some(Pre::LpVec3)),
-            "entityDelta" => return special(Pre::EntityDelta.bps_name(), Some(Pre::EntityDelta)),
+            "lpVec3" => return special(Pre::LpVec3.bml_name(), Some(Pre::LpVec3)),
+            "entityDelta" => return special(Pre::EntityDelta.bml_name(), Some(Pre::EntityDelta)),
             _ => {}
         }
         match self.shared.get(name).copied() {
@@ -392,7 +392,7 @@ impl<'p> Importer<'p> {
         }
     }
 
-    /// The BPS encoding for a named type of the protocol, lowered on first use.
+    /// The BML encoding for a named type of the protocol, lowered on first use.
     pub fn ensure_encoding(&mut self, proto_name: &str) -> Res<String> {
         if let Some(n) = self.enc_names.get(proto_name) {
             return Ok(n.clone());
@@ -404,19 +404,19 @@ impl<'p> Importer<'p> {
             }
             None => return Err(format!("unknown type {proto_name:?}")),
         };
-        let bps = names::unique(&names::snake(proto_name), |c| self.taken.contains(c));
-        self.taken.insert(bps.clone());
-        self.enc_names.insert(proto_name.to_string(), bps.clone());
-        let mut cx = Cx::new(&format!("type {proto_name}"), &bps);
+        let bml = names::unique(&names::snake(proto_name), |c| self.taken.contains(c));
+        self.taken.insert(bml.clone());
+        self.enc_names.insert(proto_name.to_string(), bml.clone());
+        let mut cx = Cx::new(&format!("type {proto_name}"), &bml);
         let body = self.lower_named(&mut cx, def)?;
         self.encodings.insert(
-            bps.clone(),
+            bml.clone(),
             EncOut {
                 arena: cx.arena,
                 body,
             },
         );
-        Ok(bps)
+        Ok(bml)
     }
 
     // -- roots ------------------------------------------------------------------------------
@@ -560,7 +560,7 @@ impl<'p> Importer<'p> {
         };
         match ty {
             Ty::Name(n) => {
-                let (bps, kind) = match self.classify(n).or_else(|e| cx.fail(e))? {
+                let (bml, kind) = match self.classify(n).or_else(|e| cx.fail(e))? {
                     Class::Void => {
                         cx.arena.register(
                             scope,
@@ -583,7 +583,7 @@ impl<'p> Importer<'p> {
                 let fid = cx.arena.field(scope, name);
                 out.push(IItem::Field {
                     fid,
-                    ty: IType::Name(bps),
+                    ty: IType::Name(bml),
                     repeat: None,
                 });
                 cx.arena.register(scope, name, plain(kind, fid));
@@ -1319,7 +1319,7 @@ impl<'p> Importer<'p> {
         Ok(())
     }
 
-    /// A switch on a string field becomes `if tag == "key"` groups; BPS arms are integers.
+    /// A switch on a string field becomes `if tag == "key"` groups; BML arms are integers.
     fn switch_by_string(
         &mut self,
         cx: &mut Cx,

@@ -6,10 +6,10 @@ use bytemill::parse;
 
 #[test]
 fn parse_core() {
-    let path = common::repo_root().join("schemas/minecraft_core.bps");
+    let path = common::repo_root().join("schemas/minecraft_core.bml");
     let src = std::fs::read_to_string(&path).unwrap();
     let s = parse(&src).unwrap();
-    assert_eq!(s.imports, vec!["std/integers.bps", "std/varint.bps"]);
+    assert_eq!(s.imports, vec!["std/integers.bml", "std/varint.bml"]);
     assert!(!s.encodings.iter().any(|e| e.name == "varint"));
 }
 
@@ -21,7 +21,7 @@ fn parse_all_schemas() {
             let path = entry.unwrap().path();
             if path.is_dir() {
                 walk(&path, out);
-            } else if path.extension().is_some_and(|e| e == "bps") {
+            } else if path.extension().is_some_and(|e| e == "bml") {
                 out.push(path);
             }
         }

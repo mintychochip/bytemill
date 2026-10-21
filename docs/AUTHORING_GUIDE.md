@@ -1,10 +1,10 @@
-# BPS authoring guide
+# BML authoring guide
 
-How to write a `.bps` schema from scratch: the declaration order that works, how to
+How to write a `.bml` schema from scratch: the declaration order that works, how to
 shape packages, how to build packet structures, and how to verify what you wrote.
 `docs/DSL_STRUCTURE.md` is the construct reference; this is the recipe.
 
-Read both. `schemas/minecraft_*.bps` are the worked examples — every pattern below
+Read both. `schemas/minecraft_*.bml` are the worked examples — every pattern below
 appears there in context.
 
 ## 1. Declare in this order
@@ -23,10 +23,10 @@ protocol   framing + route table       (minecraft @ v26_3)
 Split a file when it passes ~200 lines of packets, along the same axes:
 
 ```
-schemas/<family>_core.bps    shared wire layouts
-schemas/<family>_<version>.bps lifecycle packets with hand-tuned layouts
-schemas/<family>_<state>.bps  per-state batches (play, login, configuration)
-schemas/<family>_routes.bps  generated `route` table + stubs
+schemas/<family>_core.bml    shared wire layouts
+schemas/<family>_<version>.bml lifecycle packets with hand-tuned layouts
+schemas/<family>_<state>.bml  per-state batches (play, login, configuration)
+schemas/<family>_routes.bml  generated `route` table + stubs
 ```
 
 Files connect through `import` (§2). A name must be declared in exactly one file
@@ -35,43 +35,43 @@ Files connect through `import` (§2). A name must be declared in exactly one fil
 ## 2. Imports: where every name comes from
 
 The compiler implements five types: `u8`, `bytes(n)`, `rest`, `f32be`, and
-`f64be`. Every other type is an `encoding` declared in a `.bps` file, fixed-width
+`f64be`. Every other type is an `encoding` declared in a `.bml` file, fixed-width
 integers, `boolean`, `varint`, and `varlong` included. A file uses one by
 importing the file that declares it:
 
 | Import | Provides |
 | --- | --- |
-| `import "std/integers.bps"` | `i8`, `boolean`, `u16be`, `i16be`, `u32be`, `i32be`, `u64be`, `i64be`, and the six little-endian forms (`u16le` … `i64le`) |
-| `import "std/varint.bps"` | `varint`, `varlong` |
-| `import "minecraft_core.bps"` | `string`, `identifier`, `uuid`, `position`, `angle`, `nbt`, `text_component`, `slot`, `hashed_slot`, `bitset`, `fixed_bitset`, `entity_metadata`, and the other shared layouts |
+| `import "std/integers.bml"` | `i8`, `boolean`, `u16be`, `i16be`, `u32be`, `i32be`, `u64be`, `i64be`, and the six little-endian forms (`u16le` … `i64le`) |
+| `import "std/varint.bml"` | `varint`, `varlong` |
+| `import "minecraft_core.bml"` | `string`, `identifier`, `uuid`, `position`, `angle`, `nbt`, `text_component`, `slot`, `hashed_slot`, `bitset`, `fixed_bitset`, `entity_metadata`, and the other shared layouts |
 
 The rules:
 
 - A file sees its own declarations and the declarations of the files it imports
-  directly. **Imports are not transitive** (the `.proto` rule): if `a.bps` imports
-  `b.bps` and `b.bps` imports `c.bps`, then `a.bps` must import `c.bps` itself to
-  use what `c.bps` declares. So every `varint` in a file traces to an `import`
+  directly. **Imports are not transitive** (the `.proto` rule): if `a.bml` imports
+  `b.bml` and `b.bml` imports `c.bml`, then `a.bml` must import `c.bml` itself to
+  use what `c.bml` declares. So every `varint` in a file traces to an `import`
   line in that same file.
 - The path is relative to the file that contains the `import`. Each file loads
   once, however many files import it.
 - The five primitives are the only names that need no import.
 - `bml` takes one or more files. A file that imports everything else is the
-  root: `schemas/minecraft_26_3_wiki.bps` imports every packet file, so
-  `bml check schemas/minecraft_26_3_wiki.bps` loads the whole protocol.
+  root: `schemas/minecraft_26_3_wiki.bml` imports every packet file, so
+  `bml check schemas/minecraft_26_3_wiki.bml` loads the whole protocol.
 - Forget an import and the error names the line to add. It also looks at the
-  `.bps` files beside the file and one folder down, so `std/` is found:
+  `.bml` files beside the file and one folder down, so `std/` is found:
 
   ```
-  schemas/minecraft_26_3_login.bps: 1 name not declared here or in an imported file
-    add  import "std/varint.bps"  for varint
+  schemas/minecraft_26_3_login.bml: 1 name not declared here or in an imported file
+    add  import "std/varint.bml"  for varint
   ```
 
 A new packet file starts with the imports it needs:
 
-```bps
-import "std/integers.bps"
-import "std/varint.bps"
-import "minecraft_core.bps"
+```bml
+import "std/integers.bml"
+import "std/varint.bml"
+import "minecraft_core.bml"
 
 packet example {
     id:        varint
@@ -82,8 +82,8 @@ packet example {
 
 Composite encodings build on the same names:
 
-```bps
-import "std/varint.bps"
+```bml
+import "std/varint.bml"
 
 encoding string(max_chars = 32767) = {
     byte_len: varint
@@ -109,7 +109,7 @@ name directly, because they are not generated from the schema:
   helpers instead of translating the definition. A scalar encoding outside that
   set is an `EmitError`, not wrong code.
 
-So editing `std/varint.bps` changes the interpreter; emitted Rust follows only
+So editing `std/varint.bml` changes the interpreter; emitted Rust follows only
 when its helpers change too. `crates/bytemill/tests/test_emit_rstom.rs` compares the two.
 
 Rules that bite:
@@ -135,7 +135,7 @@ Ask, in order:
 5. **Is the whole group present conditionally?** → `if cond { ... }`.
 6. **Is the value derived, not sent?** → `name = expr`.
 
-```bps
+```bml
 encoding meta_entry = {
     index: u8
     kind:  varint                       // (4) selects the shape
@@ -156,7 +156,7 @@ encoding entity_metadata = {
 
 Conditional group, with the count derived from the element list:
 
-```bps
+```bml
 if item_count > 0 {
     item_id:      varint
     add_count:    varint
@@ -166,7 +166,7 @@ if item_count > 0 {
 
 Flag-masked optional blocks (Java sends the boolean, then the value):
 
-```bps
+```bml
 has_uuid: varint
 if has_uuid != 0 {
     uuid: uuid
@@ -175,7 +175,7 @@ if has_uuid != 0 {
 
 Bit-masked variable layouts need computed fields, then guards on them:
 
-```bps
+```bml
 actions: u8
 if actions & 0x01 != 0 { name: string(16) }
 if actions & 0x04 != 0 { game_mode: varint }
@@ -191,7 +191,7 @@ if actions & 0x04 != 0 { game_mode: varint }
 - Only field-level constructs inside a `packet` — no nested `encoding`/`protocol`.
 - Cross-state packets are declared once and routed from every state that uses them.
 
-```bps
+```bml
 packet boss_event {
     uuid:   uuid
     action: varint
@@ -210,7 +210,7 @@ packet boss_event {
 
 Self-reference is required for NBT trees and works through named encodings:
 
-```bps
+```bml
 encoding nbt_entry = {
     tag_type: u8
     name:     nbt_string
@@ -236,7 +236,7 @@ entries, `00`, and an absent tag is a lone `00`.
 A `protocol` block names the version, the protocol number, the frame shape, and
 every route.
 
-```bps
+```bml
 protocol minecraft @ v26_3 {
     id = 777
     frame default {
@@ -268,7 +268,7 @@ schema stops at the registry boundary: the framing is transcribed, the
 registry-keyed body stays opaque. That is the line between "described" and
 "data".
 
-```bps
+```bml
 // Sound Event: 0 means inline; otherwise registry ID + 1.
 encoding id_or_sound_event = {
     id: varint
@@ -291,30 +291,30 @@ encoding slot = {
 
 Within a `match` arm, use `rest` for the opaque tail so framing stays correct:
 
-```bps
+```bml
 sound = { sound_event_id: varint, if sound_event_id == 0 { ... sound_event }, ... }
 ```
 
 ## 7. Verify as you write
 
 ```bash
-bml check schemas/your.bps          # parse + resolve + type-check
-bml routes schemas/your.bps         # the routing table
-bml dump-json schemas/your.bps      # schema.json for other tools
+bml check schemas/your.bml          # parse + resolve + type-check
+bml routes schemas/your.bml         # the routing table
+bml dump-json schemas/your.bml      # schema.json for other tools
 ```
 
 Then prove a value round-trips (`--packet` precedes the schema list, so the flag is not
 mistaken for the trailing JSON):
 
 ```bash
-bml encode --packet handshake schemas/your.bps \
+bml encode --packet handshake schemas/your.bml \
   '{"protocol_version":777,"server_address":"localhost","server_port":25565,"intent":1}'
 ```
 
 And decode a frame:
 
 ```bash
-echo '10008906096c6f63616c686f737463dd01' | bml decode schemas/your.bps \
+echo '10008906096c6f63616c686f737463dd01' | bml decode schemas/your.bml \
   --state handshaking --direction serverbound --hex
 ```
 
@@ -322,7 +322,7 @@ The gates that must stay green (see `crates/bytemill/tests/`):
 
 | Gate | Asserts |
 | --- | --- |
-| `test_parser::parse_all_schemas` | every `.bps` file parses |
+| `test_parser::parse_all_schemas` | every `.bml` file parses |
 | `test_routes::every_route_resolves_to_its_packet` | every route binds to a declared packet |
 | `test_routes::rest_fallback_set_is_explicit` | no packet silently regresses to `body: rest` |
 | `test_routes::non_stub_packets_smoke_decode` | every packet decodes a zero buffer cleanly |

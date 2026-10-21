@@ -1,4 +1,4 @@
-//! Ports tests/test_emit_rstom.py: the `rstom-packets` crate shape, generated from BPS.
+//! Ports tests/test_emit_rstom.py: the `rstom-packets` crate shape, generated from BML.
 //!
 //! Deviations from the Python test:
 //! - The shared whole-protocol emit (Python's `setUpClass`) is a process-wide
@@ -31,7 +31,7 @@ static CARGO_MUTEX: Mutex<()> = Mutex::new(());
 fn unique_temp_dir(tag: &str) -> PathBuf {
     let n = TEMP_COUNTER.fetch_add(1, Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!(
-        "bps-rstom-{tag}-{}-{n}-{:?}",
+        "bml-rstom-{tag}-{}-{n}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -275,7 +275,7 @@ fn str_field(map: &Value, key: &str) -> Option<String> {
 
 /// `tests/rstom_tables.py::CARGO_TARGET`, read the same way.
 fn cargo_target_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("BPS_CARGO_TARGET_DIR")
+    if let Some(dir) = std::env::var_os("BML_CARGO_TARGET_DIR")
         && !dir.is_empty()
     {
         return PathBuf::from(dir);
@@ -284,7 +284,7 @@ fn cargo_target_dir() -> PathBuf {
     if shm.is_dir() {
         return shm.join("rstom-bps-target");
     }
-    std::env::temp_dir().join("bps-rstom-target")
+    std::env::temp_dir().join("bml-rstom-target")
 }
 
 fn resolved(path: &Path) -> PathBuf {
@@ -323,7 +323,7 @@ fn every_packet_module_of_rstom_packets_exists_at_the_same_path() {
         .collect();
     let ours = packet_modules(&shared.src, false);
     let missing: Vec<&String> = theirs.difference(&ours).collect();
-    assert!(missing.is_empty(), "modules rstom-packets has and BPS lacks: {missing:?}");
+    assert!(missing.is_empty(), "modules rstom-packets has and BML lacks: {missing:?}");
     // The one extra: the configuration form of a class Minestom gives two serializers.
     let extra: BTreeSet<String> = ours.difference(&theirs).cloned().collect();
     assert_eq!(
@@ -502,8 +502,8 @@ fn emitted_crate_compiles_and_passes_its_tests() {
     let manifest = shared.out.join("Cargo.toml").to_string_lossy().into_owned();
     let mut child = Command::new(&script)
         .args(["test", "--manifest-path", manifest.as_str(), "--quiet"])
-        .env("BPS_RSTOM_DIR", &rstom)
-        .env("BPS_CARGO_TARGET_DIR", cargo_target_dir())
+        .env("BML_RSTOM_DIR", &rstom)
+        .env("BML_CARGO_TARGET_DIR", cargo_target_dir())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -572,7 +572,7 @@ fn an_encoding_reused_in_one_packet_is_rejected() {
         &common::repo_root(),
         "encoding pair = {\n    n: varint\n    items: varint[] count = n\n}\npacket probe { first: pair  second: pair }",
     );
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     write_file(&schema, &source);
     let resolved = bytemill::analyze(&bytemill::load_schema(std::slice::from_ref(&schema)).unwrap()).unwrap();
     let err = bytemill::emit_rstom::emit_rstom(
@@ -595,7 +595,7 @@ fn an_encoding_reused_in_one_packet_is_rejected() {
 #[test]
 fn a_re_emit_drops_stale_generated_files_and_keeps_hand_written_ones() {
     let dir = unique_temp_dir("sweep");
-    let schema = dir.join("probe.bps");
+    let schema = dir.join("probe.bml");
     write_file(
         &schema,
         &common::rstom_tables::probe_source(&common::repo_root(), "packet probe { a: u8 }"),

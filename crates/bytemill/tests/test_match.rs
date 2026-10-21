@@ -158,7 +158,7 @@ static TEMP_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicU
 fn temp_dir(tag: &str) -> std::path::PathBuf {
     let n = TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let dir = std::env::temp_dir().join(format!(
-        "bps-match-{tag}-{}-{n}-{:?}",
+        "bml-match-{tag}-{}-{n}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

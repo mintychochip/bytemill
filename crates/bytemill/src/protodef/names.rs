@@ -1,4 +1,4 @@
-//! Identifier policy for generated schemas: `snake_case`, no BPS keywords, unique per scope.
+//! Identifier policy for generated schemas: `snake_case`, no BML keywords, unique per scope.
 
 /// Words the parser reads as syntax where a field or encoding name could stand. `count`, `id`,
 /// `match` and `switch` are legal names (a statement keyword needs a following `:` or `=`), and

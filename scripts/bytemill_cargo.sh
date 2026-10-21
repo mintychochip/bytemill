@@ -8,17 +8,17 @@
 # would count; a crate under the workspace root is taken for a workspace member).
 #
 #   scripts/bytemill_cargo.sh test --test test_nbt
-#   BPS_MEM_MAX=3G scripts/bytemill_cargo.sh test    # tighter cap: a runaway dies sooner
+#   BML_MEM_MAX=3G scripts/bytemill_cargo.sh test    # tighter cap: a runaway dies sooner
 #
 # Prints the scope's peak memory on exit, so the cap can be tuned from evidence.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
-scratch="${BPS_SCRATCH_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/bytemill-scratch}"
+scratch="${BML_SCRATCH_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/bytemill-scratch}"
 mkdir -p "$scratch"
 exec systemd-run --user --scope --quiet \
-  -p "MemoryMax=${BPS_MEM_MAX:-8G}" -p MemorySwapMax=0 \
-  -p "CPUQuota=${BPS_CPU_QUOTA:-400%}" -p "TasksMax=${BPS_TASKS_MAX:-1024}" \
+  -p "MemoryMax=${BML_MEM_MAX:-8G}" -p MemorySwapMax=0 \
+  -p "CPUQuota=${BML_CPU_QUOTA:-400%}" -p "TasksMax=${BML_TASKS_MAX:-1024}" \
   nice -n 19 ionice -c3 env \
     CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" \
     RUST_TEST_THREADS="${RUST_TEST_THREADS:-4}" \

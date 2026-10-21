@@ -16,7 +16,7 @@
 
 use crate::analyze::analyze;
 use crate::ast::{ResolvedSchema, Schema};
-use crate::errors::BpsResult;
+use crate::errors::BmlResult;
 use crate::json::Value;
 use crate::ordmap::OrderedMap;
 
@@ -133,7 +133,7 @@ pub struct Stages {
 ///
 /// This is the same pass order as `bml` itself: parse (done by the caller),
 /// analyze, lower, then type. A failure stops at the phase that raised it.
-pub fn stages(schema: &Schema) -> BpsResult<Stages> {
+pub fn stages(schema: &Schema) -> BmlResult<Stages> {
     let syntax = syntax_phase(schema);
     let resolved = analyze(schema)?;
     let semantic = semantic_phase(&resolved);

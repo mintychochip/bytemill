@@ -255,7 +255,7 @@ fn std_schema(source: &str) -> bytemill::ResolvedSchema {
     let root = common::repo_root();
     let std: String = ["integers", "varint"]
         .iter()
-        .map(|n| std::fs::read_to_string(root.join("schemas/std").join(format!("{n}.bps"))).unwrap())
+        .map(|n| std::fs::read_to_string(root.join("schemas/std").join(format!("{n}.bml"))).unwrap())
         .collect();
     bytemill::analyze(&bytemill::parse(&(std + source)).unwrap()).unwrap()
 }

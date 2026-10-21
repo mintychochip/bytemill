@@ -44,7 +44,7 @@ def fetch(url, dest, sha1=None):
 def capped(cmd):
     if shutil.which("systemd-run") is None:
         return cmd
-    mem = os.environ.get("BPS_MEM_MAX", "4G")
+    mem = os.environ.get("BML_MEM_MAX", "4G")
     return ["systemd-run", "--user", "--scope", "-q", "-p", f"MemoryMax={mem}", "-p", "MemorySwapMax=0"] + cmd
 
 

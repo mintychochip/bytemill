@@ -1,4 +1,4 @@
-//! The importer's output tree and its BPS text printer.
+//! The importer's output tree and its BML text printer.
 //!
 //! Fields are identified by [`FieldId`], not by name: names are assigned after a whole packet
 //! or encoding is lowered (see `naming`), because the right name of a field depends on which
@@ -157,7 +157,7 @@ impl<'a> Printer<'a> {
     }
 
     /// An operand: compound expressions are parenthesised so the printed text never depends on
-    /// BPS precedence (shifts bind looser than `&`, unlike C).
+    /// BML precedence (shifts bind looser than `&`, unlike C).
     fn operand(&self, e: &IExpr) -> String {
         match e {
             IExpr::Bin(..) | IExpr::Tern(..) => format!("({})", self.expr(e)),
@@ -262,7 +262,7 @@ impl<'a> Printer<'a> {
     }
 }
 
-/// A BPS string literal: the lexer takes `\x` as the character `x`.
+/// A BML string literal: the lexer takes `\x` as the character `x`.
 pub fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');

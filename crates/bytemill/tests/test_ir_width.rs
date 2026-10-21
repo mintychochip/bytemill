@@ -68,8 +68,8 @@ fn class_of(path: &str, name: &str) -> Storage {
 
 #[test]
 fn std_encodings_match_the_table() {
-    let int = "schemas/std/integers.bps";
-    let var = "schemas/std/varint.bps";
+    let int = "schemas/std/integers.bml";
+    let var = "schemas/std/varint.bml";
     assert_eq!(class_of(int, "i8"), Storage::I8);
     assert_eq!(class_of(int, "i16be"), Storage::I16);
     assert_eq!(class_of(int, "i16le"), Storage::I16);
@@ -138,7 +138,7 @@ fn interval_rule_shrinks_computed_bit_fields() {
 
 #[test]
 fn f32be_is_f32_storage() {
-    let schema = bytemill::load_schema(&[repo("schemas/std/integers.bps")]).unwrap();
+    let schema = bytemill::load_schema(&[repo("schemas/std/integers.bml")]).unwrap();
     let resolved = bytemill::analyze(&schema).unwrap();
     let ir = bytemill::ir::lower(&resolved).unwrap();
     assert_eq!(
@@ -157,16 +157,16 @@ fn f32be_is_f32_storage() {
 #[test]
 fn no_i128_or_any_fields_in_shipped_schemas() {
     use bytemill::ir::TypeDef;
-    let mut roots = vec!["schemas/minecraft_26_3_wiki.bps".to_string()];
+    let mut roots = vec!["schemas/minecraft_26_3_wiki.bml".to_string()];
     let versions = std::fs::read_dir(repo("schemas/versions")).unwrap();
     let mut names: Vec<String> = versions
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with('v') && n.ends_with(".bps"))
+        .filter(|n| n.starts_with('v') && n.ends_with(".bml"))
         .map(|n| format!("schemas/versions/{n}"))
         .collect();
     names.sort();
     roots.extend(names);
-    roots.push("schemas/hytale/2026_02_17.bps".to_string());
+    roots.push("schemas/hytale/2026_02_17.bml".to_string());
     assert!(!roots.is_empty());
 
     let mut bad = Vec::new();

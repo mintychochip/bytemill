@@ -1,6 +1,6 @@
-# BPS DSL structure (quick reference)
+# BML DSL structure (quick reference)
 
-BPS separates **how bytes are laid out** from **what messages exist** and **how they are routed**.
+BML separates **how bytes are laid out** from **what messages exist** and **how they are routed**.
 
 ## 1. `encoding` — wire layouts
 
@@ -8,9 +8,9 @@ Reusable, parameterizable byte grammars. The compiler's primitives are `u8`,
 `bytes(n)`, `rest`, `f32be`, and `f64be`. Wider integers and LEB128 live in
 `schemas/std/` and are pulled in with `import`.
 
-```bps
-import "std/integers.bps"
-import "std/varint.bps"
+```bml
+import "std/integers.bml"
+import "std/varint.bml"
 
 encoding string(max_chars = 32767) = {
     byte_len: varint
@@ -45,7 +45,7 @@ encoding meta_entry = {
 | --- | --- | --- |
 | primitive | `u8`, `bytes(n)`, `rest`, `f32be`, `f64be` | the only built-in types |
 | scalar encoding | `encoding u16be = { ... } = expr` | block whose value is `expr`; `name: type = expr` is the encode side |
-| import | `import "std/varint.bps"` | makes that file's names visible here; path relative to the importing file; not transitive |
+| import | `import "std/varint.bml"` | makes that file's names visible here; path relative to the importing file; not transitive |
 | bytes | `bytes(n)`, `bytes(n) as utf8` | exactly `n` bytes, optional transform |
 | remainder | `rest` | to end of the length-bounded scope |
 | repeat count | `items: slot[] count = n` | `n` from an already-decoded field |
@@ -59,7 +59,7 @@ encoding meta_entry = {
 
 ## 2. `packet` / `enum` — logical messages
 
-```bps
+```bml
 enum intent : varint { status = 1, login = 2, transfer = 3 }
 
 packet boss_event {
@@ -74,7 +74,7 @@ packet boss_event {
 
 ## 3. `protocol` — framing + dispatch
 
-```bps
+```bml
 protocol minecraft @ v26_3 {
     id = 777
     frame default {
@@ -108,9 +108,9 @@ streams, and recursive network NBT — none of which fit the descriptor model.
 
 Network NBT needs self-reference: `nbt_compound_body` spreads `nbt_entry`, whose `match` arms
 include `nbt_compound_body` and `nbt_list_body` (which in turn references
-`nbt_compound_body`). See `schemas/minecraft_core.bps`.
+`nbt_compound_body`). See `schemas/minecraft_core.bml`.
 
-```bps
+```bml
 encoding nbt_entry = {
     tag_type: u8
     name:     nbt_string
@@ -129,11 +129,11 @@ encoding nbt_payload = {
 ## Example in this repo
 
 - `schemas/std/` — integers, boolean, VarInt, and VarLong; a file imports them to use them
-- `schemas/minecraft_core.bps` — String, UUID, Position, NBT (recursive),
+- `schemas/minecraft_core.bml` — String, UUID, Position, NBT (recursive),
   Slot, entity metadata (all 44 kinds), 22-particle data table, Light Data, ID Set, LpVec3
-- `schemas/minecraft_26_3*.bps` — protocol **777**: 232 packets across 261 routes, all
-  transcribed (no `body: rest` stubs). Each packet file imports `std/integers.bps`,
-  `std/varint.bps` and `minecraft_core.bps`; `minecraft_26_3_wiki.bps` (the routes)
+- `schemas/minecraft_26_3*.bml` — protocol **777**: 232 packets across 261 routes, all
+  transcribed (no `body: rest` stubs). Each packet file imports `std/integers.bml`,
+  `std/varint.bml` and `minecraft_core.bml`; `minecraft_26_3_wiki.bml` (the routes)
   imports every packet file, so it is the one root that loads the whole protocol
 
 - `schemas/versions/` — protocols 393 (1.13) to 777 (26.3), one thin root each (header, imports,
@@ -142,4 +142,4 @@ encoding nbt_payload = {
 
 Authoring rules and the per-packet workflow live in `docs/AUTHORING_GUIDE.md`.
 
-Run: `bml check schemas/minecraft_26_3_wiki.bps`
+Run: `bml check schemas/minecraft_26_3_wiki.bml`

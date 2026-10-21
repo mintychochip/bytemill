@@ -5,9 +5,9 @@ use bytemill::ordmap::OrderedMap;
 use bytemill::value::Value;
 use std::path::{Path, PathBuf};
 
-/// `BPS_RSTOM_DIR`, else `<repo>/../rstom-bps`, else `<repo>/../rstom`.
+/// `BML_RSTOM_DIR`, else `<repo>/../rstom-bps`, else `<repo>/../rstom`.
 pub fn rstom_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("BPS_RSTOM_DIR") {
+    if let Some(dir) = std::env::var_os("BML_RSTOM_DIR") {
         return PathBuf::from(dir);
     }
     let worktree = super::repo_root().parent().unwrap().join("rstom-bps");
@@ -142,7 +142,7 @@ pub fn probe_source_default(root: &Path) -> String {
 fn probe_source_inner(root: &Path, body: &str) -> String {
     let std: String = ["integers", "varint"]
         .iter()
-        .map(|n| format!("import \"{}\"\n", root.join("schemas/std").join(format!("{n}.bps")).display()))
+        .map(|n| format!("import \"{}\"\n", root.join("schemas/std").join(format!("{n}.bml")).display()))
         .collect();
     let mut names: Vec<&str> = Vec::new();
     for (packet, _, _, _, _) in PROTOCOL {

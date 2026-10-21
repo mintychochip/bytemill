@@ -1,11 +1,11 @@
-//! `.bps` loading, porting `bps/load.py`.
+//! `.bml` loading, porting `bps/load.py`.
 //!
 //! An import is a path relative to the file that contains it, and each file is
 //! loaded once. A file sees its own declarations and those of the files it
 //! imports *directly*; imports are not transitive (the `.proto` rule).
 
 use crate::ast::Schema;
-use crate::errors::{BpsResult, parse, py_repr_str, resolve};
+use crate::errors::{BmlResult, parse, py_repr_str, resolve};
 use crate::parser::parse as parse_text;
 use crate::primitives::is_bare_primitive;
 use crate::refs::{Ref, RefKind, references};
@@ -18,7 +18,7 @@ struct Module {
     imports: Vec<PathBuf>,
 }
 
-pub fn load_schema(paths: &[impl AsRef<Path>]) -> BpsResult<Schema> {
+pub fn load_schema(paths: &[impl AsRef<Path>]) -> BmlResult<Schema> {
     let modules = load_modules(paths)?;
     let providers = Providers::new(modules.values());
     for module in modules.values() {
@@ -54,7 +54,7 @@ impl ModuleTable {
     }
 }
 
-fn load_modules(paths: &[impl AsRef<Path>]) -> BpsResult<ModuleTable> {
+fn load_modules(paths: &[impl AsRef<Path>]) -> BmlResult<ModuleTable> {
     let mut modules = ModuleTable::new();
     let mut loading: Vec<PathBuf> = Vec::new();
 
@@ -63,7 +63,7 @@ fn load_modules(paths: &[impl AsRef<Path>]) -> BpsResult<ModuleTable> {
         importer: Option<&Path>,
         modules: &mut ModuleTable,
         loading: &mut Vec<PathBuf>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let path = resolve_path(raw);
         if modules.contains(&path) || loading.contains(&path) {
             return Ok(());
@@ -162,7 +162,7 @@ impl Providers {
     }
 }
 
-fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) -> BpsResult<()> {
+fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) -> BmlResult<()> {
     let mut visible: Vec<PathBuf> = vec![module.path.clone()];
     visible.extend(module.imports.iter().cloned());
     // file to import -> names it provides (insertion-ordered like Python's dict)
@@ -240,7 +240,7 @@ fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) 
     }
     for (name, ref_) in &nowhere {
         lines.push(format!(
-            "  {} (used in {}) is declared in no loaded or nearby .bps file",
+            "  {} (used in {}) is declared in no loaded or nearby .bml file",
             py_repr_str(name),
             ref_.where_
         ));
@@ -248,9 +248,9 @@ fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) 
     Err(resolve(lines.join("\n")))
 }
 
-/// The `.bps` files `dir.glob("*.bps")` (`depth` 0) or `dir.glob("*/*.bps")` (`depth` 1) finds.
+/// The `.bml` files `dir.glob("*.bml")` (`depth` 0) or `dir.glob("*/*.bml")` (`depth` 1) finds.
 /// Like pathlib's glob, not `glob.glob`, hidden names match.
-fn bps_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
+fn bml_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
     let folders: Vec<PathBuf> = if depth == 0 {
         vec![dir.to_path_buf()]
     } else {
@@ -269,7 +269,7 @@ fn bps_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
             continue;
         };
         for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy().ends_with(".bps") && entry.path().is_file() {
+            if entry.file_name().to_string_lossy().ends_with(".bml") && entry.path().is_file() {
                 out.push(entry.path());
             }
         }
@@ -277,7 +277,7 @@ fn bps_files(dir: &Path, depth: usize) -> Vec<PathBuf> {
     out
 }
 
-/// Providers among the unloaded `.bps` files beside `module` and one folder
+/// Providers among the unloaded `.bml` files beside `module` and one folder
 /// down. This only words an error: a name a nearby file declares gets the
 /// `import` line to add, not a dead end. A file that cannot be read is skipped
 /// so it cannot hide the error being reported.
@@ -285,7 +285,7 @@ fn nearby_providers(module: &Module, loaded: &ModuleTable) -> Providers {
     let dir = module.path.parent().unwrap_or(Path::new("."));
     let mut found: Vec<Module> = Vec::new();
     for depth in [0, 1] {
-        let mut paths = bps_files(dir, depth);
+        let mut paths = bml_files(dir, depth);
         paths.sort();
         for path in paths {
             let resolved = resolve_path(&path);

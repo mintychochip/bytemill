@@ -1,6 +1,6 @@
 //! Ports tests/test_errors.py.
 
-use bytemill::errors::{decode_at, parse, BpsError, ErrorKind};
+use bytemill::errors::{decode_at, parse, BmlError, ErrorKind};
 
 #[test]
 fn offset_optional() {
@@ -13,7 +13,7 @@ fn offset_optional() {
 #[test]
 fn parse_error_is_an_error() {
     let e = parse("syntax");
-    assert!(matches!(e, BpsError { kind: ErrorKind::Parse, .. }));
+    assert!(matches!(e, BmlError { kind: ErrorKind::Parse, .. }));
 }
 
 // A failed `require` prints the expression the way Python's dataclass repr does. That text is

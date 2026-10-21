@@ -69,14 +69,14 @@ fn assert_go_gates(dir: &Path) {
 }
 
 fn scratch(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-go-{tag}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-go-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
 
 #[test]
 fn go_unit_codecs() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint }\npacket floats { a: f32be, b: f64be }\npacket gated { v: varint\n require v == 777 }\npacket holder { n: varint\n ids: varint[] count = n }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let dir = scratch("unit");
@@ -248,22 +248,22 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) -> usize {
 
 #[test]
 fn go_26_3_packets_roundtrip() {
-    roundtrip_schema("schemas/minecraft_26_3_wiki.bps", "26-3", 100);
+    roundtrip_schema("schemas/minecraft_26_3_wiki.bml", "26-3", 100);
 }
 
 #[test]
 fn go_v1_20_1_packets_roundtrip() {
-    roundtrip_schema("schemas/versions/v1_20_1.bps", "v1-20-1", 100);
+    roundtrip_schema("schemas/versions/v1_20_1.bml", "v1-20-1", 100);
 }
 
 #[test]
 fn go_hytale_packets_roundtrip() {
-    roundtrip_schema("schemas/hytale/2026_02_17.bps", "hytale", 1);
+    roundtrip_schema("schemas/hytale/2026_02_17.bml", "hytale", 1);
 }
 
 /// Emit a package containing a counted list under `ver`, returning its scratch dir.
 fn emit_versioned(ver: GoVersion, tag: &str) -> PathBuf {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe { n: varint }\npacket holder { n: varint\n ids: varint[] count = n }\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let dir = scratch(&format!("ver-{tag}"));

@@ -5,7 +5,7 @@
 //! Python's `str.isalpha`/`isalnum` (Unicode), approximated by `char::is_alphabetic` /
 //! `is_alphanumeric`; number literals stay ASCII-only.
 
-use crate::errors::{BpsResult, parse, parse_at, py_repr_str};
+use crate::errors::{BmlResult, parse, parse_at, py_repr_str};
 use std::fmt;
 
 pub const KEYWORDS: &[&str] = &[
@@ -113,7 +113,7 @@ impl Token {
     }
 
     /// Python's `int(tok.value)`; ident values raise, int values convert.
-    pub fn as_int(&self) -> BpsResult<i128> {
+    pub fn as_int(&self) -> BmlResult<i128> {
         match &self.value {
             TokValue::Int(v) => Ok(*v),
             _ => Err(parse(format!("expected int token, got {:?}", self.value))),
@@ -121,7 +121,7 @@ impl Token {
     }
 }
 
-pub fn tokenize(source: &str) -> BpsResult<Vec<Token>> {
+pub fn tokenize(source: &str) -> BmlResult<Vec<Token>> {
     let chars: Vec<char> = source.chars().collect();
     let n = chars.len();
     let mut tokens: Vec<Token> = Vec::new();

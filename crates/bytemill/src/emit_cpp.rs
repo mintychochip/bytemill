@@ -49,7 +49,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use crate::ResolvedSchema;
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Func, IntTy, LocalId, Name, Origin, Program, ReadOp, RepeatMode,
     Stmt, Ty, TypeIdx, escape, hex_literal, typed,
@@ -179,7 +179,7 @@ const RUNTIME_TOP: &[&str] = &[
 /// `clang-format` (LLVM style) column limit.
 const MAX_COL: usize = 80;
 
-pub fn emit_cpp(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+pub fn emit_cpp(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     emit_cpp_with_standard(resolved, out_dir, crate::CppStandard::default())
 }
 
@@ -187,7 +187,7 @@ pub fn emit_cpp_with_standard(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     std_ver: crate::CppStandard,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     let program = typed(resolved)?;
     let layout = Layout::build(&program);
     check_top_level(&program, &layout)?;
@@ -232,7 +232,7 @@ pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
     format!("encode_{}", program.codecs[codec].name.snake())
 }
 
-fn check_top_level(program: &Program, layout: &Layout) -> BpsResult<()> {
+fn check_top_level(program: &Program, layout: &Layout) -> BmlResult<()> {
     for t in 0..program.types.len() {
         let name = pascal(&program.types[t].name);
         if RUNTIME_TOP.contains(&name.as_str()) {
@@ -2709,7 +2709,7 @@ fn emit_header(
     program: &Program,
     layout: &Layout,
     std_ver: crate::CppStandard,
-) -> BpsResult<String> {
+) -> BmlResult<String> {
     let mut src = Src::new();
     src.raw(&runtime_header(layout.uses_i128, std_ver));
     for decl in &program.types {
@@ -2792,7 +2792,7 @@ fn sig_string(
     rname: &str,
     wname: &str,
     std_ver: crate::CppStandard,
-) -> BpsResult<(String, Vec<String>)> {
+) -> BmlResult<(String, Vec<String>)> {
     let c = &program.codecs[codec];
     let body = if decode { &c.decode } else { &c.encode };
     if decode {
@@ -2919,7 +2919,7 @@ fn emit_sources(
     program: &Program,
     layout: &Layout,
     std_ver: crate::CppStandard,
-) -> BpsResult<BTreeMap<String, String>> {
+) -> BmlResult<BTreeMap<String, String>> {
     let mut bodies: BTreeMap<String, Src> = BTreeMap::new();
     for ci in 0..program.codecs.len() {
         let stem = program.output_stem(&program.codecs[ci].origin);
@@ -3039,7 +3039,7 @@ fn emit_function(
     codec: CodecIdx,
     decode: bool,
     std_ver: crate::CppStandard,
-) -> BpsResult<String> {
+) -> BmlResult<String> {
     let c = &program.codecs[codec];
     let body: &Body = if decode { &c.decode } else { &c.encode };
     let (rname, wname) = cursor_names(body);

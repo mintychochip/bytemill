@@ -10,7 +10,7 @@ use crate::ast::{
     BlockItem, EncBody, Expr, FieldType, MatchArm, MatchType, PacketDecl, RepeatMode,
     ResolvedSchema, Tag, TypeRef, WireField, arm_tag_list, select_match_arm,
 };
-use crate::errors::{BpsError, BpsResult, py_repr_str};
+use crate::errors::{BmlError, BmlResult, py_repr_str};
 use crate::interp::eval_expr;
 use crate::ordmap::OrderedMap;
 use crate::value::{Env, Value};
@@ -195,7 +195,7 @@ fn prim(name: &str) -> Option<Value> {
 }
 
 /// `_value_for(t, env, scope)`: a field type's synthetic value.
-pub fn value_for(t: &FieldType, env: &Env, scope: &SynthScope<'_>) -> BpsResult<Value> {
+pub fn value_for(t: &FieldType, env: &Env, scope: &SynthScope<'_>) -> BmlResult<Value> {
     match t {
         FieldType::Block(b) => block_value(&b.items, env, scope),
         FieldType::Match(mt) => {
@@ -210,7 +210,7 @@ pub fn value_for(t: &FieldType, env: &Env, scope: &SynthScope<'_>) -> BpsResult<
     }
 }
 
-fn ref_value(tr: &TypeRef, env: &Env, scope: &SynthScope<'_>) -> BpsResult<Value> {
+fn ref_value(tr: &TypeRef, env: &Env, scope: &SynthScope<'_>) -> BmlResult<Value> {
     let name = tr.name.as_str();
     if name == "rest" || name == "bytes" {
         return Ok(raw_bytes());
@@ -253,7 +253,7 @@ fn ref_value(tr: &TypeRef, env: &Env, scope: &SynthScope<'_>) -> BpsResult<Value
 }
 
 /// `_block_value(items, env, scope)` as a decoded-shape map.
-fn block_value(items: &[BlockItem], env: &Env, scope: &SynthScope<'_>) -> BpsResult<Value> {
+fn block_value(items: &[BlockItem], env: &Env, scope: &SynthScope<'_>) -> BmlResult<Value> {
     let mut local = env.clone();
     Ok(Value::map(block_walk(items, &mut local, scope, true)?))
 }
@@ -278,7 +278,7 @@ fn scrutinee(expr: &Expr, env: &Env) -> Option<i128> {
 }
 
 /// `_synth_match(item, local, scope)`: the statement-form match's arm, merged.
-fn synth_match(mt: &MatchType, local: &mut Env, scope: &SynthScope<'_>) -> BpsResult<Env> {
+fn synth_match(mt: &MatchType, local: &mut Env, scope: &SynthScope<'_>) -> BmlResult<Env> {
     let mut arm = scrutinee(&mt.tag_expr, local).and_then(|tag| select_match_arm(mt, tag));
     let mut extra = Env::new();
     if arm.is_none()
@@ -325,7 +325,7 @@ fn block_walk(
     local: &mut Env,
     scope: &SynthScope<'_>,
     top: bool,
-) -> BpsResult<Env> {
+) -> BmlResult<Env> {
     let mut out = Env::new();
     for item in items {
         match item {
@@ -369,7 +369,7 @@ fn field_item(
     out: &mut Env,
     scope: &SynthScope<'_>,
     top: bool,
-) -> BpsResult<()> {
+) -> BmlResult<()> {
     if let Some(cond) = &wf.if_expr
         && let Ok(v) = eval_expr(cond, local)
         && !v.truthy()
@@ -538,15 +538,15 @@ fn override_entries() -> Vec<(String, String, Value)> {
     })
 }
 
-fn check_override(resolved: &ResolvedSchema, pkt_name: &str, field_name: &str) -> BpsResult<()> {
+fn check_override(resolved: &ResolvedSchema, pkt_name: &str, field_name: &str) -> BmlResult<()> {
     let pkt = resolved.packets.get(pkt_name).ok_or_else(|| {
-        BpsError::resolve(format!(
+        BmlError::resolve(format!(
             "SYNTH_OVERRIDES references unknown packet {}",
             py_repr_str(pkt_name)
         ))
     })?;
     if !declared_wire_fields(&pkt.items).contains(field_name) {
-        return Err(BpsError::resolve(format!(
+        return Err(BmlError::resolve(format!(
             "SYNTH_OVERRIDES references unknown field {} on packet {}",
             py_repr_str(field_name),
             py_repr_str(pkt_name)
@@ -556,7 +556,7 @@ fn check_override(resolved: &ResolvedSchema, pkt_name: &str, field_name: &str) -
 }
 
 /// `validate_all_synth_overrides(resolved)`: every override names a real packet and field.
-pub fn validate_all_synth_overrides(resolved: &ResolvedSchema) -> BpsResult<()> {
+pub fn validate_all_synth_overrides(resolved: &ResolvedSchema) -> BmlResult<()> {
     for (pkt_name, field_name, _) in override_entries() {
         check_override(resolved, &pkt_name, &field_name)?;
     }
@@ -565,7 +565,7 @@ pub fn validate_all_synth_overrides(resolved: &ResolvedSchema) -> BpsResult<()> 
 
 /// `synthesize_packet(resolved, pkt)`: a decoded-shape value for `pkt` that the
 /// interpreter encodes cleanly.
-pub fn synthesize_packet(resolved: &ResolvedSchema, pkt: &PacketDecl) -> BpsResult<Env> {
+pub fn synthesize_packet(resolved: &ResolvedSchema, pkt: &PacketDecl) -> BmlResult<Env> {
     let scope = SynthScope { resolved };
     let overrides = override_entries();
     for (pkt_name, field_name, _) in &overrides {
@@ -619,7 +619,7 @@ fn field_value(
     local: &mut Env,
     out: &mut Env,
     scope: &SynthScope<'_>,
-) -> BpsResult<Value> {
+) -> BmlResult<Value> {
     let FieldType::Match(mt) = t else {
         return value_for(t, local, scope);
     };

@@ -1,30 +1,30 @@
-//! Minestom classes for BPS packets, porting `bps/minestom.py`.
+//! Minestom classes for BML packets, porting `bps/minestom.py`.
 //!
 //! `rstom-packets` names a packet by its Minestom class and files it under the
-//! Minestom package; BPS names it by what vanilla calls it (`add_entity`). The
+//! Minestom package; BML names it by what vanilla calls it (`add_entity`). The
 //! two meet at the id tables: the class at position N of a state's table is the
 //! class of the route with id N.
 
 use crate::ast::{PacketDecl, ResolvedSchema, RouteDecl};
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::json::loads;
 use crate::ordmap::OrderedMap;
 use crate::value::Value;
 use std::path::Path;
 
-/// BPS spells the first state `handshaking`; Minestom's packages say `handshake`.
+/// BML spells the first state `handshaking`; Minestom's packages say `handshake`.
 const PACKAGE_HANDSHAKING: (&str, &str) = ("handshaking", "handshake");
 
 /// Minestom keeps two wire forms on one class and picks the serializer per id
-/// table. A BPS packet is one wire form and a Rust struct has one, so such a
-/// class is one struct per BPS packet: the packet named here keeps the class.
+/// table. A BML packet is one wire form and a Rust struct has one, so such a
+/// class is one struct per BML packet: the packet named here keeps the class.
 pub const SHARED_CLASSES: &[(&str, &str)] = &[("ShowDialogPacket", "show_dialog")];
 
 pub const PACKAGE_PREFIX: &str = "net.minestom.server.network.packet";
 
 pub fn package_of(state: &str) -> &str {
-    let (bps_state, package) = PACKAGE_HANDSHAKING;
-    if state == bps_state { package } else { state }
+    let (bml_state, package) = PACKAGE_HANDSHAKING;
+    if state == bml_state { package } else { state }
 }
 
 /// `SpawnEntityPacket` -> `spawn_entity_packet`, as the generator names the file.
@@ -71,7 +71,7 @@ pub struct ClassTable {
 }
 
 impl ClassTable {
-    pub fn from_schema(schema: &Value) -> BpsResult<ClassTable> {
+    pub fn from_schema(schema: &Value) -> BmlResult<ClassTable> {
         let mut classes: OrderedMap<MinestomClass> = OrderedMap::new();
         let packets = schema_map_list(schema, "packets")?;
         for entry in &packets {
@@ -112,7 +112,7 @@ impl ClassTable {
                         Value::Str(s) => Ok(s.to_string()),
                         _ => Err(emit("stateTables packets entries must be strings")),
                     })
-                    .collect::<BpsResult<Vec<_>>>()?,
+                    .collect::<BmlResult<Vec<_>>>()?,
                 _ => Vec::new(),
             };
             for name in &names {
@@ -127,7 +127,7 @@ impl ClassTable {
         Ok(ClassTable { classes, tables })
     }
 
-    pub fn load(path: &Path) -> BpsResult<ClassTable> {
+    pub fn load(path: &Path) -> BmlResult<ClassTable> {
         let text = crate::text::read_text(path)
             .map_err(|e| emit(format!("cannot read {}: {e}", path.display())))?;
         let schema = loads(&text)?;
@@ -159,7 +159,7 @@ impl ClassTable {
     }
 }
 
-fn schema_map_list<'a>(schema: &'a Value, key: &str) -> BpsResult<Vec<&'a Value>> {
+fn schema_map_list<'a>(schema: &'a Value, key: &str) -> BmlResult<Vec<&'a Value>> {
     match schema.get(key) {
         Some(Value::List(items)) => Ok(items.iter().collect()),
         Some(Value::Null) | None => Ok(Vec::new()),
@@ -167,14 +167,14 @@ fn schema_map_list<'a>(schema: &'a Value, key: &str) -> BpsResult<Vec<&'a Value>
     }
 }
 
-fn map_str<'a>(map: &'a Value, key: &str) -> BpsResult<&'a str> {
+fn map_str<'a>(map: &'a Value, key: &str) -> BmlResult<&'a str> {
     match map.get(key) {
         Some(Value::Str(s)) => Ok(s),
         _ => Err(emit(format!("packets.json entry needs a string {key:?}"))),
     }
 }
 
-/// One generated struct: a BPS packet as the Minestom class of one direction.
+/// One generated struct: a BML packet as the Minestom class of one direction.
 #[derive(Debug, Clone)]
 pub struct Unit {
     pub pkt: PacketDecl,
@@ -203,7 +203,7 @@ pub fn class_name(packet: &str) -> String {
 
 /// The class an extra wire form of a shared class becomes: same name, its own
 /// state's package.
-fn extra_form(cls: &MinestomClass, packet: &str, routes: &[RouteDecl]) -> BpsResult<MinestomClass> {
+fn extra_form(cls: &MinestomClass, packet: &str, routes: &[RouteDecl]) -> BmlResult<MinestomClass> {
     let mut states: Vec<String> = routes
         .iter()
         .map(|r| package_of(&r.state).to_string())
@@ -230,7 +230,7 @@ fn extra_form(cls: &MinestomClass, packet: &str, routes: &[RouteDecl]) -> BpsRes
 }
 
 /// A struct for each direction each packet travels, ordered by module path.
-pub fn build_units(resolved: &ResolvedSchema, classes: &ClassTable) -> BpsResult<Vec<Unit>> {
+pub fn build_units(resolved: &ResolvedSchema, classes: &ClassTable) -> BmlResult<Vec<Unit>> {
     // Insertion-ordered, like the Python dicts that back these tables.
     let mut found: Vec<((String, String), MinestomClass)> = Vec::new();
     let mut routed: Vec<((String, String), Vec<RouteDecl>)> = Vec::new();

@@ -7,7 +7,7 @@ pub mod java_probes;
 pub mod rstom_tables;
 
 use bytemill::ast::Schema;
-use bytemill::errors::BpsResult;
+use bytemill::errors::BmlResult;
 use bytemill::{analyze, load_schema, parse};
 use std::path::{Path, PathBuf};
 
@@ -25,12 +25,12 @@ pub fn schema_path(rel: &str) -> PathBuf {
 }
 
 /// The whole protocol, loaded from the one file that imports the rest.
-pub fn load_minecraft() -> BpsResult<bytemill::ResolvedSchema> {
-    analyze(&load_schema(&[schema_path("minecraft_26_3_wiki.bps")])?)
+pub fn load_minecraft() -> BmlResult<bytemill::ResolvedSchema> {
+    analyze(&load_schema(&[schema_path("minecraft_26_3_wiki.bml")])?)
 }
 
 /// The Minecraft corpus plus extra declarations parsed from `source`.
-pub fn load_with_extra(source: &str) -> BpsResult<bytemill::ResolvedSchema> {
+pub fn load_with_extra(source: &str) -> BmlResult<bytemill::ResolvedSchema> {
     let base = load_minecraft()?;
     let extra = parse(source)?;
     let schema = Schema {
@@ -43,10 +43,10 @@ pub fn load_with_extra(source: &str) -> BpsResult<bytemill::ResolvedSchema> {
     analyze(&schema)
 }
 
-/// A unique throwaway directory of `.bps` files.
+/// A unique throwaway directory of `.bml` files.
 pub fn temp_tree(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "bps-test-{tag}-{}-{:?}",
+        "bml-test-{tag}-{}-{:?}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

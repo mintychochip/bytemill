@@ -1,6 +1,6 @@
 //! Byte cursors, porting `bps/interp/cursor.py`.
 
-use crate::errors::{BpsResult, decode_at};
+use crate::errors::{BmlResult, decode_at};
 
 pub struct Cursor<'a> {
     pub data: &'a [u8],
@@ -24,7 +24,7 @@ impl<'a> Cursor<'a> {
         self.data.len() - self.pos
     }
 
-    pub fn read(&mut self, n: usize) -> BpsResult<&'a [u8]> {
+    pub fn read(&mut self, n: usize) -> BmlResult<&'a [u8]> {
         if self.pos + n > self.data.len() {
             return Err(decode_at(
                 format!("need {n} bytes, have {}", self.remaining()),
@@ -36,7 +36,7 @@ impl<'a> Cursor<'a> {
         Ok(chunk)
     }
 
-    pub fn peek_u8(&self) -> BpsResult<u8> {
+    pub fn peek_u8(&self) -> BmlResult<u8> {
         if self.pos >= self.data.len() {
             return Err(decode_at("unexpected end", self.pos));
         }

@@ -203,7 +203,7 @@ pub fn route_packets(resolved: &ResolvedSchema) -> Vec<(String, String, i128, St
         .collect()
 }
 
-/// The BPS packet(s) at the ids where Java registers each class.
+/// The BML packet(s) at the ids where Java registers each class.
 pub fn packets_by_class(resolved: &ResolvedSchema) -> Vec<(String, Vec<String>)> {
     let route = route_packets(resolved);
     let mut out: Vec<(String, Vec<String>)> = Vec::new();
@@ -256,7 +256,7 @@ pub fn check(resolved: &ResolvedSchema, packet: &str, data: &[u8]) -> Option<Str
     }
 }
 
-/// Samples the schema cannot reproduce, by BPS packet.
+/// Samples the schema cannot reproduce, by BML packet.
 pub fn failures(resolved: &ResolvedSchema) -> Vec<(String, Vec<(Sample, String)>)> {
     let by_class = packets_by_class(resolved);
     let mut out: Vec<(String, Vec<(Sample, String)>)> = Vec::new();

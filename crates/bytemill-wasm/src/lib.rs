@@ -12,12 +12,12 @@
 use std::slice;
 
 use bytemill::ast::{BlockItem, FieldType, MatchArm, Schema};
-use bytemill::errors::{BpsError, resolve};
+use bytemill::errors::{BmlError, resolve};
 use bytemill::interp::{decode_frame_payload, decode_packet, encode_packet};
 use bytemill::json::{dumps, loads};
 use bytemill::ordmap::OrderedMap;
 use bytemill::value::Value;
-use bytemill::{BpsResult, ResolvedSchema, analyze, parse};
+use bytemill::{BmlResult, ResolvedSchema, analyze, parse};
 
 // ---------------------------------------------------------------------------
 // Memory ABI
@@ -58,7 +58,7 @@ pub unsafe extern "C" fn bml_free(ptr: *mut u8, len: usize) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bml_run(ptr: *const u8, len: usize) -> *mut u8 {
     let response = if ptr.is_null() || len == 0 {
-        error_json(BpsError::parse("empty request"))
+        error_json(BmlError::parse("empty request"))
     } else {
         let request = unsafe { slice::from_raw_parts(ptr, len) };
         handle(request)
@@ -116,14 +116,14 @@ pub unsafe extern "C" fn bml_free_response(ptr: *mut u8) {
 fn handle(request: &[u8]) -> String {
     let text = match std::str::from_utf8(request) {
         Ok(text) => text,
-        Err(_) => return error_json(BpsError::parse("request is not UTF-8")),
+        Err(_) => return error_json(BmlError::parse("request is not UTF-8")),
     };
     let request = match loads(text) {
         Ok(value) => value,
         Err(err) => return error_json(err),
     };
     let Some(op) = string_field(&request, "op") else {
-        return error_json(BpsError::parse("request needs an \"op\" string"));
+        return error_json(BmlError::parse("request needs an \"op\" string"));
     };
 
     match op {
@@ -148,13 +148,13 @@ fn handle(request: &[u8]) -> String {
             Err(err) => error_json(err),
         },
         "targets" => ok_json(bytemill::compat::targets_json()),
-        other => error_json(BpsError::parse(format!(
+        other => error_json(BmlError::parse(format!(
             "unknown op {other:?}; expected check, decode, encode, stages, targets, or version"
         ))),
     }
 }
 
-fn check(request: &Value) -> BpsResult<Value> {
+fn check(request: &Value) -> BmlResult<Value> {
     let resolved = resolve_source(request)?;
     let packets = resolved
         .packets
@@ -226,7 +226,7 @@ fn check(request: &Value) -> BpsResult<Value> {
     ]))
 }
 
-fn decode(request: &Value) -> BpsResult<Value> {
+fn decode(request: &Value) -> BmlResult<Value> {
     let resolved = resolve_source(request)?;
     let input = required_string(request, "hex")?;
     let bytes = decode_hex(input)?;
@@ -265,14 +265,14 @@ fn decode(request: &Value) -> BpsResult<Value> {
     ]))
 }
 
-fn encode(request: &Value) -> BpsResult<Value> {
+fn encode(request: &Value) -> BmlResult<Value> {
     let resolved = resolve_source(request)?;
     let packet = required_string(request, "packet")?;
     let value = request
         .get("value")
-        .ok_or_else(|| BpsError::encode("request needs a \"value\" object"))?;
+        .ok_or_else(|| BmlError::encode("request needs a \"value\" object"))?;
     let Value::Map(fields) = value else {
-        return Err(BpsError::encode("encode needs a JSON object"));
+        return Err(BmlError::encode("encode needs a JSON object"));
     };
 
     let bytes = encode_packet(&resolved, packet, fields)?;
@@ -287,10 +287,10 @@ fn encode(request: &Value) -> BpsResult<Value> {
     ]))
 }
 
-fn parse_source(request: &Value) -> BpsResult<Schema> {
+fn parse_source(request: &Value) -> BmlResult<Schema> {
     let source = required_string(request, "source")?;
     if source.trim().is_empty() {
-        return Err(BpsError::parse("schema source is empty"));
+        return Err(BmlError::parse("schema source is empty"));
     }
     let schema = parse(source)?;
     if !schema.imports.is_empty() {
@@ -301,12 +301,12 @@ fn parse_source(request: &Value) -> BpsResult<Schema> {
     Ok(schema)
 }
 
-fn resolve_source(request: &Value) -> BpsResult<ResolvedSchema> {
+fn resolve_source(request: &Value) -> BmlResult<ResolvedSchema> {
     let schema = parse_source(request)?;
     analyze(&schema)
 }
 
-fn stages(request: &Value) -> BpsResult<Value> {
+fn stages(request: &Value) -> BmlResult<Value> {
     let schema = parse_source(request)?;
     let report = bytemill::ir::stages(&schema)?;
     Ok(bytemill::ir::stages_json(&report))
@@ -332,7 +332,7 @@ fn ok_json(data: Value) -> String {
     dumps(&map(vec![("ok", Value::Bool(true)), ("data", data)]))
 }
 
-fn error_json(error: BpsError) -> String {
+fn error_json(error: BmlError) -> String {
     dumps(&map(vec![
         ("ok", Value::Bool(false)),
         (
@@ -359,9 +359,9 @@ fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     }
 }
 
-fn required_string<'a>(value: &'a Value, key: &str) -> BpsResult<&'a str> {
+fn required_string<'a>(value: &'a Value, key: &str) -> BmlResult<&'a str> {
     string_field(value, key)
-        .ok_or_else(|| BpsError::parse(format!("request needs a {key:?} string")))
+        .ok_or_else(|| BmlError::parse(format!("request needs a {key:?} string")))
 }
 
 fn collect_fields(items: &[BlockItem], out: &mut Vec<String>) {
@@ -401,7 +401,7 @@ fn push_unique(out: &mut Vec<String>, name: &str) {
 // Hex
 // ---------------------------------------------------------------------------
 
-fn decode_hex(text: &str) -> BpsResult<Vec<u8>> {
+fn decode_hex(text: &str) -> BmlResult<Vec<u8>> {
     let mut clean = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
@@ -415,7 +415,7 @@ fn decode_hex(text: &str) -> BpsResult<Vec<u8>> {
         clean.push(c);
     }
     if !clean.len().is_multiple_of(2) {
-        return Err(BpsError::decode("hex needs an even number of digits"));
+        return Err(BmlError::decode("hex needs an even number of digits"));
     }
     let mut out = Vec::with_capacity(clean.len() / 2);
     let bytes = clean.as_bytes();
@@ -427,12 +427,12 @@ fn decode_hex(text: &str) -> BpsResult<Vec<u8>> {
     Ok(out)
 }
 
-fn hex_digit(byte: u8) -> BpsResult<u8> {
+fn hex_digit(byte: u8) -> BmlResult<u8> {
     match byte {
         b'0'..=b'9' => Ok(byte - b'0'),
         b'a'..=b'f' => Ok(byte - b'a' + 10),
         b'A'..=b'F' => Ok(byte - b'A' + 10),
-        other => Err(BpsError::decode(format!(
+        other => Err(BmlError::decode(format!(
             "invalid hex digit {:?}",
             other as char
         ))),

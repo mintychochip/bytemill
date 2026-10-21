@@ -1,8 +1,8 @@
-//! Import PrismarineJS minecraft-data `protocol.json` (ProtoDef) descriptions as BPS schemas.
+//! Import PrismarineJS minecraft-data `protocol.json` (ProtoDef) descriptions as BML schemas.
 //!
 //! `model` parses the JSON into a typed tree, `lower` translates packets and named types into
 //! the `ir` tree (resolving every ProtoDef path through `scope`), `names` and `scope` give
-//! every field its final name, and `render` prints one self-contained `.bps` file per protocol.
+//! every field its final name, and `render` prints one self-contained `.bml` file per protocol.
 //! `versions` drives it over the manifest in `schemas/versions/`.
 
 pub mod ir;

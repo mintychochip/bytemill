@@ -2,7 +2,7 @@
 //!
 //! Argument handling is hand-rolled to match the Python `argparse` surface the
 //! tests exercise: the same subcommands, the same flags, exit code 2 for usage
-//! errors and 3 for `BpsError`/`ShapeError`. The Python CLI has no `import-versions`,
+//! errors and 3 for `BmlError`/`ShapeError`. The Python CLI has no `import-versions`,
 //! `import-protodef` or `wire-check`; those are Rust-only.
 
 use crate::analyze::analyze;
@@ -11,13 +11,13 @@ use crate::emit_json::schema_to_json;
 use crate::emit_rstom::emit_rstom;
 use crate::emit_rust::emit_rust;
 use crate::emit_tree::emit_tree;
-use crate::errors::{BpsError, BpsResult, emit};
+use crate::errors::{BmlError, BmlResult, emit};
 use crate::interp::{decode_frame_payload, decode_packet, encode_packet};
 use crate::json::{Value, dumps_sorted, loads};
 use crate::load::load_schema;
 use crate::minestom::{ClassTable, build_units};
 use crate::shapes::{
-    bps_field_pairs, extract_shape, hand_packet_path, mismatch, module_path, packet_report,
+    bml_field_pairs, extract_shape, hand_packet_path, mismatch, module_path, packet_report,
     shape_to_json,
 };
 use std::path::{Path, PathBuf};
@@ -31,7 +31,7 @@ fn default_shapes() -> PathBuf {
     Path::new(PROTOC_ROOT).join(DEFAULT_SHAPES_REL)
 }
 
-fn load_and_analyze(paths: &[String]) -> BpsResult<crate::ast::ResolvedSchema> {
+fn load_and_analyze(paths: &[String]) -> BmlResult<crate::ast::ResolvedSchema> {
     let schema = load_schema(&paths.iter().map(PathBuf::from).collect::<Vec<_>>())?;
     analyze(&schema)
 }
@@ -50,7 +50,7 @@ fn default_packets_json_hint(target: &str, anchor: &Path) -> String {
 }
 
 /// rstom's class table: the one named, or the one beside an rstom workspace / crate.
-fn class_table(given: Option<&str>, anchor: &Path, target: &str) -> BpsResult<ClassTable> {
+fn class_table(given: Option<&str>, anchor: &Path, target: &str) -> BmlResult<ClassTable> {
     let path = match given {
         Some(p) => PathBuf::from(p),
         None => {
@@ -148,7 +148,7 @@ fn take_switch(argv: &mut Vec<String>, name: &str) -> bool {
 }
 
 /// `bml import-versions` and `bml import-protodef`: minecraft-data's ProtoDef descriptions
-/// as BPS schemas (see `crate::protodef`). Rust-only; the Python CLI has no importer.
+/// as BML schemas (see `crate::protodef`). Rust-only; the Python CLI has no importer.
 fn import_cli(cmd: &str, mut argv: Vec<String>) -> Result<i32, String> {
     use crate::protodef::{FileSpec, Protocol, import, import_versions};
     let root = Path::new(PROTOC_ROOT);
@@ -426,7 +426,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
         }
     }
 
-    // The Python code prints BpsError/ShapeError to stderr and exits 3.
+    // The Python code prints BmlError/ShapeError to stderr and exits 3.
     match run(&cmd, &a, shapes_cmd.as_deref()) {
         Ok(code) => Ok(code),
         Err(e) => {
@@ -436,7 +436,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
     }
 }
 
-fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
+fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
     match cmd {
         "check" => {
             load_and_analyze(&a.schemas)?;
@@ -511,7 +511,7 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
             let resolved = load_and_analyze(&a.schemas)?;
             let val = loads(a.json_value.as_deref().unwrap_or(""))?;
             let Value::Map(m) = val else {
-                return Err(BpsError::new(
+                return Err(BmlError::new(
                     crate::errors::ErrorKind::Encode,
                     "encode needs a JSON object",
                 ));
@@ -540,7 +540,7 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                     })
                     .map(|route| route.packet.0.clone())
                     .ok_or_else(|| {
-                        BpsError::new(
+                        BmlError::new(
                             crate::errors::ErrorKind::Encode,
                             format!("no route for {packet} in {state}.{direction}"),
                         )
@@ -651,7 +651,7 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                         }
                         let mod_path = module_path(unit);
                         let text = crate::text::read_text(&path).map_err(|e| {
-                            BpsError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
+                            BmlError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
                         })?;
                         let Ok(shape) =
                             extract_shape(&text, &unit.cls.name, &mod_path, Some(&path))
@@ -659,7 +659,7 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                             continue;
                         };
                         if a.eligible {
-                            let pairs = bps_field_pairs(&unit.pkt, &resolved)?;
+                            let pairs = bml_field_pairs(&unit.pkt, &resolved)?;
                             if !mismatch(&shape, &pairs).is_empty() {
                                 continue;
                             }
@@ -667,11 +667,11 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
                         let dest = out.join(format!("{mod_path}.json"));
                         if let Some(parent) = dest.parent() {
                             std::fs::create_dir_all(parent).map_err(|e| {
-                                BpsError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
+                                BmlError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
                             })?;
                         }
                         std::fs::write(&dest, shape_to_json(&shape)).map_err(|e| {
-                            BpsError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
+                            BmlError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
                         })?;
                     }
                     Ok(0)
@@ -683,21 +683,21 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BpsResult<i32> {
     }
 }
 
-fn read_stdin() -> BpsResult<String> {
+fn read_stdin() -> BmlResult<String> {
     use std::io::Read;
     let mut buf = String::new();
     std::io::stdin()
         .read_to_string(&mut buf)
-        .map_err(|e| BpsError::new(crate::errors::ErrorKind::Parse, format!("{e}")))?;
+        .map_err(|e| BmlError::new(crate::errors::ErrorKind::Parse, format!("{e}")))?;
     Ok(buf.trim().to_string())
 }
 
 /// `bytes.fromhex(raw.replace(" ", ""))`.
-fn hex_bytes(raw: &str) -> BpsResult<Vec<u8>> {
+fn hex_bytes(raw: &str) -> BmlResult<Vec<u8>> {
     let text: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
     let bytes = text.as_bytes();
     if !bytes.len().is_multiple_of(2) {
-        return Err(BpsError::new(
+        return Err(BmlError::new(
             crate::errors::ErrorKind::Parse,
             "non-hexadecimal number found in fromhex() arg",
         ));
@@ -709,7 +709,7 @@ fn hex_bytes(raw: &str) -> BpsResult<Vec<u8>> {
         match (hi, lo) {
             (Some(h), Some(l)) => out.push((h * 16 + l) as u8),
             _ => {
-                return Err(BpsError::new(
+                return Err(BmlError::new(
                     crate::errors::ErrorKind::Parse,
                     "non-hexadecimal number found in fromhex() arg",
                 ));

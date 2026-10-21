@@ -38,7 +38,7 @@ JSON object:
 
 ## Requests
 
-All schema-taking operations use a single self-contained BPS source (imports are
+All schema-taking operations use a single self-contained BML source (imports are
 rejected because the bridge has no filesystem).
 
 - `{"op":"version"}`

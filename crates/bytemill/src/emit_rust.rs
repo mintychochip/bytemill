@@ -11,29 +11,29 @@ use crate::ast::{
     BlockItem, EncBody, Expr, FieldType, MatchArm, MatchType, PacketDecl, Repeat, RepeatMode,
     ResolvedSchema, Tag, TypeRef, WireField,
 };
-use crate::errors::{BpsResult, emit, py_repr_str};
+use crate::errors::{BmlResult, emit, py_repr_str};
 use crate::frames_gen;
 
-const RUNTIME_RS: &str = r#"//! Generated BPS runtime: cursor, Minecraft VarInt, and shared wire helpers.
+const RUNTIME_RS: &str = r#"//! Generated BML runtime: cursor, Minecraft VarInt, and shared wire helpers.
 
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone)]
-pub enum BpsError {
+pub enum BmlError {
     Msg(String),
     At(String, usize),
 }
 
-impl std::fmt::Display for BpsError {
+impl std::fmt::Display for BmlError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BpsError::Msg(m) => write!(f, "{m}"),
-            BpsError::At(m, o) => write!(f, "{m} at offset {o}"),
+            BmlError::Msg(m) => write!(f, "{m}"),
+            BmlError::At(m, o) => write!(f, "{m} at offset {o}"),
         }
     }
 }
 
-impl std::error::Error for BpsError {}
+impl std::error::Error for BmlError {}
 
 pub struct Cursor<'a> {
     data: &'a [u8],
@@ -47,64 +47,64 @@ impl<'a> Cursor<'a> {
     pub fn remaining(&self) -> usize {
         self.data.len().saturating_sub(self.pos)
     }
-    pub fn read(&mut self, n: usize) -> Result<&'a [u8], BpsError> {
+    pub fn read(&mut self, n: usize) -> Result<&'a [u8], BmlError> {
         if self.pos + n > self.data.len() {
-            return Err(BpsError::At("unexpected EOF".into(), self.pos));
+            return Err(BmlError::At("unexpected EOF".into(), self.pos));
         }
         let s = &self.data[self.pos..self.pos + n];
         self.pos += n;
         Ok(s)
     }
-    pub fn peek_u8(&self) -> Result<u8, BpsError> {
+    pub fn peek_u8(&self) -> Result<u8, BmlError> {
         if self.pos >= self.data.len() {
-            return Err(BpsError::At("unexpected EOF".into(), self.pos));
+            return Err(BmlError::At("unexpected EOF".into(), self.pos));
         }
         Ok(self.data[self.pos])
     }
 }
 
-pub fn u8_at(cur: &mut Cursor) -> Result<u8, BpsError> {
+pub fn u8_at(cur: &mut Cursor) -> Result<u8, BmlError> {
     Ok(cur.read(1)?[0])
 }
 
-pub fn i8_at(cur: &mut Cursor) -> Result<i64, BpsError> {
+pub fn i8_at(cur: &mut Cursor) -> Result<i64, BmlError> {
     Ok(u8_at(cur)? as i8 as i64)
 }
 
-pub fn u16_be(cur: &mut Cursor) -> Result<u16, BpsError> {
+pub fn u16_be(cur: &mut Cursor) -> Result<u16, BmlError> {
     let b = cur.read(2)?;
     Ok(u16::from_be_bytes([b[0], b[1]]))
 }
 
-pub fn u32_be(cur: &mut Cursor) -> Result<u32, BpsError> {
+pub fn u32_be(cur: &mut Cursor) -> Result<u32, BmlError> {
     let b = cur.read(4)?;
     Ok(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-pub fn i32_be(cur: &mut Cursor) -> Result<i64, BpsError> {
+pub fn i32_be(cur: &mut Cursor) -> Result<i64, BmlError> {
     Ok(u32_be(cur)? as i32 as i64)
 }
 
-pub fn u64_be(cur: &mut Cursor) -> Result<u64, BpsError> {
+pub fn u64_be(cur: &mut Cursor) -> Result<u64, BmlError> {
     let b = cur.read(8)?;
     Ok(u64::from_be_bytes([
         b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
     ]))
 }
 
-pub fn i64_be(cur: &mut Cursor) -> Result<i64, BpsError> {
+pub fn i64_be(cur: &mut Cursor) -> Result<i64, BmlError> {
     Ok(u64_be(cur)? as i64)
 }
 
-pub fn f32_be(cur: &mut Cursor) -> Result<f64, BpsError> {
+pub fn f32_be(cur: &mut Cursor) -> Result<f64, BmlError> {
     Ok(f32::from_bits(u32_be(cur)?) as f64)
 }
 
-pub fn f64_be(cur: &mut Cursor) -> Result<f64, BpsError> {
+pub fn f64_be(cur: &mut Cursor) -> Result<f64, BmlError> {
     Ok(f64::from_bits(u64_be(cur)?))
 }
 
-pub fn boolean(cur: &mut Cursor) -> Result<bool, BpsError> {
+pub fn boolean(cur: &mut Cursor) -> Result<bool, BmlError> {
     Ok(u8_at(cur)? != 0)
 }
 
@@ -117,7 +117,7 @@ pub fn sign_extend(v: i64, bits: u32) -> i64 {
     }
 }
 
-pub fn leb128(cur: &mut Cursor, bits: u32) -> Result<i64, BpsError> {
+pub fn leb128(cur: &mut Cursor, bits: u32) -> Result<i64, BmlError> {
     let max_bytes = if bits == 64 { 10 } else { 5 };
     let mut shift = 0u32;
     let mut result: u64 = 0;
@@ -138,11 +138,11 @@ pub fn leb128(cur: &mut Cursor, bits: u32) -> Result<i64, BpsError> {
     Ok(v)
 }
 
-pub fn varint(cur: &mut Cursor) -> Result<i64, BpsError> {
+pub fn varint(cur: &mut Cursor) -> Result<i64, BmlError> {
     leb128(cur, 32)
 }
 
-pub fn varlong(cur: &mut Cursor) -> Result<i64, BpsError> {
+pub fn varlong(cur: &mut Cursor) -> Result<i64, BmlError> {
     leb128(cur, 64)
 }
 
@@ -150,23 +150,23 @@ pub fn utf16_units(s: &str) -> usize {
     s.chars().map(|c| if (c as u32) > 0xFFFF { 2 } else { 1 }).sum()
 }
 
-pub fn string_at(cur: &mut Cursor, max_chars: usize) -> Result<String, BpsError> {
+pub fn string_at(cur: &mut Cursor, max_chars: usize) -> Result<String, BmlError> {
     let len = varint(cur)? as usize;
     let raw = cur.read(len)?.to_vec();
-    let s = String::from_utf8(raw).map_err(|e| BpsError::Msg(e.to_string()))?;
+    let s = String::from_utf8(raw).map_err(|e| BmlError::Msg(e.to_string()))?;
     if utf16_units(&s) > max_chars {
-        return Err(BpsError::Msg(format!("string exceeds {max_chars} UTF-16 units")));
+        return Err(BmlError::Msg(format!("string exceeds {max_chars} UTF-16 units")));
     }
     Ok(s)
 }
 
-pub fn uuid_at(cur: &mut Cursor) -> Result<Value, BpsError> {
+pub fn uuid_at(cur: &mut Cursor) -> Result<Value, BmlError> {
     let msb = u64_be(cur)?;
     let lsb = u64_be(cur)?;
     Ok(json!({ "msb": msb, "lsb": lsb }))
 }
 
-pub fn position_at(cur: &mut Cursor) -> Result<Value, BpsError> {
+pub fn position_at(cur: &mut Cursor) -> Result<Value, BmlError> {
     let raw = u64_be(cur)?;
     let x = sign_extend((raw >> 38) as i64, 26);
     let y = sign_extend((raw % 4096) as i64, 12);
@@ -175,12 +175,12 @@ pub fn position_at(cur: &mut Cursor) -> Result<Value, BpsError> {
 }
 
 /// Network NBT (protocol >= 764): the root tag id, then its payload (no root name).
-pub fn nbt_tag_at(cur: &mut Cursor) -> Result<Value, BpsError> {
+pub fn nbt_tag_at(cur: &mut Cursor) -> Result<Value, BmlError> {
     let tag_type = u8_at(cur)?;
     Ok(json!({ "tag_type": tag_type, "value": nbt_payload(cur, tag_type)? }))
 }
 
-fn nbt_compound_body(cur: &mut Cursor) -> Result<Value, BpsError> {
+fn nbt_compound_body(cur: &mut Cursor) -> Result<Value, BmlError> {
     let mut entries = Vec::new();
     while cur.remaining() > 0 {
         if cur.peek_u8()? == 0x00 {
@@ -195,7 +195,7 @@ fn nbt_compound_body(cur: &mut Cursor) -> Result<Value, BpsError> {
     Ok(json!({ "entries": entries }))
 }
 
-fn nbt_payload(cur: &mut Cursor, tag_type: u8) -> Result<Value, BpsError> {
+fn nbt_payload(cur: &mut Cursor, tag_type: u8) -> Result<Value, BmlError> {
     Ok(match tag_type {
         1 => json!(i8_at(cur)?),
         2 => json!(u16_be(cur)? as i16 as i64),
@@ -230,7 +230,7 @@ fn nbt_payload(cur: &mut Cursor, tag_type: u8) -> Result<Value, BpsError> {
     })
 }
 
-fn nbt_list_body(cur: &mut Cursor) -> Result<Value, BpsError> {
+fn nbt_list_body(cur: &mut Cursor) -> Result<Value, BmlError> {
     let elem_type = u8_at(cur)?;
     let count = i32_be(cur)? as usize;
     let mut items = Vec::new();
@@ -240,15 +240,15 @@ fn nbt_list_body(cur: &mut Cursor) -> Result<Value, BpsError> {
     Ok(json!({ "elem_type": elem_type, "count": count, "items": items }))
 }
 
-fn nbt_string_at(cur: &mut Cursor) -> Result<String, BpsError> {
+fn nbt_string_at(cur: &mut Cursor) -> Result<String, BmlError> {
     let len = u16_be(cur)? as usize;
     let raw = cur.read(len)?.to_vec();
-    String::from_utf8(raw).map_err(|e| BpsError::Msg(e.to_string()))
+    String::from_utf8(raw).map_err(|e| BmlError::Msg(e.to_string()))
 }
 
 /// Slot frame: item count, then the registry-keyed component counts (payloads are
 /// registry-dependent and not walked, matching the v1 schema).
-pub fn slot_at(cur: &mut Cursor) -> Result<Value, BpsError> {
+pub fn slot_at(cur: &mut Cursor) -> Result<Value, BmlError> {
     let item_count = varint(cur)?;
     if item_count <= 0 {
         return Ok(json!({ "item_count": item_count }));
@@ -264,7 +264,7 @@ pub fn slot_at(cur: &mut Cursor) -> Result<Value, BpsError> {
     }))
 }
 
-pub fn hashed_slot_at(cur: &mut Cursor) -> Result<Value, BpsError> {
+pub fn hashed_slot_at(cur: &mut Cursor) -> Result<Value, BmlError> {
     let has_item = boolean(cur)?;
     if !has_item {
         return Ok(json!({ "has_item": false }));
@@ -406,7 +406,7 @@ fn rest_only(pkt: &PacketDecl) -> Option<&str> {
     }
 }
 
-fn required(e: &Option<Expr>) -> BpsResult<&Expr> {
+fn required(e: &Option<Expr>) -> BmlResult<&Expr> {
     e.as_ref()
         .ok_or_else(|| emit("'NoneType' object has no attribute 'kind'"))
 }
@@ -460,7 +460,7 @@ impl<'a> Walker<'a> {
 
     // --- expressions -------------------------------------------------------
 
-    fn expr(&self, e: &Expr) -> BpsResult<String> {
+    fn expr(&self, e: &Expr) -> BmlResult<String> {
         match e {
             Expr::Int(v) => Ok(v.to_string()),
             Expr::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
@@ -493,7 +493,7 @@ impl<'a> Walker<'a> {
                 let joined = args
                     .iter()
                     .map(|a| self.expr(a))
-                    .collect::<BpsResult<Vec<_>>>()?
+                    .collect::<BmlResult<Vec<_>>>()?
                     .join(", ");
                 match name.as_str() {
                     "sign_extend" => Ok(format!("runtime::sign_extend({joined})")),
@@ -522,7 +522,7 @@ impl<'a> Walker<'a> {
     // --- decode of a type into a Rust expression ---------------------------
 
     /// A Rust expression evaluating to a serde_json::Value.
-    fn decode_expr(&mut self, t: &FieldType, indent: &str) -> BpsResult<String> {
+    fn decode_expr(&mut self, t: &FieldType, indent: &str) -> BmlResult<String> {
         match t {
             FieldType::Block(b) => self.block_expr(&b.items, indent),
             FieldType::Match(mt) => self.match_expr(mt, indent),
@@ -530,7 +530,7 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn match_expr(&mut self, mt: &MatchType, indent: &str) -> BpsResult<String> {
+    fn match_expr(&mut self, mt: &MatchType, indent: &str) -> BmlResult<String> {
         let tag = self.expr(&mt.tag_expr)?;
         let mut arms = Vec::new();
         for arm in &mt.arms {
@@ -547,7 +547,7 @@ impl<'a> Walker<'a> {
         ))
     }
 
-    fn ref_expr(&mut self, r: &TypeRef, indent: &str) -> BpsResult<String> {
+    fn ref_expr(&mut self, r: &TypeRef, indent: &str) -> BmlResult<String> {
         let name = r.name.as_str();
         if let Some(p) = lookup(PRIMITIVES, name) {
             return Ok(format!("json!({p})"));
@@ -595,7 +595,7 @@ impl<'a> Walker<'a> {
     }
 
     /// Queue the function that decodes a recursive encoding (once).
-    fn recursive_fn(&mut self, name: &str, items: &[BlockItem]) -> BpsResult<()> {
+    fn recursive_fn(&mut self, name: &str, items: &[BlockItem]) -> BmlResult<()> {
         if self.fns.iter().any(|(n, _)| n == name) {
             return Ok(());
         }
@@ -603,7 +603,7 @@ impl<'a> Walker<'a> {
         self.fns.push((name.to_string(), String::new()));
         let body = self.block_expr(items, "    ")?;
         let text = format!(
-            "\npub(crate) fn {}_at(\n    cur: &mut Cursor,\n    env: &std::collections::HashMap<String, i64>,\n) -> Result<Value, BpsError> {{\n    Ok({body})\n}}\n",
+            "\npub(crate) fn {}_at(\n    cur: &mut Cursor,\n    env: &std::collections::HashMap<String, i64>,\n) -> Result<Value, BmlError> {{\n    Ok({body})\n}}\n",
             snake(name)
         );
         if let Some(slot) = self.fns.iter_mut().find(|(n, _)| n == name) {
@@ -612,14 +612,14 @@ impl<'a> Walker<'a> {
         Ok(())
     }
 
-    fn block_expr(&mut self, items: &[BlockItem], indent: &str) -> BpsResult<String> {
+    fn block_expr(&mut self, items: &[BlockItem], indent: &str) -> BmlResult<String> {
         let body = self.block_stmts(items, &format!("{indent}    "))?;
         Ok(format!(
             "{{\n{indent}    let mut out: serde_json::Map<String, Value> = serde_json::Map::new();\n{indent}    let mut env: std::collections::HashMap<String, i64> = env.clone();\n{body}\n{indent}    Value::Object(out)\n{indent}}}"
         ))
     }
 
-    fn block_stmts(&mut self, items: &[BlockItem], indent: &str) -> BpsResult<String> {
+    fn block_stmts(&mut self, items: &[BlockItem], indent: &str) -> BmlResult<String> {
         let mut lines: Vec<String> = Vec::new();
         for item in items {
             match item {
@@ -686,7 +686,7 @@ impl<'a> Walker<'a> {
             .join("\n"))
     }
 
-    fn field_stmts(&mut self, wf: &WireField, indent: &str) -> BpsResult<String> {
+    fn field_stmts(&mut self, wf: &WireField, indent: &str) -> BmlResult<String> {
         if let Some(rep) = &wf.repeat {
             return self.repeat_stmts(wf, rep, indent);
         }
@@ -711,7 +711,7 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn repeat_stmts(&mut self, wf: &WireField, rep: &Repeat, indent: &str) -> BpsResult<String> {
+    fn repeat_stmts(&mut self, wf: &WireField, rep: &Repeat, indent: &str) -> BmlResult<String> {
         let elem = self.decode_expr(&wf.type_ref, &format!("{indent}        "))?;
         let mut lines = vec![
             format!("{indent}{{"),
@@ -752,10 +752,10 @@ impl<'a> Walker<'a> {
 
     // --- packets -----------------------------------------------------------
 
-    fn packet_fn(&mut self, pkt: &PacketDecl) -> BpsResult<String> {
+    fn packet_fn(&mut self, pkt: &PacketDecl) -> BmlResult<String> {
         let body = self.block_stmts(&pkt.items, "    ")?;
         Ok(format!(
-            "\npub fn decode_{}(cur: &mut Cursor) -> Result<Value, BpsError> {{\n    let mut out: serde_json::Map<String, Value> = serde_json::Map::new();\n    let mut env: std::collections::HashMap<String, i64> = std::collections::HashMap::new();\n{body}\n    Ok(Value::Object(out))\n}}\n",
+            "\npub fn decode_{}(cur: &mut Cursor) -> Result<Value, BmlError> {{\n    let mut out: serde_json::Map<String, Value> = serde_json::Map::new();\n    let mut env: std::collections::HashMap<String, i64> = std::collections::HashMap::new();\n{body}\n    Ok(Value::Object(out))\n}}\n",
             snake(&pkt.name)
         ))
     }
@@ -804,11 +804,11 @@ fn packet_stem(resolved: &ResolvedSchema, name: &str) -> String {
     }
 }
 
-fn write_file(path: &Path, text: &str) -> BpsResult<()> {
+fn write_file(path: &Path, text: &str) -> BmlResult<()> {
     std::fs::write(path, text).map_err(|e| emit(e.to_string()))
 }
 
-pub fn emit_rust(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
+pub fn emit_rust(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     let lowered: HashSet<String> = PRIMITIVES
         .iter()
         .chain(HELPERS.iter())
@@ -830,7 +830,7 @@ pub fn emit_rust(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     for pkt in resolved.packets.values() {
         let text = match rest_only(pkt) {
             Some(field) => format!(
-                "\npub fn decode_{}(cur: &mut Cursor) -> Result<Value, BpsError> {{\n    Ok(json!({{ \"{field}\": cur.read(cur.remaining())?.to_vec() }}))\n}}\n",
+                "\npub fn decode_{}(cur: &mut Cursor) -> Result<Value, BmlError> {{\n    Ok(json!({{ \"{field}\": cur.read(cur.remaining())?.to_vec() }}))\n}}\n",
                 snake(&pkt.name)
             ),
             None => walker.packet_fn(pkt)?,
@@ -891,7 +891,7 @@ pub fn emit_rust(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     write_file(
         &src.join("lib.rs"),
         &format!(
-            "pub mod runtime;\nmod packets;\n\nuse packets::*;\nuse runtime::{{BpsError, Cursor, varint}};\n\npub const PROTOCOL_ID: i32 = {proto_id};\n\npub fn decode_packet(\n    state: &str,\n    direction: &str,\n    packet_id: i32,\n    payload: &[u8],\n) -> Result<serde_json::Value, BpsError> {{\n    let mut cur = Cursor::new(payload);\n    match (packet_id, state, direction) {{\n{route_arms}\n        _ => Err(BpsError::Msg(format!(\n            \"no route for id {{}} in {{}}.{{}}\", packet_id, state, direction\n        ))),\n    }}\n}}\n\npub fn decode_frame(\n    state: &str,\n    direction: &str,\n    frame: &[u8],\n) -> Result<(i32, serde_json::Value), BpsError> {{\n    let mut cur = Cursor::new(frame);\n    let _len = varint(&mut cur)?;\n    let pid = varint(&mut cur)? as i32;\n    let rest = cur.read(cur.remaining())?.to_vec();\n    let val = decode_packet(state, direction, pid, &rest)?;\n    Ok((pid, val))\n}}\n"
+            "pub mod runtime;\nmod packets;\n\nuse packets::*;\nuse runtime::{{BmlError, Cursor, varint}};\n\npub const PROTOCOL_ID: i32 = {proto_id};\n\npub fn decode_packet(\n    state: &str,\n    direction: &str,\n    packet_id: i32,\n    payload: &[u8],\n) -> Result<serde_json::Value, BmlError> {{\n    let mut cur = Cursor::new(payload);\n    match (packet_id, state, direction) {{\n{route_arms}\n        _ => Err(BmlError::Msg(format!(\n            \"no route for id {{}} in {{}}.{{}}\", packet_id, state, direction\n        ))),\n    }}\n}}\n\npub fn decode_frame(\n    state: &str,\n    direction: &str,\n    frame: &[u8],\n) -> Result<(i32, serde_json::Value), BmlError> {{\n    let mut cur = Cursor::new(frame);\n    let _len = varint(&mut cur)?;\n    let pid = varint(&mut cur)? as i32;\n    let rest = cur.read(cur.remaining())?.to_vec();\n    let val = decode_packet(state, direction, pid, &rest)?;\n    Ok((pid, val))\n}}\n"
         ),
     )?;
     write_file(

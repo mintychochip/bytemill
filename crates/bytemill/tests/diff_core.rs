@@ -1,6 +1,6 @@
 //! Differential interpreter check against Python-generated fixtures.
 //!
-//! Dev-time verification tool: `BPS_FIXTURES=/tmp/difftest/fixtures.json cargo
+//! Dev-time verification tool: `BML_FIXTURES=/tmp/difftest/fixtures.json cargo
 //! test -p bytemill --test diff_core`. The fixtures come from the Python reference
 //! (synth value, Python-encoded bytes, decoded shape, canonicalized to JSON).
 
@@ -95,10 +95,10 @@ fn from_canon(v: &Value) -> Value {
 
 #[test]
 fn interpreter_matches_python_fixtures() {
-    let path = match std::env::var("BPS_FIXTURES") {
+    let path = match std::env::var("BML_FIXTURES") {
         Ok(p) => p,
         Err(_) => {
-            eprintln!("BPS_FIXTURES not set; skipping differential check");
+            eprintln!("BML_FIXTURES not set; skipping differential check");
             return;
         }
     };

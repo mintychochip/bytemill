@@ -16,14 +16,14 @@ use super::{
     VariantIdx, WriteOp,
 };
 use crate::ast::{Expr as AstExpr, ResolvedSchema};
-use crate::errors::{BpsResult, emit};
+use crate::errors::{BmlResult, emit};
 use crate::ir::{IrArm, IrSchema, Stmt as IrStmt, Storage, Ty as IrTy, TypeDef, WireOp, lower};
 
 const BUILTINS: [&str; 5] = ["u8", "f32be", "f64be", "bytes", "rest"];
 const ELEM: &str = "__elem";
 
 /// Lower `resolved` and build its typed program.
-pub fn typed(resolved: &ResolvedSchema) -> BpsResult<Program> {
+pub fn typed(resolved: &ResolvedSchema) -> BmlResult<Program> {
     let ir = lower(resolved)?;
     Builder::new(resolved, &ir)?.build()
 }
@@ -55,7 +55,7 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(resolved: &'a ResolvedSchema, ir: &'a IrSchema) -> BpsResult<Self> {
+    fn new(resolved: &'a ResolvedSchema, ir: &'a IrSchema) -> BmlResult<Self> {
         Ok(Builder {
             resolved,
             ir,
@@ -73,7 +73,7 @@ impl<'a> Builder<'a> {
         })
     }
 
-    fn build(mut self) -> BpsResult<Program> {
+    fn build(mut self) -> BmlResult<Program> {
         self.classify_roots()?;
         self.declare_types()?;
         self.find_captures()?;
@@ -92,7 +92,7 @@ impl<'a> Builder<'a> {
     // Roots and types
     // ------------------------------------------------------------------
 
-    fn classify_roots(&mut self) -> BpsResult<()> {
+    fn classify_roots(&mut self) -> BmlResult<()> {
         for key in self.ir.decode.keys() {
             if BUILTINS.contains(&key) {
                 continue;
@@ -122,7 +122,7 @@ impl<'a> Builder<'a> {
 
     /// An encoding that reads a name nothing in it binds (`nbt_payload` reads
     /// the `tag_type` of the encodings that spread it): only meaningful spread.
-    fn is_fragment(&self, key: &str) -> BpsResult<bool> {
+    fn is_fragment(&self, key: &str) -> BmlResult<bool> {
         let proc = get_proc(&self.ir.decode, key)?;
         let mut bound: HashSet<String> = proc.params.iter().cloned().collect();
         bound_names(&proc.body, &mut bound);
@@ -169,7 +169,7 @@ impl<'a> Builder<'a> {
     }
 
     /// Declares every type a root reaches, names them, and fills their kinds.
-    fn declare_types(&mut self) -> BpsResult<()> {
+    fn declare_types(&mut self) -> BmlResult<()> {
         // Reachable IR type keys from the roots' value types.
         let mut reach: HashSet<String> = HashSet::new();
         let mut queue: Vec<String> = Vec::new();
@@ -294,7 +294,7 @@ impl<'a> Builder<'a> {
 
     /// Roots by their schema names, nested types by their parent's name and
     /// field (or variant). Unique under every casing.
-    fn name_types(&mut self) -> BpsResult<()> {
+    fn name_types(&mut self) -> BmlResult<()> {
         let mut taken = Taken::default();
         let mut named: HashSet<TypeIdx> = HashSet::new();
         let mut queue: Vec<TypeIdx> = Vec::new();
@@ -422,7 +422,7 @@ impl<'a> Builder<'a> {
     }
 
     /// IR type → typed-program type.
-    fn ty(&self, ty: &IrTy) -> BpsResult<Ty> {
+    fn ty(&self, ty: &IrTy) -> BmlResult<Ty> {
         match ty {
             IrTy::Scalar(s) => Ok(storage_ty(*s)),
             IrTy::List(inner) => Ok(Ty::List(Box::new(self.ty(inner)?))),
@@ -431,7 +431,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn named_ty(&self, key: &str) -> BpsResult<Ty> {
+    fn named_ty(&self, key: &str) -> BmlResult<Ty> {
         match self.ir.types.get(key) {
             Some(TypeDef::Scalar(s)) => Ok(storage_ty(*s)),
             Some(TypeDef::String) => Ok(Ty::Str),
@@ -457,7 +457,7 @@ impl<'a> Builder<'a> {
     // Captures (pass one)
     // ------------------------------------------------------------------
 
-    fn find_captures(&mut self) -> BpsResult<()> {
+    fn find_captures(&mut self) -> BmlResult<()> {
         loop {
             let before = self.captures.clone();
             for i in 0..self.roots.len() {
@@ -556,7 +556,7 @@ impl<'a> Builder<'a> {
         rec: Option<&str>,
         bound: &mut HashSet<String>,
         free: &mut Vec<String>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         for stmt in stmts {
             match stmt {
                 IrStmt::Let { name, expr } => {
@@ -639,7 +639,7 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    fn free_record_dec(&mut self, key: &str, body: &[IrStmt]) -> BpsResult<Vec<String>> {
+    fn free_record_dec(&mut self, key: &str, body: &[IrStmt]) -> BmlResult<Vec<String>> {
         let mut bound = HashSet::new();
         let mut own = Vec::new();
         self.free_dec(body, Some(key), &mut bound, &mut own)?;
@@ -652,7 +652,7 @@ impl<'a> Builder<'a> {
         sum: &str,
         arms: &[IrArm],
         default: Option<&[IrStmt]>,
-    ) -> BpsResult<Vec<String>> {
+    ) -> BmlResult<Vec<String>> {
         let mut own = Vec::new();
         let all: Vec<(Option<&IrArm>, &[IrStmt])> = arms
             .iter()
@@ -685,7 +685,7 @@ impl<'a> Builder<'a> {
         elem: &[IrStmt],
         rec: Option<&str>,
         list: &str,
-    ) -> BpsResult<Vec<String>> {
+    ) -> BmlResult<Vec<String>> {
         let mut own = Vec::new();
         let mut bound = HashSet::new();
         let elem_key = self.field_key(rec, list);
@@ -724,7 +724,7 @@ impl<'a> Builder<'a> {
         rec: Option<&str>,
         bound: &mut HashSet<String>,
         free: &mut Vec<String>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         for stmt in stmts {
             match stmt {
                 IrStmt::Let { name, expr } => {
@@ -803,7 +803,7 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    fn free_record_enc(&mut self, key: &str, body: &[IrStmt]) -> BpsResult<Vec<String>> {
+    fn free_record_enc(&mut self, key: &str, body: &[IrStmt]) -> BmlResult<Vec<String>> {
         let mut bound: HashSet<String> = self.ir_fields(key).into_iter().collect();
         let mut own = Vec::new();
         self.free_enc(body, Some(key), &mut bound, &mut own)?;
@@ -817,7 +817,7 @@ impl<'a> Builder<'a> {
         arms: &[IrArm],
         default: Option<&[IrStmt]>,
         dst: &str,
-    ) -> BpsResult<Vec<String>> {
+    ) -> BmlResult<Vec<String>> {
         let mut own = Vec::new();
         let all: Vec<(Option<&IrArm>, &[IrStmt])> = arms
             .iter()
@@ -850,7 +850,7 @@ impl<'a> Builder<'a> {
         elem: &[IrStmt],
         rec: Option<&str>,
         list: &str,
-    ) -> BpsResult<Vec<String>> {
+    ) -> BmlResult<Vec<String>> {
         let mut own = Vec::new();
         let mut bound: HashSet<String> = HashSet::from([ELEM.to_string()]);
         let elem_key = self.field_key(rec, list);
@@ -885,7 +885,7 @@ impl<'a> Builder<'a> {
     // Codecs (pass two)
     // ------------------------------------------------------------------
 
-    fn declare_root_codecs(&mut self) -> BpsResult<()> {
+    fn declare_root_codecs(&mut self) -> BmlResult<()> {
         let mut taken = Taken::default();
         for i in 0..self.roots.len() {
             let (key, kind) = self.roots[i].clone();
@@ -939,7 +939,7 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    fn build_root(&mut self, codec: CodecIdx) -> BpsResult<()> {
+    fn build_root(&mut self, codec: CodecIdx) -> BmlResult<()> {
         let key = self.prog.codecs[codec].ir.clone();
         let ir = self.ir;
         let dec_proc = get_proc(&ir.decode, &key)?;
@@ -1006,13 +1006,13 @@ impl<'a> Builder<'a> {
 
     /// Declared type of each name a decode body binds (first binding; a
     /// `utf8` rebinding makes it a string).
-    fn decl_types(&self, stmts: &[IrStmt]) -> BpsResult<HashMap<String, Ty>> {
+    fn decl_types(&self, stmts: &[IrStmt]) -> BmlResult<HashMap<String, Ty>> {
         let mut out = HashMap::new();
         self.decl_types_into(stmts, &mut out)?;
         Ok(out)
     }
 
-    fn decl_types_into(&self, stmts: &[IrStmt], out: &mut HashMap<String, Ty>) -> BpsResult<()> {
+    fn decl_types_into(&self, stmts: &[IrStmt], out: &mut HashMap<String, Ty>) -> BmlResult<()> {
         for stmt in stmts {
             match stmt {
                 IrStmt::CallDecode { dst, callee, .. } => {
@@ -1053,7 +1053,7 @@ impl<'a> Builder<'a> {
         f: &mut Fun,
         stmts: &[IrStmt],
         types: &HashMap<String, Ty>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let mut names = Vec::new();
         prebind_names(stmts, &mut names);
         for name in names {
@@ -1071,7 +1071,7 @@ impl<'a> Builder<'a> {
 
     /// Decode: a record field bound inside an `if` or `match` arm, or optional,
     /// is declared before the statements; the rest at their binding.
-    fn declare_fields(&mut self, f: &mut Fun, rec: TypeIdx, stmts: &[IrStmt]) -> BpsResult<()> {
+    fn declare_fields(&mut self, f: &mut Fun, rec: TypeIdx, stmts: &[IrStmt]) -> BmlResult<()> {
         let mut top = Vec::new();
         let mut nested = Vec::new();
         top_and_nested(stmts, &mut top, &mut nested);
@@ -1102,7 +1102,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn construct(&self, f: &mut Fun, rec: TypeIdx) -> BpsResult<Expr> {
+    fn construct(&self, f: &mut Fun, rec: TypeIdx) -> BmlResult<Expr> {
         let mut fields = Vec::new();
         for field in self.prog.fields(rec) {
             let local = f
@@ -1119,7 +1119,7 @@ impl<'a> Builder<'a> {
     // Decode statements
     // ------------------------------------------------------------------
 
-    fn dec_stmts(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BpsResult<()> {
+    fn dec_stmts(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BmlResult<()> {
         for (i, stmt) in stmts.iter().enumerate() {
             f.rest.push(stmts[i + 1..].to_vec());
             let result = self.dec_stmt(f, stmt);
@@ -1129,7 +1129,7 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    fn dec_block(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BpsResult<Vec<Stmt>> {
+    fn dec_block(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BmlResult<Vec<Stmt>> {
         f.push_block();
         let result = self.dec_stmts(f, stmts);
         let out = f.pop_block();
@@ -1137,7 +1137,7 @@ impl<'a> Builder<'a> {
         Ok(out)
     }
 
-    fn dec_stmt(&mut self, f: &mut Fun, stmt: &IrStmt) -> BpsResult<()> {
+    fn dec_stmt(&mut self, f: &mut Fun, stmt: &IrStmt) -> BmlResult<()> {
         match stmt {
             IrStmt::Let { name, expr } => {
                 let te = self.expr(f, expr, Mode::Stmt)?;
@@ -1287,7 +1287,7 @@ impl<'a> Builder<'a> {
         f: &mut Fun,
         callee: &str,
         args: &[AstExpr],
-    ) -> BpsResult<(StmtFn, Ty)> {
+    ) -> BmlResult<(StmtFn, Ty)> {
         if BUILTINS.contains(&callee) {
             let op = match callee {
                 "u8" => ReadOp::U8,
@@ -1319,7 +1319,7 @@ impl<'a> Builder<'a> {
         f: &mut Fun,
         codec: CodecIdx,
         args: &[AstExpr],
-    ) -> BpsResult<Vec<Expr>> {
+    ) -> BmlResult<Vec<Expr>> {
         let n = self.prog.codecs[codec].params.len();
         if args.len() != n {
             return Err(emit(format!(
@@ -1336,7 +1336,7 @@ impl<'a> Builder<'a> {
         Ok(out)
     }
 
-    fn read_op(&mut self, f: &mut Fun, op: &WireOp) -> BpsResult<ReadOp> {
+    fn read_op(&mut self, f: &mut Fun, op: &WireOp) -> BmlResult<ReadOp> {
         Ok(match op {
             WireOp::U8 => ReadOp::U8,
             WireOp::F32be => ReadOp::F32,
@@ -1355,7 +1355,7 @@ impl<'a> Builder<'a> {
         mode: RepeatMode,
         elem: &[IrStmt],
         dst: &str,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let list_ty = self
             .target_ty(f, dst)
             .ok_or_else(|| emit(format!("typed: list {dst} has no type")))?;
@@ -1403,7 +1403,7 @@ impl<'a> Builder<'a> {
         list: &str,
         item_ty: &Ty,
         item: Bind,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         match elem {
             [IrStmt::CallDecode { dst, callee, args }] if dst == ELEM => {
                 let (stmt_fn, ty) = self.call_decode(f, &callee.0, args)?;
@@ -1473,7 +1473,7 @@ impl<'a> Builder<'a> {
     }
 
     /// Where a decode binding of `name` goes. See `after_bind`.
-    fn bind(&mut self, f: &mut Fun, name: &str, ty: &Ty) -> BpsResult<Bound> {
+    fn bind(&mut self, f: &mut Fun, name: &str, ty: &Ty) -> BmlResult<Bound> {
         if f.prebound.contains(name) {
             let local = match f.lookup(name) {
                 Some(Binding::Local(l)) => l,
@@ -1625,7 +1625,7 @@ impl<'a> Builder<'a> {
     // Encode statements
     // ------------------------------------------------------------------
 
-    fn enc_stmts(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BpsResult<()> {
+    fn enc_stmts(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BmlResult<()> {
         if f.rec.is_some() {
             self.hoist_enc_lets(f, stmts)?;
         }
@@ -1638,7 +1638,7 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    fn enc_block(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BpsResult<Vec<Stmt>> {
+    fn enc_block(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BmlResult<Vec<Stmt>> {
         f.push_block();
         let mut result = Ok(());
         for (i, stmt) in stmts.iter().enumerate() {
@@ -1656,7 +1656,7 @@ impl<'a> Builder<'a> {
 
     /// A computed value bound inside an `if` or `match` arm and read after it
     /// lives in a local declared first, starting at the field's own value.
-    fn hoist_enc_lets(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BpsResult<()> {
+    fn hoist_enc_lets(&mut self, f: &mut Fun, stmts: &[IrStmt]) -> BmlResult<()> {
         for (i, stmt) in stmts.iter().enumerate() {
             let mut inner = Vec::new();
             if let IrStmt::If {
@@ -1720,7 +1720,7 @@ impl<'a> Builder<'a> {
         Ok(())
     }
 
-    fn enc_stmt(&mut self, f: &mut Fun, stmt: &IrStmt) -> BpsResult<()> {
+    fn enc_stmt(&mut self, f: &mut Fun, stmt: &IrStmt) -> BmlResult<()> {
         match stmt {
             IrStmt::Let { name, expr } => {
                 let identity = matches!(expr, AstExpr::Ident(n) if n == name);
@@ -1973,7 +1973,7 @@ impl<'a> Builder<'a> {
         callee: &str,
         args: &[AstExpr],
         value: TE,
-    ) -> BpsResult<Stmt> {
+    ) -> BmlResult<Stmt> {
         if BUILTINS.contains(&callee) {
             let op = match callee {
                 "u8" => WireOp::U8,
@@ -1999,7 +1999,7 @@ impl<'a> Builder<'a> {
         Ok(Stmt::Encode { codec, args, value })
     }
 
-    fn write(&mut self, f: &mut Fun, op: &WireOp, value: TE) -> BpsResult<Stmt> {
+    fn write(&mut self, f: &mut Fun, op: &WireOp, value: TE) -> BmlResult<Stmt> {
         Ok(match op {
             WireOp::U8 => Stmt::Write {
                 op: WriteOp::U8,
@@ -2034,7 +2034,7 @@ impl<'a> Builder<'a> {
         elem: &[IrStmt],
         dst: &str,
         term: Option<&AstExpr>,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         let list_ty = self
             .enc_target_ty(f, dst)
             .ok_or_else(|| emit(format!("typed: list {dst} has no type")))?;
@@ -2071,7 +2071,7 @@ impl<'a> Builder<'a> {
         list: &str,
         item_ty: &Ty,
         item: LocalId,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         match elem {
             [
                 IrStmt::CallEncode {
@@ -2167,7 +2167,7 @@ impl<'a> Builder<'a> {
         rec: TypeIdx,
         body: &[IrStmt],
         decode: bool,
-    ) -> BpsResult<CodecIdx> {
+    ) -> BmlResult<CodecIdx> {
         let codec = self.nested_codec(parent, rec, CodecKind::Record)?;
         if decode {
             let mut f = Fun::new(codec, Some(rec));
@@ -2205,7 +2205,7 @@ impl<'a> Builder<'a> {
         default: Option<&[IrStmt]>,
         dst: &str,
         decode: bool,
-    ) -> BpsResult<CodecIdx> {
+    ) -> BmlResult<CodecIdx> {
         let codec = self.nested_codec(parent, sum, CodecKind::Sum)?;
         let mut f = Fun::new(codec, None);
         let value = if decode {
@@ -2253,7 +2253,7 @@ impl<'a> Builder<'a> {
         Ok(codec)
     }
 
-    fn variant_of(&mut self, sum: TypeIdx, tags: Option<&[i128]>) -> BpsResult<VariantIdx> {
+    fn variant_of(&mut self, sum: TypeIdx, tags: Option<&[i128]>) -> BmlResult<VariantIdx> {
         let first = tags.and_then(|t| t.first().copied());
         let key = self.prog.types[sum].ir.clone();
         let Some(TypeDef::Sum { arms }) = self.ir.types.get(&key) else {
@@ -2279,10 +2279,10 @@ impl<'a> Builder<'a> {
         body: &[IrStmt],
         dst: &str,
         value: Option<LocalId>,
-    ) -> BpsResult<Vec<Stmt>> {
+    ) -> BmlResult<Vec<Stmt>> {
         let payload_ty = self.prog.variants(sum)[variant].payload.clone();
         f.push_block();
-        let result = (|| -> BpsResult<()> {
+        let result = (|| -> BmlResult<()> {
             if body.is_empty() {
                 if let TypeKind::Sum { variants } = &mut self.prog.types[sum].kind {
                     variants[variant].payload = None;
@@ -2349,7 +2349,7 @@ impl<'a> Builder<'a> {
         dst: &str,
         ty: &Ty,
         bind: Bind,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         match body {
             [
                 IrStmt::CallDecode {
@@ -2410,7 +2410,7 @@ impl<'a> Builder<'a> {
         dst: &str,
         ty: &Ty,
         payload: LocalId,
-    ) -> BpsResult<()> {
+    ) -> BmlResult<()> {
         match body {
             [
                 IrStmt::CallEncode {
@@ -2451,7 +2451,7 @@ impl<'a> Builder<'a> {
         parent: &mut Fun,
         ty: TypeIdx,
         kind: CodecKind,
-    ) -> BpsResult<CodecIdx> {
+    ) -> BmlResult<CodecIdx> {
         let key = self.prog.types[ty].ir.clone();
         if let Some(&c) = self.codec_idx.get(&key) {
             return Ok(c);
@@ -2507,7 +2507,7 @@ impl<'a> Builder<'a> {
 
     /// The parent's values for a nested codec's captures (optional ones stay
     /// optional).
-    fn capture_args(&mut self, f: &mut Fun, codec: CodecIdx) -> BpsResult<Vec<Expr>> {
+    fn capture_args(&mut self, f: &mut Fun, codec: CodecIdx) -> BmlResult<Vec<Expr>> {
         let params = self.prog.codecs[codec].params.clone();
         let mut out = Vec::new();
         for p in params {
@@ -2536,7 +2536,7 @@ impl<'a> Builder<'a> {
     }
 
     /// Type and optionality of a name, without unwrapping it.
-    fn peek(&self, f: &Fun, name: &str) -> BpsResult<(Ty, bool)> {
+    fn peek(&self, f: &Fun, name: &str) -> BmlResult<(Ty, bool)> {
         match f.lookup(name) {
             Some(Binding::Local(l)) => Ok((f.locals[l].ty.clone(), f.locals[l].optional)),
             Some(Binding::Field { ty, field, .. }) => {
@@ -2559,7 +2559,7 @@ impl<'a> Builder<'a> {
     }
 
     /// A guard: its condition and the optional values it reads (`Get`).
-    fn guard(&mut self, f: &mut Fun, cond: &AstExpr) -> BpsResult<(Expr, Vec<Expr>)> {
+    fn guard(&mut self, f: &mut Fun, cond: &AstExpr) -> BmlResult<(Expr, Vec<Expr>)> {
         f.guard_refs = Some(Vec::new());
         let te = self.expr(f, cond, Mode::Guard);
         let refs = f.guard_refs.take().unwrap_or_default();
@@ -2567,7 +2567,7 @@ impl<'a> Builder<'a> {
         Ok((c, refs))
     }
 
-    fn expr(&mut self, f: &mut Fun, e: &AstExpr, mode: Mode) -> BpsResult<TE> {
+    fn expr(&mut self, f: &mut Fun, e: &AstExpr, mode: Mode) -> BmlResult<TE> {
         match e {
             AstExpr::Int(v) => {
                 let value = i64_literal(*v)?;
@@ -2615,7 +2615,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn read(&mut self, f: &mut Fun, name: &str, mode: Mode) -> BpsResult<TE> {
+    fn read(&mut self, f: &mut Fun, name: &str, mode: Mode) -> BmlResult<TE> {
         let b = f.lookup(name).ok_or_else(|| {
             emit(format!(
                 "typed: {} reads {name}, which is not bound",
@@ -2657,7 +2657,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn as_bool(&self, te: TE) -> BpsResult<Expr> {
+    fn as_bool(&self, te: TE) -> BmlResult<Expr> {
         match te.ty {
             Ty::Bool => Ok(te.e),
             Ty::Int(t) => Ok(Expr::Binary {
@@ -2671,11 +2671,11 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn as_i64(&self, te: TE) -> BpsResult<Expr> {
+    fn as_i64(&self, te: TE) -> BmlResult<Expr> {
         Ok(self.as_i64_te(te)?.e)
     }
 
-    fn as_i64_te(&self, te: TE) -> BpsResult<TE> {
+    fn as_i64_te(&self, te: TE) -> BmlResult<TE> {
         match &te.ty {
             Ty::Int(IntTy::I64) => Ok(te),
             Ty::Int(_) if te.lit => Ok(TE {
@@ -2720,7 +2720,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn binop(&self, op: &str, l: TE, r: TE) -> BpsResult<TE> {
+    fn binop(&self, op: &str, l: TE, r: TE) -> BmlResult<TE> {
         let op = match op {
             "+" => BinOp::Add,
             "-" => BinOp::Sub,
@@ -2762,7 +2762,7 @@ impl<'a> Builder<'a> {
         self.arith(op, l, r)
     }
 
-    fn compare(&self, op: BinOp, l: TE, r: TE) -> BpsResult<TE> {
+    fn compare(&self, op: BinOp, l: TE, r: TE) -> BmlResult<TE> {
         let out = |lhs: Expr, rhs: Expr| {
             TE::leaf(
                 Expr::Binary {
@@ -2790,7 +2790,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn arith(&self, op: BinOp, l: TE, r: TE) -> BpsResult<TE> {
+    fn arith(&self, op: BinOp, l: TE, r: TE) -> BmlResult<TE> {
         if matches!(op, BinOp::Div | BinOp::Mod) && !(r.lit && r.lo != 0) {
             return Err(emit("typed: `/` and `%` need a non-zero literal divisor"));
         }
@@ -2839,7 +2839,7 @@ impl<'a> Builder<'a> {
         })
     }
 
-    fn ternary(&self, c: Expr, a: TE, b: TE) -> BpsResult<TE> {
+    fn ternary(&self, c: Expr, a: TE, b: TE) -> BmlResult<TE> {
         let mk = |a: Expr, b: Expr, ty: Ty, lo: i128, hi: i128| TE {
             e: Expr::Cond {
                 cond: Box::new(c.clone()),
@@ -2867,10 +2867,10 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn call(&self, name: &str, args: Vec<TE>) -> BpsResult<TE> {
+    fn call(&self, name: &str, args: Vec<TE>) -> BmlResult<TE> {
         let i64_ty = Ty::Int(IntTy::I64);
         let n = args.len();
-        let want = |k: usize| -> BpsResult<()> {
+        let want = |k: usize| -> BmlResult<()> {
             if n == k {
                 Ok(())
             } else {
@@ -2968,7 +2968,7 @@ impl<'a> Builder<'a> {
     }
 
     /// `te` as a value of `ty`: same type, a literal that fits, or a cast.
-    fn coerce(&self, te: TE, ty: &Ty) -> BpsResult<Expr> {
+    fn coerce(&self, te: TE, ty: &Ty) -> BmlResult<Expr> {
         if &te.ty == ty {
             return Ok(te.e);
         }
@@ -2996,7 +2996,7 @@ impl<'a> Builder<'a> {
     // Finish
     // ------------------------------------------------------------------
 
-    fn finish(&mut self) -> BpsResult<()> {
+    fn finish(&mut self) -> BmlResult<()> {
         for codec in &mut self.prog.codecs {
             let n = codec.params.len();
             for body in [&mut codec.decode, &mut codec.encode] {
@@ -3029,7 +3029,7 @@ impl<'a> Builder<'a> {
         if taken { Name::new("v") } else { value }
     }
 
-    fn routes(&mut self) -> BpsResult<()> {
+    fn routes(&mut self) -> BmlResult<()> {
         for route in &self.ir.routes {
             let Some(&packet) = self.codec_idx.get(&route.packet.0) else {
                 return Err(emit(format!(
@@ -3258,12 +3258,12 @@ impl Taken {
 fn get_proc<'b>(
     map: &'b crate::ordmap::OrderedMap<crate::ir::Proc>,
     key: &str,
-) -> BpsResult<&'b crate::ir::Proc> {
+) -> BmlResult<&'b crate::ir::Proc> {
     map.get(key)
         .ok_or_else(|| emit(format!("typed: no procedure {key}")))
 }
 
-fn get_type<'b>(ir: &'b IrSchema, key: &str) -> BpsResult<&'b TypeDef> {
+fn get_type<'b>(ir: &'b IrSchema, key: &str) -> BmlResult<&'b TypeDef> {
     ir.types
         .get(key)
         .ok_or_else(|| emit(format!("typed: no type {key}")))
@@ -3322,7 +3322,7 @@ fn read_op_ty(op: &ReadOp) -> Ty {
     }
 }
 
-fn check_ty(got: &Ty, want: &Ty, what: &str) -> BpsResult<()> {
+fn check_ty(got: &Ty, want: &Ty, what: &str) -> BmlResult<()> {
     if got == want {
         Ok(())
     } else {
@@ -3348,7 +3348,7 @@ fn ir_named(ty: &IrTy, out: &mut Vec<String>) {
     }
 }
 
-fn i64_literal(v: i128) -> BpsResult<i64> {
+fn i64_literal(v: i128) -> BmlResult<i64> {
     if let Ok(x) = i64::try_from(v) {
         return Ok(x);
     }

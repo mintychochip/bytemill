@@ -1,6 +1,6 @@
 # Bytemill
 
-A schema language (BPS) and compiler for binary wire formats that Protobuf cannot express: variable-length integers, bit-packed fields, tagged unions, conditional layouts, and stateful packet routing.
+A schema language (BML) and compiler for binary wire formats that Protobuf cannot express: variable-length integers, bit-packed fields, tagged unions, conditional layouts, and stateful packet routing.
 
 Bytemill compiles schemas to idiomatic, zero-allocation decoders and encoders across nine languages: **Rust, Go, Python, Java, C#, C, C++, TypeScript, and Zig**.
 
@@ -8,7 +8,7 @@ Bytemill compiles schemas to idiomatic, zero-allocation decoders and encoders ac
 
 ## The DSL
 
-A `.bps` schema has three core layers:
+A `.bml` schema has three core layers:
 
 1. **`encoding`** — byte-level layouts (`varint`, `string`, `position`, `nbt`)
 2. **`packet` / `enum`** — logical message payloads
@@ -16,7 +16,7 @@ A `.bps` schema has three core layers:
 
 Constructs include tagged unions (`match kind { 0 => i8, 1 => varint, ... }`), repeats (`[] count = expr` or `[] until expr`), conditionals (`if cond { ... }`), computed fields (`name = expr`), assertions (`require expr`), and inlining (`...encoding(args)`).
 
-```bps
+```bml
 // Bit-packed 64-bit coordinate with sign-extended fields
 encoding position = {
     raw: u64be
@@ -52,22 +52,22 @@ packet player_chat {
 }
 ```
 
-The compiler implements five built-in primitives: `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`. Every other type is declared in `.bps` schemas and imported via non-transitive imports:
+The compiler implements five built-in primitives: `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`. Every other type is declared in `.bml` schemas and imported via non-transitive imports:
 
-```bps
-import "std/integers.bps"      // i8, u16be, i32be, boolean, ...
-import "std/varint.bps"        // varint, varlong
-import "minecraft_core.bps"    // string, uuid, position, nbt, slot
+```bml
+import "std/integers.bml"      // i8, u16be, i32be, boolean, ...
+import "std/varint.bml"        // varint, varlong
+import "minecraft_core.bml"    // string, uuid, position, nbt, slot
 ```
 
 ---
 
 ## Use Cases
 
-- **Game Network Protocols & Emulators**: Multiplayer protocols (e.g., Minecraft, Hytale) rely on variable-length integers (`varint`), bitfields, dynamic length prefixes, compression framing, and stateful direction tables that Protobuf cannot express. A single BPS schema specifies the entire packet hierarchy, and Bytemill emits typed codecs for clients, proxies, and servers.
+- **Game Network Protocols & Emulators**: Multiplayer protocols (e.g., Minecraft, Hytale) rely on variable-length integers (`varint`), bitfields, dynamic length prefixes, compression framing, and stateful direction tables that Protobuf cannot express. A single BML schema specifies the entire packet hierarchy, and Bytemill emits typed codecs for clients, proxies, and servers.
 - **Embedded, IoT, & Network Telemetry**: Binary telemetry streams, CAN bus frames, and network appliances use bit-packed fields, non-standard integer widths (12-bit signed coordinates, 3-byte ints), and explicit endianness. Bytemill maps these directly to native C, C++, Rust, or Zig structs without heap allocation or parsing overhead.
 - **High-Throughput Polyglot Services**: When gRPC / Protobuf serialization overhead or dynamic reflection is a bottleneck, Bytemill produces zero-copy, zero-reflection decoders in nine languages (Go, Rust, C++, C, Python, Java, C#, TypeScript, Zig) from a single protocol definition, keeping cross-language services byte-compatible.
-- **Protocol Reverse Engineering & Auditing**: Capture packet streams, formalize the wire format in a readable `.bps` specification, and immediately generate decoders and validation test suites across multiple languages, eliminating transcription bugs between reverse-engineered specs and working code.
+- **Protocol Reverse Engineering & Auditing**: Capture packet streams, formalize the wire format in a readable `.bml` specification, and immediately generate decoders and validation test suites across multiple languages, eliminating transcription bugs between reverse-engineered specs and working code.
 ---
 
 ## Quick Start
@@ -106,7 +106,7 @@ cargo build --release   # target/release/bml
 ### Check and Inspect Schemas
 
 ```bash
-ROOT=schemas/minecraft_26_3_wiki.bps
+ROOT=schemas/minecraft_26_3_wiki.bml
 
 bml check $ROOT     # Parse, resolve, and type-check
 bml routes $ROOT    # Print stateful packet routing table (261 routes)
@@ -126,10 +126,10 @@ echo '10008906096c6f63616c686f737463dd01' | bml decode $ROOT \
 
 Round-trip VarInts:
 ```bash
-echo 'ac0202' | bml decode schemas/minecraft_26_3_play.bps --packet animate --hex
+echo 'ac0202' | bml decode schemas/minecraft_26_3_play.bml --packet animate --hex
 # {"animation": 2, "entity_id": 300}
 
-bml encode --packet animate schemas/minecraft_26_3_play.bps '{"entity_id": 300, "animation": 2}'
+bml encode --packet animate schemas/minecraft_26_3_play.bml '{"entity_id": 300, "animation": 2}'
 # ac0202
 ```
 
@@ -162,14 +162,14 @@ not implemented.
 Emit typed, deterministic decoders and encoders for any target:
 
 ```bash
-bml emit <target> <schema.bps> --out <out_dir> [--std <standard>]
+bml emit <target> <schema.bml> --out <out_dir> [--std <standard>]
 # or specify standard directly on the target:
-bml emit cpp:98 schemas/std/varint.bps --out ./bml_cpp
-bml emit go:1.18 schemas/std/varint.bps --out ./bml_go
-bml emit python:3.8 schemas/std/varint.bps --out ./bml_py
-bml emit c:89 schemas/std/varint.bps --out ./bml_c
-bml emit java:17 schemas/std/varint.bps --out ./bml_java
-bml emit csharp:10 schemas/std/varint.bps --out ./bml_cs
+bml emit cpp:98 schemas/std/varint.bml --out ./bml_cpp
+bml emit go:1.18 schemas/std/varint.bml --out ./bml_go
+bml emit python:3.8 schemas/std/varint.bml --out ./bml_py
+bml emit c:89 schemas/std/varint.bml --out ./bml_c
+bml emit java:17 schemas/std/varint.bml --out ./bml_java
+bml emit csharp:10 schemas/std/varint.bml --out ./bml_cs
 ```
 
 | Target | Default Standard | Supported Versions | Output Layout | Idiomatic Types | Formatter & Lint Gate |
@@ -208,11 +208,11 @@ Bytemill supports in-tree code generation for the Rust Minestom server (`rstom`)
 bml emit rstom $ROOT --out ../rstom/crates/bytemill_rstom
 
 # In-place generation within rstom workspace using AST shape ledgers
-bml shapes extract $ROOT --rstom ../rstom-bps --eligible --out targets/rstom/shapes
-bml emit rstom-tree $ROOT --rstom ../rstom-bps --shapes targets/rstom/shapes [--check]
+bml shapes extract $ROOT --rstom ../rstom --eligible --out targets/rstom/shapes
+bml emit rstom-tree $ROOT --rstom ../rstom --shapes targets/rstom/shapes [--check]
 ```
 
-See `docs/superpowers/specs/2026-10-11-bps-generates-rstom-packets-design.md` for shape ledgers and wire pin gates.
+See the [rstom packet generation design](docs/superpowers/specs/2026-10-11-bps-generates-rstom-packets-design.md) for shape ledgers and wire pin gates.
 
 ---
 
@@ -250,5 +250,5 @@ creating a release.
 - `PROJECT.md` — project status and the remaining goal queue
 - `docs/DSL_STRUCTURE.md` — DSL syntax, operators, and framing rules
 - `docs/AUTHORING_GUIDE.md` — Schema authoring and shared standard types
-- `docs/TRANSCRIPTION_CHEATSHEET.md` — Wiki packet definitions to BPS transcription guide
-- `docs/superpowers/specs/2026-10-15-bps-idiomatic-printers-design.md` — Codegen IR and typed printer design specification
+- `docs/TRANSCRIPTION_CHEATSHEET.md` — Wiki packet definitions to BML transcription guide
+- [Idiomatic printers design](docs/superpowers/specs/2026-10-15-bps-idiomatic-printers-design.md) — Codegen IR and typed printer design specification

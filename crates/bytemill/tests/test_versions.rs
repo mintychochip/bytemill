@@ -160,9 +160,9 @@ fn route_tables_are_the_sources() {
 /// what was decoded must give the same bytes.
 const SEEDS: u64 = 12;
 
-/// `BPS_SEEDS=300 cargo test ...` runs a longer pass (about 98% of the branch sites).
+/// `BML_SEEDS=300 cargo test ...` runs a longer pass (about 98% of the branch sites).
 fn seeds() -> u64 {
-    std::env::var("BPS_SEEDS")
+    std::env::var("BML_SEEDS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(SEEDS)
@@ -234,14 +234,14 @@ fn list_round_trip_failures() {
         out.extend(f);
     }
     std::fs::write(
-        std::env::var("BPS_FAILURES").unwrap_or_else(|_| "/tmp/bps_failures.txt".into()),
+        std::env::var("BML_FAILURES").unwrap_or_else(|_| "/tmp/bml_failures.txt".into()),
         out.join("\n"),
     )
     .unwrap();
 }
 
 #[test]
-#[ignore = "diagnostic: branch coverage of the generated packets, BPS_SEEDS runs per packet"]
+#[ignore = "diagnostic: branch coverage of the generated packets, BML_SEEDS runs per packet"]
 fn report_generator_coverage() {
     let seeds = seeds();
     for entry in entries() {
@@ -267,10 +267,10 @@ fn report_generator_coverage() {
 #[ignore = "writes wire vectors drawn from every generated schema, for the ProtoDef oracle and the Python parity run"]
 fn write_generated_vectors() {
     let dir = std::path::PathBuf::from(
-        std::env::var("BPS_VECTORS_OUT").expect("BPS_VECTORS_OUT=<directory>"),
+        std::env::var("BML_VECTORS_OUT").expect("BML_VECTORS_OUT=<directory>"),
     );
     std::fs::create_dir_all(&dir).unwrap();
-    let only = std::env::var("BPS_ONLY").ok();
+    let only = std::env::var("BML_ONLY").ok();
     for entry in entries() {
         if only.as_deref().is_some_and(|o| o != entry.release) {
             continue;
@@ -291,7 +291,7 @@ fn write_generated_vectors() {
                 } else {
                     "toServer"
                 };
-                // The id alone names the packet: the oracle's names are the data's, not BPS's.
+                // The id alone names the packet: the oracle's names are the data's, not BML's.
                 out.push_str(&format!(
                     "{{\"state\":\"{}\",\"direction\":\"{dir_name}\",\"id\":{},\"hex\":\"{hex}\"}}\n",
                     route.state, route.packet_id
@@ -395,7 +395,7 @@ fn shared_layout_means_what_the_single_file_means() {
             static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let dir = std::env::temp_dir().join(format!(
-                "bps-share-equiv-{tag}-{}-{n}-{:?}",
+                "bml-share-equiv-{tag}-{}-{n}-{:?}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -411,7 +411,7 @@ fn shared_layout_means_what_the_single_file_means() {
     }
     let tmp = TempRoot::new("equiv");
     std::fs::create_dir_all(tmp.0.join("std")).unwrap();
-    for f in ["integers.bps", "varint.bps"] {
+    for f in ["integers.bml", "varint.bml"] {
         std::fs::copy(root().join("schemas/std").join(f), tmp.0.join("std").join(f)).unwrap();
     }
     let report = import_versions(
@@ -479,7 +479,7 @@ fn every_shared_file_checks_alone() {
     let mut n = 0;
     for dir in std::fs::read_dir(root().join("schemas/versions/common")).unwrap() {
         let path = dir.unwrap().path();
-        if path.extension().and_then(|e| e.to_str()) != Some("bps") {
+        if path.extension().and_then(|e| e.to_str()) != Some("bml") {
             continue;
         }
         let schema = load_schema(std::slice::from_ref(&path)).unwrap_or_else(|e| panic!("{}: {e}", path.display()));

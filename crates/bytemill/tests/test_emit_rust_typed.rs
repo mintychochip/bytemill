@@ -17,7 +17,7 @@ fn repo(rel: &str) -> PathBuf {
 
 /// Fresh emitted-crate directory for one leg.
 fn fresh_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("bps-rust-typed-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bml-rust-typed-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     dir
 }
@@ -25,7 +25,7 @@ fn fresh_dir(name: &str) -> PathBuf {
 /// Private compiler cache for the inner `cargo` runs (deleted afterwards).
 fn fresh_target(name: &str) -> PathBuf {
     let dir = Path::new(&std::env::var("HOME").unwrap()).join(format!(
-        ".cache/bps-scratch/rust-typed-{name}-{}",
+        ".cache/bml-scratch/rust-typed-{name}-{}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
@@ -201,7 +201,7 @@ fn assert_no_clones(dir: &Path) {
 
 #[test]
 fn rust_typed_unit_vectors() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe {\n    n: varint\n    x: f32be\n    y: f64be\n}\npacket reqp {\n    n: varint\n    require n == 1\n}\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     let program = bytemill::ir::typed(&resolved).unwrap();
@@ -244,7 +244,7 @@ fn rust_typed_unit_vectors() {
 
 #[test]
 fn rust_typed_26_3_packets_roundtrip() {
-    let path = repo("schemas/minecraft_26_3_wiki.bps");
+    let path = repo("schemas/minecraft_26_3_wiki.bml");
     let resolved = bytemill::analyze(&bytemill::load_schema(&[path]).unwrap()).unwrap();
     let program = bytemill::ir::typed(&resolved).unwrap();
     let dir = fresh_dir("26-3");
@@ -259,7 +259,7 @@ fn rust_typed_26_3_packets_roundtrip() {
 
 #[test]
 fn rust_typed_hytale_packets_roundtrip() {
-    let path = repo("schemas/hytale/2026_02_17.bps");
+    let path = repo("schemas/hytale/2026_02_17.bml");
     let resolved = bytemill::analyze(&bytemill::load_schema(&[path]).unwrap()).unwrap();
     let program = bytemill::ir::typed(&resolved).unwrap();
     let dir = fresh_dir("hytale");
@@ -276,7 +276,7 @@ fn rust_typed_hytale_packets_roundtrip() {
 /// `Cargo.toml`. Text-only: no cargo gates run here.
 #[test]
 fn rust_typed_edition_option() {
-    let source = std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
+    let source = std::fs::read_to_string(repo("schemas/std/varint.bml")).unwrap()
         + "packet probe {\n    n: varint\n}\n";
     let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
     for (tag, edition) in [

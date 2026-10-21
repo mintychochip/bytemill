@@ -1,4 +1,4 @@
-# Wiki → BPS transcription cheat sheet
+# Wiki → BML transcription cheat sheet
 
 Starting point: `/tmp/mc_packets.txt` (Minecraft Java Edition protocol/Packets,
 protocol 777). Each packet section is `==== Packet Name ====` with a wiki table of
@@ -15,14 +15,14 @@ Output: a file that starts with the imports below and then contains **only**
 imports, so these three lines come first:
 
 ```
-import "std/integers.bps"
-import "std/varint.bps"
-import "minecraft_core.bps"
+import "std/integers.bml"
+import "std/varint.bml"
+import "minecraft_core.bml"
 ```
 
 ## Type mapping
 
-| Wiki type | BPS |
+| Wiki type | BML |
 | --- | --- |
 | `VarInt` | `varint` |
 | `VarLong` | `varlong` |
