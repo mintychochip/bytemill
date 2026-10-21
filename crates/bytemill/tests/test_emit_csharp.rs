@@ -1,4 +1,4 @@
-//! `emit csharp` produces a `BpsGen` C# library: a runtime plus one file per
+//! `emit csharp` produces a `BmlGen` C# library: a runtime plus one file per
 //! route category, with record structs (or plain structs on old targets) whose
 //! `Decode`/`Encode` pairs follow the typed program.
 
@@ -19,10 +19,10 @@ fn std_source() -> String {
         + &std::fs::read_to_string(repo("schemas/std/varint.bps")).unwrap()
 }
 
-/// Every generated `.cs` file under `BpsGen`, concatenated, so assertions see
+/// Every generated `.cs` file under `BmlGen`, concatenated, so assertions see
 /// the whole tree.
 fn generated(dir: &Path) -> String {
-    let root = dir.join("BpsGen");
+    let root = dir.join("BmlGen");
     let mut files: Vec<_> = std::fs::read_dir(&root)
         .unwrap()
         .map(|e| e.unwrap().path())
@@ -49,19 +49,19 @@ fn csharp_varint_probe_roundtrip() {
     bytemill::emit_csharp::emit_csharp_with_version(&resolved, &dir, bytemill::CSharpVersion::CSharp12)
         .unwrap();
 
-    let root = dir.join("BpsGen");
+    let root = dir.join("BmlGen");
     assert!(
         root.join("Runtime.cs").is_file(),
-        "missing BpsGen/Runtime.cs"
+        "missing BmlGen/Runtime.cs"
     );
     let runtime = std::fs::read_to_string(root.join("Runtime.cs")).unwrap();
     assert!(
-        runtime.contains("namespace BpsGen"),
-        "runtime needs the BpsGen namespace:\n{runtime}"
+        runtime.contains("namespace BmlGen"),
+        "runtime needs the BmlGen namespace:\n{runtime}"
     );
     assert!(
-        runtime.contains("public class BpsError : Exception"),
-        "runtime needs BpsError:\n{runtime}"
+        runtime.contains("public class BmlError : Exception"),
+        "runtime needs BmlError:\n{runtime}"
     );
     assert!(
         runtime.contains("public ref struct Reader")
@@ -153,7 +153,7 @@ fn csharp_version_options() {
 
     for (label, text) in [("C# 8", &eight), ("C# 12", &twelve)] {
         assert!(
-            text.contains("namespace BpsGen"),
+            text.contains("namespace BmlGen"),
             "{label} namespace:\n{text}"
         );
         assert!(
@@ -231,15 +231,15 @@ fn assert_no_struct_self_reference(text: &str) {
     );
 }
 
-/// Compile the emitted `BpsGen` tree with `dotnet build` (`net8.0`,
+/// Compile the emitted `BmlGen` tree with `dotnet build` (`net8.0`,
 /// `LangVersion {lang}`), asserting success with no CS0523/CS8669.
 fn build_gate(dir: &Path, dotnet: &Path, lang: &str) {
     let csproj = format!(
-        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <LangVersion>{lang}</LangVersion>\n    <OutputType>Library</OutputType>\n    <Nullable>disable</Nullable>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n  </PropertyGroup>\n  <ItemGroup>\n    <Compile Include=\"BpsGen/**/*.cs\" />\n  </ItemGroup>\n</Project>\n"
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <LangVersion>{lang}</LangVersion>\n    <OutputType>Library</OutputType>\n    <Nullable>disable</Nullable>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n  </PropertyGroup>\n  <ItemGroup>\n    <Compile Include=\"BmlGen/**/*.cs\" />\n  </ItemGroup>\n</Project>\n"
     );
-    std::fs::write(dir.join("bpsgen.csproj"), csproj).unwrap();
+    std::fs::write(dir.join("bmlgen.csproj"), csproj).unwrap();
     let out = std::process::Command::new(dotnet)
-        .args(["build", "bpsgen.csproj", "--nologo", "-v", "q"])
+        .args(["build", "bmlgen.csproj", "--nologo", "-v", "q"])
         .current_dir(dir)
         .output()
         .unwrap();
@@ -330,17 +330,17 @@ fn csharp_26_3_runtime_roundtrip() {
         return;
     };
     std::fs::write(
-        dir.join("bpsgen.csproj"),
-        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <LangVersion>12</LangVersion>\n    <OutputType>Exe</OutputType>\n    <Nullable>disable</Nullable>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n    <StartupObject>Check</StartupObject>\n  </PropertyGroup>\n  <ItemGroup>\n    <Compile Include=\"BpsGen/**/*.cs\" />\n    <Compile Include=\"Check.cs\" />\n  </ItemGroup>\n</Project>\n",
+        dir.join("bmlgen.csproj"),
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <LangVersion>12</LangVersion>\n    <OutputType>Exe</OutputType>\n    <Nullable>disable</Nullable>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n    <StartupObject>Check</StartupObject>\n  </PropertyGroup>\n  <ItemGroup>\n    <Compile Include=\"BmlGen/**/*.cs\" />\n    <Compile Include=\"Check.cs\" />\n  </ItemGroup>\n</Project>\n",
     )
     .unwrap();
     std::fs::write(
         dir.join("Check.cs"),
-        "using System;\nusing BpsGen;\n\nstatic class Check\n{\n    public static void Main()\n    {\n        Writer w = new Writer();\n        VarintCodec.Encode(w, 300);\n        byte[] enc = w.ToByteArray();\n        if (enc.Length != 2 || enc[0] != 0xAC || enc[1] != 0x02)\n        {\n            throw new Exception(\"varint 300 bytes differ\");\n        }\n        Reader r0 = new Reader(enc);\n        int back = VarintCodec.Decode(ref r0);\n        if (back != 300)\n        {\n            throw new Exception(\"varint 300 decode differ\");\n        }\n        byte[] raw = new byte[] { 0, 0, 0, 0, 0, 0, 1, 44 };\n        Reader r1 = new Reader(raw);\n        KeepAlive p = KeepAlive.Decode(ref r1);\n        if (p.KeepAliveId != 300L)\n        {\n            throw new Exception(\"KeepAlive id differ\");\n        }\n        Writer w2 = new Writer();\n        p.Encode(w2);\n        byte[] again = w2.ToByteArray();\n        if (again.Length != 8)\n        {\n            throw new Exception(\"KeepAlive bytes differ\");\n        }\n        for (int i = 0; i < 8; i++)\n        {\n            if (again[i] != raw[i])\n            {\n                throw new Exception(\"KeepAlive bytes differ\");\n            }\n        }\n        Console.WriteLine(\"csharp smoke ok\");\n    }\n}\n",
+        "using System;\nusing BmlGen;\n\nstatic class Check\n{\n    public static void Main()\n    {\n        Writer w = new Writer();\n        VarintCodec.Encode(w, 300);\n        byte[] enc = w.ToByteArray();\n        if (enc.Length != 2 || enc[0] != 0xAC || enc[1] != 0x02)\n        {\n            throw new Exception(\"varint 300 bytes differ\");\n        }\n        Reader r0 = new Reader(enc);\n        int back = VarintCodec.Decode(ref r0);\n        if (back != 300)\n        {\n            throw new Exception(\"varint 300 decode differ\");\n        }\n        byte[] raw = new byte[] { 0, 0, 0, 0, 0, 0, 1, 44 };\n        Reader r1 = new Reader(raw);\n        KeepAlive p = KeepAlive.Decode(ref r1);\n        if (p.KeepAliveId != 300L)\n        {\n            throw new Exception(\"KeepAlive id differ\");\n        }\n        Writer w2 = new Writer();\n        p.Encode(w2);\n        byte[] again = w2.ToByteArray();\n        if (again.Length != 8)\n        {\n            throw new Exception(\"KeepAlive bytes differ\");\n        }\n        for (int i = 0; i < 8; i++)\n        {\n            if (again[i] != raw[i])\n            {\n                throw new Exception(\"KeepAlive bytes differ\");\n            }\n        }\n        Console.WriteLine(\"csharp smoke ok\");\n    }\n}\n",
     )
     .unwrap();
     let build = std::process::Command::new(&dotnet)
-        .args(["build", "bpsgen.csproj", "--nologo", "-v", "q"])
+        .args(["build", "bmlgen.csproj", "--nologo", "-v", "q"])
         .current_dir(&dir)
         .output()
         .unwrap();

@@ -175,14 +175,14 @@ bml emit csharp:10 schemas/std/varint.bps --out ./bml_cs
 | Target | Default Standard | Supported Versions | Output Layout | Idiomatic Types | Formatter & Lint Gate |
 |---|---|---|---|---|---|
 | `rust-typed` | 2024 | 2015, 2018, 2021, 2024 | Standalone crate (`src/packets/`) | Zero-clone borrow encode, `Option<T>`, `Result<T, Error>` | `cargo test`, `rustfmt`, `clippy -D warnings` |
-| `go` | 1.23 | 1.16 → 1.24 | `bpsgen` package (`*.go`) | Structs, sealed interfaces for sums, preallocated slices | `go test`, `gofmt -l`, `go vet` |
-| `python` | 3.11 | 3.8 → 3.14 | `bpsgen/` package | `@dataclass(slots=True)` (3.10+), `IntEnum`, union aliases | `compileall`, `ruff format/check`, `mypy --strict` |
-| `java` | 21 | 8, 11, 17, 21 | `bpsgen/` package | Records + sealed interfaces (17+), classes (8/11), `Optional` | `java`/`javac` compile + roundtrip |
-| `csharp` | 12 | 8, 9, 10, 11, 12 | `BpsGen/` package | `record struct` (10+), `record`/classes for recursive types, `List<T>` | `dotnet build` + roundtrip |
-| `c` | C11 | C89, C90, C99, C11, C17, C23 | `bpsgen.h` + per-category `.c` | Structs + unions, `bps_status`, explicit allocators | `cc -Wall -Werror`, `clang-format` |
-| `cpp` | C++20 | C++98, 03, 11, 14, 17, 20, 23, 26 | `bpsgen.hpp` + `.cpp` | `std::variant`, `std::optional`, `std::span` (polyfills on <17) | `g++ -std=c++20 -Werror`, `clang-format` |
+| `go` | 1.23 | 1.16 → 1.24 | `bmlgen` package (`*.go`) | Structs, sealed interfaces for sums, preallocated slices | `go test`, `gofmt -l`, `go vet` |
+| `python` | 3.11 | 3.8 → 3.14 | `bmlgen/` package | `@dataclass(slots=True)` (3.10+), `IntEnum`, union aliases | `compileall`, `ruff format/check`, `mypy --strict` |
+| `java` | 21 | 8, 11, 17, 21 | `bmlgen/` package | Records + sealed interfaces (17+), classes (8/11), `Optional` | `java`/`javac` compile + roundtrip |
+| `csharp` | 12 | 8, 9, 10, 11, 12 | `BmlGen/` package | `record struct` (10+), `record`/classes for recursive types, `List<T>` | `dotnet build` + roundtrip |
+| `c` | C11 | C89, C90, C99, C11, C17, C23 | `bmlgen.h` + per-category `.c` | Structs + unions, `bml_status`, explicit allocators | `cc -Wall -Werror`, `clang-format` |
+| `cpp` | C++20 | C++98, 03, 11, 14, 17, 20, 23, 26 | `bmlgen.hpp` + `.cpp` | `std::variant`, `std::optional`, `std::span` (polyfills on <17) | `g++ -std=c++20 -Werror`, `clang-format` |
 | `typescript` | ES2022 | ES2015, ES2018, ES2020, ES2022, ESNext | ES modules (`.ts`) | `readonly` interfaces, discriminated unions, `Uint8Array` | `tsc --strict --erasableSyntaxOnly`, `prettier` |
-| `zig` | 0.14 | 0.11, 0.12, 0.13, 0.14 | `bpsgen.zig` package | `union(enum)`, `?T`, `errdefer` unwinding, `@"keyword"` | `zig fmt --check`, `zig test` |
+| `zig` | 0.14 | 0.11, 0.12, 0.13, 0.14 | `bmlgen.zig` package | `union(enum)`, `?T`, `errdefer` unwinding, `@"keyword"` | `zig fmt --check`, `zig test` |
 
 `bml targets` prints the target and standard matrix as JSON; `crates/bytemill/src/compat.rs` is the
 source it reads, and `tests/test_compat.rs` pins every version against `EmitOptions::for_target`.

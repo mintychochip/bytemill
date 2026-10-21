@@ -1,10 +1,10 @@
-//! `emit typescript`: a `bpsgen.ts` index over one ES module per route
+//! `emit typescript`: a `bmlgen.ts` index over one ES module per route
 //! category (`runtime.ts`, `encoding.ts`, `play_clientbound.ts`, `shared.ts`,
 //! ...), the same split as the other printers.
 //!
 //! Modules run under node 22 `--experimental-strip-types` and pass
 //! `tsc --strict --noEmit` (plus `--erasableSyntaxOnly`) and `prettier --check`.
-//! Every module exports its declarations; `bpsgen.ts` re-exports them all, so
+//! Every module exports its declarations; `bmlgen.ts` re-exports them all, so
 //! the public surface is unchanged. Each module imports only the runtime
 //! helpers and other modules' symbols its text names.
 //!
@@ -29,7 +29,7 @@
 //! `/` floors and `%` takes the divisor's sign (`floorDiv`/`intMod`,
 //! `0` for a zero divisor), matching the interpreter.
 //!
-//! Errors are `BpsError` (codec, offset, kind, detail); every failure the
+//! Errors are `BmlError` (codec, offset, kind, detail); every failure the
 //! typed program documents maps to a `never`-returning builder so narrowing
 //! and definite assignment hold past them.
 
@@ -44,7 +44,7 @@ use crate::ir::typed::{
     Ty, TypeIdx, WriteOp, byte_literal, escape, hex_literal,
 };
 
-const RUNTIME: &str = r#"export type BpsErrorKind =
+const RUNTIME: &str = r#"export type BmlErrorKind =
   | "shortBuffer"
   | "requireFailed"
   | "invalidUtf8"
@@ -54,18 +54,18 @@ const RUNTIME: &str = r#"export type BpsErrorKind =
   | "negativeLength"
   | "bytesTooLong"
   | "untilEndEncode";
-export class BpsError extends Error {
-  kind: BpsErrorKind;
+export class BmlError extends Error {
+  kind: BmlErrorKind;
   codec: string;
   offset: number;
   constructor(
-    kind: BpsErrorKind,
+    kind: BmlErrorKind,
     codec: string,
     offset: number,
     detail: string,
   ) {
     super(`${codec} @${offset}: ${kind}: ${detail}`);
-    this.name = "BpsError";
+    this.name = "BmlError";
     this.kind = kind;
     this.codec = codec;
     this.offset = offset;
@@ -76,27 +76,27 @@ export function shortBuffer(
   offset: number,
   detail: string,
 ): never {
-  throw new BpsError("shortBuffer", codec, offset, detail);
+  throw new BmlError("shortBuffer", codec, offset, detail);
 }
 export function requireFailed(
   codec: string,
   offset: number,
   text: string,
 ): never {
-  throw new BpsError("requireFailed", codec, offset, text);
+  throw new BmlError("requireFailed", codec, offset, text);
 }
 export function invalidUtf8(codec: string, offset: number): never {
-  throw new BpsError("invalidUtf8", codec, offset, "invalid UTF-8");
+  throw new BmlError("invalidUtf8", codec, offset, "invalid UTF-8");
 }
 export function noMatchArm(codec: string, offset: number, tag: number): never {
-  throw new BpsError("noMatchArm", codec, offset, `no arm for tag ${tag}`);
+  throw new BmlError("noMatchArm", codec, offset, `no arm for tag ${tag}`);
 }
 export function missingField(
   codec: string,
   offset: number,
   field: string,
 ): never {
-  throw new BpsError("missingField", codec, offset, field);
+  throw new BmlError("missingField", codec, offset, field);
 }
 export function wrongVariant(
   codec: string,
@@ -104,7 +104,7 @@ export function wrongVariant(
   want: string,
   have: string,
 ): never {
-  throw new BpsError(
+  throw new BmlError(
     "wrongVariant",
     codec,
     offset,
@@ -116,17 +116,17 @@ export function negativeLength(
   offset: number,
   count: number,
 ): never {
-  throw new BpsError("negativeLength", codec, offset, `count ${count}`);
+  throw new BmlError("negativeLength", codec, offset, `count ${count}`);
 }
 export function bytesTooLong(
   codec: string,
   offset: number,
   detail: string,
 ): never {
-  throw new BpsError("bytesTooLong", codec, offset, detail);
+  throw new BmlError("bytesTooLong", codec, offset, detail);
 }
 export function untilEndEncode(codec: string, offset: number): never {
-  throw new BpsError("untilEndEncode", codec, offset, "encode not supported");
+  throw new BmlError("untilEndEncode", codec, offset, "encode not supported");
 }
 export const utf8Encoder = new TextEncoder();
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
@@ -141,16 +141,16 @@ export class Reader {
   }
   readU8(codec: string): number {
     if (this.pos >= this.data.length) {
-      throw new BpsError("shortBuffer", codec, this.pos, "need 1 byte");
+      throw new BmlError("shortBuffer", codec, this.pos, "need 1 byte");
     }
     return this.data[this.pos++];
   }
   readBytes(codec: string, n: number): Uint8Array {
     if (!Number.isInteger(n) || n < 0) {
-      throw new BpsError("negativeLength", codec, this.pos, `length ${n}`);
+      throw new BmlError("negativeLength", codec, this.pos, `length ${n}`);
     }
     if (this.pos + n > this.data.length) {
-      throw new BpsError(
+      throw new BmlError(
         "shortBuffer",
         codec,
         this.pos,
@@ -188,7 +188,7 @@ export class Writer {
   }
   writeBytesFixed(codec: string, b: Uint8Array, n: number): void {
     if (b.length > n) {
-      throw new BpsError(
+      throw new BmlError(
         "bytesTooLong",
         codec,
         this.length,
@@ -290,7 +290,7 @@ export function decodeUtf8(
   try {
     return utf8Decoder.decode(bytes);
   } catch {
-    throw new BpsError("invalidUtf8", codec, offset, "invalid UTF-8");
+    throw new BmlError("invalidUtf8", codec, offset, "invalid UTF-8");
   }
 }
 "#;
@@ -438,7 +438,7 @@ pub fn emit_typescript_with_target(
         .iter()
         .map(|stem| format!("export * from \"./{stem}.ts\";\n"))
         .collect();
-    fs::write(out_dir.join("bpsgen.ts"), index).map_err(|e| emit(e.to_string()))?;
+    fs::write(out_dir.join("bmlgen.ts"), index).map_err(|e| emit(e.to_string()))?;
     fs::write(out_dir.join("tsconfig.json"), tsconfig(target)).map_err(|e| emit(e.to_string()))?;
     Ok(())
 }
@@ -459,7 +459,7 @@ struct Symbol {
     value: bool,
 }
 
-/// Every name `bpsgen.ts` re-exports, keyed by emitted identifier.
+/// Every name `bmlgen.ts` re-exports, keyed by emitted identifier.
 fn symbols(program: &Program) -> BTreeMap<String, Symbol> {
     let mut out = BTreeMap::new();
     for t in 0..program.types.len() {

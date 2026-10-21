@@ -42,8 +42,8 @@
 //!   body moves the value into an owned place.
 //! * Integer arithmetic runs in `i64` two's-complement like the interpreter:
 //!   `wraps` additions, subtractions, multiplications, and shifts use
-//!   `bps_add`/`bps_sub`/`bps_mul` or `wrapping_*`; `/` floors (`bps_div`)
-//!   and `%` takes the divisor's sign (`bps_mod`); plain operators print
+//!   `bml_add`/`bml_sub`/`bml_mul` or `wrapping_*`; `/` floors (`bml_div`)
+//!   and `%` takes the divisor's sign (`bml_mod`); plain operators print
 //!   where the result cannot overflow. [`Program::int_range`] decides the
 //!   `/` and `%` cases. `sign_extend` matches the builtin.
 //! * Failures map to [`Error`], naming the failing codec (snake case, with
@@ -484,22 +484,22 @@ pub fn utf16_units(s: &str) -> usize {
 }
 
 /// Wrapping `+`: every typed-program integer op runs in `i64` two's complement.
-pub fn bps_add(a: i64, b: i64) -> i64 {
+pub fn bml_add(a: i64, b: i64) -> i64 {
     a.wrapping_add(b)
 }
 
 /// Wrapping `-`.
-pub fn bps_sub(a: i64, b: i64) -> i64 {
+pub fn bml_sub(a: i64, b: i64) -> i64 {
     a.wrapping_sub(b)
 }
 
 /// Wrapping `*`.
-pub fn bps_mul(a: i64, b: i64) -> i64 {
+pub fn bml_mul(a: i64, b: i64) -> i64 {
     a.wrapping_mul(b)
 }
 
 /// Floor `/` (rounds toward negative infinity, unlike Rust `/`).
-pub fn bps_div(a: i64, b: i64) -> i64 {
+pub fn bml_div(a: i64, b: i64) -> i64 {
     let q = a.wrapping_div(b);
     let r = a.wrapping_rem(b);
     if r != 0 && (r < 0) != (b < 0) {
@@ -510,7 +510,7 @@ pub fn bps_div(a: i64, b: i64) -> i64 {
 }
 
 /// `%` with the divisor's sign (unlike Rust `%`).
-pub fn bps_mod(a: i64, b: i64) -> i64 {
+pub fn bml_mod(a: i64, b: i64) -> i64 {
     let r = a.wrapping_rem(b);
     if r != 0 && (r < 0) != (b < 0) {
         r.wrapping_add(b)
@@ -520,12 +520,12 @@ pub fn bps_mod(a: i64, b: i64) -> i64 {
 }
 
 /// Minimum of two `i64` values.
-pub fn bps_min(a: i64, b: i64) -> i64 {
+pub fn bml_min(a: i64, b: i64) -> i64 {
     a.min(b)
 }
 
 /// Maximum of two `i64` values.
-pub fn bps_max(a: i64, b: i64) -> i64 {
+pub fn bml_max(a: i64, b: i64) -> i64 {
     a.max(b)
 }
 "#;
@@ -3497,7 +3497,7 @@ impl<'a> Gen<'a> {
         }
     }
 
-    /// Single-line binary rendering: plain operators, `bps_*` helpers where
+    /// Single-line binary rendering: plain operators, `bml_*` helpers where
     /// the result can overflow, and wrapping methods off `i64`.
     fn binary_str(
         &self,
@@ -3683,9 +3683,9 @@ impl<'a> Gen<'a> {
                 }
                 if matches!(ty, Ty::Int(IntTy::I64)) {
                     BinForm::Helper(match op {
-                        BinOp::Add => "bps_add",
-                        BinOp::Sub => "bps_sub",
-                        _ => "bps_mul",
+                        BinOp::Add => "bml_add",
+                        BinOp::Sub => "bml_sub",
+                        _ => "bml_mul",
                     })
                 } else {
                     BinForm::Method(match op {
@@ -3700,8 +3700,8 @@ impl<'a> Gen<'a> {
                     BinForm::Plain
                 } else {
                     BinForm::Helper(match op {
-                        BinOp::Div => "bps_div",
-                        _ => "bps_mod",
+                        BinOp::Div => "bml_div",
+                        _ => "bml_mod",
                     })
                 }
             }
@@ -3770,12 +3770,12 @@ impl<'a> Gen<'a> {
             Func::Min => {
                 let a = self.arg(cx, args, 0);
                 let b = self.arg(cx, args, 1);
-                format!("bps_min({a}, {b})")
+                format!("bml_min({a}, {b})")
             }
             Func::Max => {
                 let a = self.arg(cx, args, 0);
                 let b = self.arg(cx, args, 1);
-                format!("bps_max({a}, {b})")
+                format!("bml_max({a}, {b})")
             }
         }
     }
@@ -3797,8 +3797,8 @@ impl<'a> Gen<'a> {
                 let callee = match func {
                     Func::SignExtend => "sign_extend",
                     Func::Utf16Units => "utf16_units",
-                    Func::Min => "bps_min",
-                    Func::Max => "bps_max",
+                    Func::Min => "bml_min",
+                    Func::Max => "bml_max",
                     _ => panic!("rust-typed: length helper in call position"),
                 };
                 // `utf16_units(..) as i64` keeps its suffix outside the break.
@@ -4012,7 +4012,7 @@ impl<'a> Gen<'a> {
 enum BinForm {
     /// `l op r` with operand parentheses.
     Plain,
-    /// `bps_add(l, r)`-style helper (narrow results cast back).
+    /// `bml_add(l, r)`-style helper (narrow results cast back).
     Helper(&'static str),
     /// `(l).wrapping_add(r)`-style method.
     Method(&'static str),

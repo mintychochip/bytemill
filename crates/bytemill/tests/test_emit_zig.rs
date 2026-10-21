@@ -1,4 +1,4 @@
-//! `emit zig` produces a `bpsgen.zig` index over per-category modules that
+//! `emit zig` produces a `bmlgen.zig` index over per-category modules that
 //! `zig fmt` accepts and `zig test` round-trips with
 //! `std.testing.allocator` (leaks fail the suite).
 
@@ -41,7 +41,7 @@ fn emit(resolved: &bytemill::ResolvedSchema, dir: &Path) -> String {
 
 /// The public entry point re-exports every generated module.
 fn index(dir: &Path) -> String {
-    std::fs::read_to_string(dir.join("bpsgen.zig")).unwrap()
+    std::fs::read_to_string(dir.join("bmlgen.zig")).unwrap()
 }
 
 fn run_zig(dir: &Path, tool_args: &[&str], file: &str) {
@@ -107,7 +107,7 @@ fn zig_unit_vectors() {
     );
     assert!(
         index(&dir).contains("pub const Error = @import(\"runtime.zig\").Error;"),
-        "bpsgen.zig must re-export the runtime\n{}",
+        "bmlgen.zig must re-export the runtime\n{}",
         index(&dir)
     );
     assert!(dir.join("encoding.zig").is_file(), "missing encoding.zig");
@@ -126,25 +126,25 @@ fn zig_unit_vectors() {
     let varint_encode = bytemill::emit_zig::encode_fn(&program, varint);
     let probe_tail = encode_tail(&program, probe);
     let mut src =
-        String::from("const std = @import(\"std\");\nconst bps = @import(\"bpsgen.zig\");\n");
+        String::from("const std = @import(\"std\");\nconst bml = @import(\"bmlgen.zig\");\n");
     src.push_str(&format!(
         r#"
 test "varint vectors" {{
     const a = std.testing.allocator;
     var b300 = [_]u8{{ 0xac, 0x02 }};
-    var r300 = bps.Reader{{ .data = &b300 }};
-    try std.testing.expectEqual(@as(i32, 300), try bps.{d300});
+    var r300 = bml.Reader{{ .data = &b300 }};
+    try std.testing.expectEqual(@as(i32, 300), try bml.{d300});
     var bneg = [_]u8{{ 0xff, 0xff, 0xff, 0xff, 0x0f }};
-    var rneg = bps.Reader{{ .data = &bneg }};
-    try std.testing.expectEqual(@as(i32, -1), try bps.{dneg});
-    var w = bps.Writer.init(a);
+    var rneg = bml.Reader{{ .data = &bneg }};
+    try std.testing.expectEqual(@as(i32, -1), try bml.{dneg});
+    var w = bml.Writer.init(a);
     defer w.deinit();
-    try bps.{varint_encode}(&w, 300);
-    try bps.{varint_encode}(&w, -1);
+    try bml.{varint_encode}(&w, 300);
+    try bml.{varint_encode}(&w, -1);
     try std.testing.expectEqualSlices(u8, &[_]u8{{ 0xac, 0x02, 0xff, 0xff, 0xff, 0xff, 0x0f }}, w.buf.items);
     var bad = [_]u8{{ 0x80, 0x80, 0x80, 0x80, 0x80 }};
-    var rbad = bps.Reader{{ .data = &bad }};
-    try std.testing.expectError(error.RequireFailed, bps.{dbad});
+    var rbad = bml.Reader{{ .data = &bad }};
+    try std.testing.expectError(error.RequireFailed, bml.{dbad});
 }}
 "#,
         d300 = decode_call(&program, varint, "r300"),
@@ -161,21 +161,21 @@ test "varint vectors" {{
 test "probe floats and require" {{
     const a = std.testing.allocator;
     var bytes = [_]u8{{ 0xac, 0x02, 0x3f, 0x80, 0x00, 0x00, 0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18 }};
-    var r = bps.Reader{{ .data = &bytes }};
-    var packet = try bps.{dprobe};{probe_deinit}
+    var r = bml.Reader{{ .data = &bytes }};
+    var packet = try bml.{dprobe};{probe_deinit}
     try std.testing.expectEqual(@as(i32, 300), packet.n);
     try std.testing.expectEqual(@as(f32, 1.0), packet.x);
     try std.testing.expectEqual(@as(f64, 3.141592653589793), packet.y);
-    var w = bps.Writer.init(a);
+    var w = bml.Writer.init(a);
     defer w.deinit();
     try packet.{probe_tail}(&w);
     try std.testing.expectEqualSlices(u8, &bytes, w.buf.items);
     var wrong = [_]u8{{ 0x05, 0x3f, 0x80, 0x00, 0x00, 0x40, 0x09, 0x21, 0xfb, 0x54, 0x44, 0x2d, 0x18 }};
-    var rwrong = bps.Reader{{ .data = &wrong }};
-    try std.testing.expectError(error.RequireFailed, bps.{dwrong});
+    var rwrong = bml.Reader{{ .data = &wrong }};
+    try std.testing.expectError(error.RequireFailed, bml.{dwrong});
     var short = [_]u8{{ 0xac }};
-    var rshort = bps.Reader{{ .data = &short }};
-    try std.testing.expectError(error.Short, bps.{dshort});
+    var rshort = bml.Reader{{ .data = &short }};
+    try std.testing.expectError(error.Short, bml.{dshort});
 }}
 "#,
         dprobe = decode_call(&program, probe, "r"),
@@ -215,10 +215,10 @@ fn roundtrip_case(
 test "packet {packets} {name}" {{
     const a = std.testing.allocator;
     const raw = [_]u8{{ {list} }};
-    var reader = bps.Reader{{ .data = &raw }};
-    var packet = try bps.{decode};{deinit}
+    var reader = bml.Reader{{ .data = &raw }};
+    var packet = try bml.{decode};{deinit}
     try std.testing.expectEqual(raw.len, reader.pos);
-    var w = bps.Writer.init(a);
+    var w = bml.Writer.init(a);
     defer w.deinit();
     try packet.{tail}(&w);
     try std.testing.expectEqualSlices(u8, &raw, w.buf.items);
@@ -257,7 +257,7 @@ fn roundtrip_suite(schema: &str, dir_name: &str, minimum: usize) {
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().and_then(|e| e.to_str()) != Some("zig")
-            || path.file_name().and_then(|n| n.to_str()) == Some("bpsgen.zig")
+            || path.file_name().and_then(|n| n.to_str()) == Some("bmlgen.zig")
         {
             continue;
         }
@@ -272,7 +272,7 @@ fn roundtrip_suite(schema: &str, dir_name: &str, minimum: usize) {
     }
     fmt_check(&dir);
     let mut src =
-        String::from("const std = @import(\"std\");\nconst bps = @import(\"bpsgen.zig\");\n");
+        String::from("const std = @import(\"std\");\nconst bml = @import(\"bmlgen.zig\");\n");
     let mut n = 0usize;
     for packet in resolved.packets.values() {
         let value = match synthesize_packet(&resolved, packet) {
@@ -314,11 +314,11 @@ fn zig_version_option() {
     let dir = std::env::temp_dir().join(format!("bps-zig-v014-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     bytemill::emit_zig::emit_zig_with_version(&resolved, &dir, bytemill::ZigVersion::V0_14).unwrap();
-    assert!(dir.join("bpsgen.zig").is_file(), "missing bpsgen.zig");
+    assert!(dir.join("bmlgen.zig").is_file(), "missing bmlgen.zig");
     assert!(dir.join("encoding.zig").is_file(), "missing encoding.zig");
     assert!(
         index(&dir).contains("pub const Error = @import(\"runtime.zig\").Error;"),
-        "bpsgen.zig must re-export the runtime\n{}",
+        "bmlgen.zig must re-export the runtime\n{}",
         index(&dir)
     );
     let _ = std::fs::remove_dir_all(&dir);

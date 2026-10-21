@@ -1,4 +1,4 @@
-//! `emit cpp` produces `bpsgen.hpp` + `bpsgen.cpp` that g++ round-trips:
+//! `emit cpp` produces `bmlgen.hpp` + `bmlgen.cpp` that g++ round-trips:
 //! unit checks on `varint` + a probe packet (exact bytes, floats, a
 //! short-buffer error, a `require` failure), a UTF-8 rejection check on
 //! `string`, then every synthesizable 26.3 and Hytale packet through
@@ -125,7 +125,7 @@ fn cpp_varint_roundtrip() {
     clang_format_gate(&dir);
     // The unit's shape: decoders are [[nodiscard]], errors share a base, the
     // writer borrows byte buffers, and the integer helpers are constexpr.
-    let header = std::fs::read_to_string(dir.join("bpsgen.hpp")).unwrap();
+    let header = std::fs::read_to_string(dir.join("bmlgen.hpp")).unwrap();
     assert!(
         header.contains("[[nodiscard]]"),
         "decoders must be [[nodiscard]]"
@@ -147,7 +147,7 @@ fn cpp_varint_roundtrip() {
     let decode = bytemill::emit_cpp::decode_fn(&program, probe);
     let encode = bytemill::emit_cpp::encode_fn(&program, probe);
     let check = format!(
-        r#"#include "bpsgen.hpp"
+        r#"#include "bmlgen.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -161,7 +161,7 @@ static void check(bool ok, const char *msg) {{
   }}
 }}
 int main() {{
-  using namespace bps;
+  using namespace bml;
   {{
     Writer w;
     encode_varint(w, 300);
@@ -236,7 +236,7 @@ fn cpp_string_rejects_bad_utf8() {
     let string = program.codec_by_ir("string").expect("string codec");
     assert_eq!(bytemill::emit_cpp::decode_fn(&program, string), "decode_string");
     assert_eq!(bytemill::emit_cpp::encode_fn(&program, string), "encode_string");
-    let check = r#"#include "bpsgen.hpp"
+    let check = r#"#include "bmlgen.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -249,7 +249,7 @@ static void check(bool ok, const char *msg) {
   }
 }
 int main() {
-  using namespace bps;
+  using namespace bml;
   {
     const std::uint8_t raw[] = {0x02, 0x68, 0x69};
     Reader r(raw, sizeof(raw));
@@ -303,7 +303,7 @@ fn roundtrip_suite(schema_rel: &str, dir_name: &str, min_packets: usize) {
     bytemill::emit_cpp::emit_cpp(&resolved, &dir).unwrap();
     clang_format_gate(&dir);
     let mut body = String::from(
-        "#include \"bpsgen.hpp\"\n#include <cstdint>\n#include <cstdio>\n#include <vector>\nusing namespace bps;\nstatic int fails = 0;\n",
+        "#include \"bmlgen.hpp\"\n#include <cstdint>\n#include <cstdio>\n#include <vector>\nusing namespace bml;\nstatic int fails = 0;\n",
     );
     let mut calls = String::new();
     let mut n = 0usize;
@@ -375,7 +375,7 @@ fn probe_roundtrip_std(std_ver: bytemill::CppStandard, flag: &str, dir_name: &st
     let program = bytemill::ir::typed::typed(&resolved).unwrap();
     let dir = temp(dir_name);
     bytemill::emit_cpp::emit_cpp_with_standard(&resolved, &dir, std_ver).unwrap();
-    let header = std::fs::read_to_string(dir.join("bpsgen.hpp")).unwrap();
+    let header = std::fs::read_to_string(dir.join("bmlgen.hpp")).unwrap();
     if std_ver.supports_std_span() {
         assert!(
             header.contains("std::span<const std::uint8_t>"),
@@ -413,11 +413,11 @@ fn probe_roundtrip_std(std_ver: bytemill::CppStandard, flag: &str, dir_name: &st
         );
     } else {
         // (The `[[nodiscard]]` spelling still appears inside the
-        // `BPS_NODISCARD` macro definition; the declarations themselves
+        // `BML_NODISCARD` macro definition; the declarations themselves
         // must use the macro.)
         assert!(
-            header.contains("BPS_NODISCARD Probe decode_probe"),
-            "{flag}: pre-C++17 declarations use the BPS_NODISCARD macro"
+            header.contains("BML_NODISCARD Probe decode_probe"),
+            "{flag}: pre-C++17 declarations use the BML_NODISCARD macro"
         );
         assert!(
             !header.contains("[[nodiscard]] Probe decode_probe"),
@@ -442,7 +442,7 @@ fn probe_roundtrip_std(std_ver: bytemill::CppStandard, flag: &str, dir_name: &st
     let probe = program.packet_codec("probe").expect("probe codec");
     assert_eq!(bytemill::emit_cpp::decode_fn(&program, probe), "decode_probe");
     assert_eq!(bytemill::emit_cpp::encode_fn(&program, probe), "encode_probe");
-    let check = r#"#include "bpsgen.hpp"
+    let check = r#"#include "bmlgen.hpp"
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -455,7 +455,7 @@ static void check(bool ok, const char *msg) {
   }
 }
 int main() {
-  using namespace bps;
+  using namespace bml;
   {
     Writer w;
     encode_varint(w, 300);

@@ -1,4 +1,4 @@
-//! `emit cpp`: `bpsgen.hpp` + `bpsgen.cpp` whose types and codec functions are
+//! `emit cpp`: `bmlgen.hpp` + `bmlgen.cpp` whose types and codec functions are
 //! the typed program (`bytemill::ir::typed::Program`).
 //!
 //! * Records are `struct`s (fields in schema order, every typed-program field
@@ -40,8 +40,8 @@
 //! Language standards (`emit_cpp_with_standard`): the default is C++20 and
 //! its output is byte-for-byte the historical emission. Older standards
 //! replace unavailable facilities with small polyfills declared in the
-//! header (`Optional`, `StringView`, `Span`, `BPS_NODISCARD`,
-//! `BPS_CONSTEXPR`, `BPS_NOEXCEPT`), tagged structs for sums, wrapper
+//! header (`Optional`, `StringView`, `Span`, `BML_NODISCARD`,
+//! `BML_CONSTEXPR`, `BML_NOEXCEPT`), tagged structs for sums, wrapper
 //! structs for open enums, member-initializing constructors for records,
 //! index loops, `typedef`s, and explicit `operator==`/`!=`.
 
@@ -194,7 +194,7 @@ pub fn emit_cpp_with_standard(
     let header = emit_header(&program, &layout, std_ver)?;
     let sources = emit_sources(&program, &layout, std_ver)?;
     std::fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
-    let header_path = out_dir.join("bpsgen.hpp");
+    let header_path = out_dir.join("bmlgen.hpp");
     std::fs::write(&header_path, header).map_err(|e| emit(e.to_string()))?;
     // `clang-format` assumes C++11 angle brackets (`>>`); pre-C++11 output
     // keeps its `> >` spacing, so only format what it can parse.
@@ -729,7 +729,7 @@ const RUNTIME_BASE: &str = r#"#pragma once
 #include <variant>
 #include <vector>
 
-namespace bps {
+namespace bml {
 class CodecError : public std::runtime_error {
 public:
   explicit CodecError(const std::string &what) : std::runtime_error(what) {}
@@ -1083,20 +1083,20 @@ inline std::string str128(__int128 v) {
 /// Attribute/keyword macros shared by every pre-C++20 header. Each tracks
 /// `__cplusplus`, so the same header stays correct no matter which `-std=`
 /// flag compiles it.
-const BPS_MACROS: &str = r#"#if __cplusplus >= 201703L
-#define BPS_NODISCARD [[nodiscard]]
+const BML_MACROS: &str = r#"#if __cplusplus >= 201703L
+#define BML_NODISCARD [[nodiscard]]
 #else
-#define BPS_NODISCARD
+#define BML_NODISCARD
 #endif
 #if __cplusplus >= 201402L
-#define BPS_CONSTEXPR constexpr
+#define BML_CONSTEXPR constexpr
 #else
-#define BPS_CONSTEXPR inline
+#define BML_CONSTEXPR inline
 #endif
 #if __cplusplus >= 201103L
-#define BPS_NOEXCEPT noexcept
+#define BML_NOEXCEPT noexcept
 #else
-#define BPS_NOEXCEPT
+#define BML_NOEXCEPT
 #endif
 "#;
 
@@ -1145,13 +1145,13 @@ private:
     let h = h.replace("class Writer {", &format!("{SPAN_17}class Writer {{"));
     h.replace(
         "#include <vector>\n",
-        &format!("#include <vector>\n\n{BPS_MACROS}"),
+        &format!("#include <vector>\n\n{BML_MACROS}"),
     )
 }
 
 /// Pre-C++17 runtime: includes for the requested standard plus a
 /// C++98-compatible runtime (polyfill `Optional`/`StringView`/`Span`,
-/// `bps_to_string`, index loops, a deep-copying raw-pointer `Box`).
+/// `bml_to_string`, index loops, a deep-copying raw-pointer `Box`).
 fn compat_runtime(std_ver: crate::CppStandard) -> String {
     const HEAD_11: &str = r#"#pragma once
 #include <algorithm>
@@ -1193,7 +1193,7 @@ using ::uint64_t;
         HEAD_98.to_string()
     };
     h.push('\n');
-    h.push_str(BPS_MACROS);
+    h.push_str(BML_MACROS);
     h.push_str(COMPAT_BODY);
     h
 }
@@ -1201,7 +1201,7 @@ using ::uint64_t;
 /// Pre-C++17 runtime body: only C++98 constructs (index loops, no in-class
 /// member initializers, no `auto`, no `nullptr`), so the same text compiles
 /// under `-std=c++98` through `-std=c++14`.
-const COMPAT_BODY: &str = r#"namespace bps {
+const COMPAT_BODY: &str = r#"namespace bml {
 struct Nullopt_t {};
 static Nullopt_t nullopt;
 template <typename T> class Optional {
@@ -1279,7 +1279,7 @@ private:
   const T *data_;
   std::size_t size_;
 };
-inline std::string bps_to_string(std::int64_t v) {
+inline std::string bml_to_string(std::int64_t v) {
   if (v == 0) {
     return std::string("0");
   }
@@ -1307,7 +1307,7 @@ public:
   DecodeError(const std::string &codec, std::size_t offset,
               const std::string &what)
       : CodecError("decode " + codec + " at offset " +
-                   bps_to_string(static_cast<std::int64_t>(offset)) + ": " +
+                   bml_to_string(static_cast<std::int64_t>(offset)) + ": " +
                    what),
         codec(codec), offset(offset) {}
   virtual ~DecodeError() throw() {}
@@ -1321,7 +1321,7 @@ public:
   virtual ~EncodeError() throw() {}
   std::string codec;
 };
-inline bool is_utf8(const std::uint8_t *s, std::size_t n) BPS_NOEXCEPT {
+inline bool is_utf8(const std::uint8_t *s, std::size_t n) BML_NOEXCEPT {
   std::size_t i = 0;
   while (i < n) {
     std::uint8_t c = s[i];
@@ -1368,8 +1368,8 @@ class Reader {
 public:
   Reader(const std::uint8_t *data, std::size_t len)
       : data_(data), len_(len), pos_(0) {}
-  std::size_t pos() const BPS_NOEXCEPT { return pos_; }
-  std::size_t remaining() const BPS_NOEXCEPT { return len_ - pos_; }
+  std::size_t pos() const BML_NOEXCEPT { return pos_; }
+  std::size_t remaining() const BML_NOEXCEPT { return len_ - pos_; }
   std::uint8_t u8(const char *codec) {
     if (pos_ >= len_) {
       throw DecodeError(codec, pos_, "short buffer: need 1 byte");
@@ -1384,11 +1384,11 @@ public:
   }
   std::vector<std::uint8_t> bytes(std::int64_t n, const char *codec) {
     if (n < 0) {
-      throw DecodeError(codec, pos_, "negative length " + bps_to_string(n));
+      throw DecodeError(codec, pos_, "negative length " + bml_to_string(n));
     }
     if (static_cast<std::uint64_t>(n) > remaining()) {
       throw DecodeError(codec, pos_,
-                        "short buffer: need " + bps_to_string(n) + " bytes");
+                        "short buffer: need " + bml_to_string(n) + " bytes");
     }
     std::vector<std::uint8_t> out(data_ + pos_, data_ + pos_ + n);
     pos_ += static_cast<std::size_t>(n);
@@ -1462,23 +1462,23 @@ public:
     }
   }
 };
-BPS_CONSTEXPR std::int64_t add_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+BML_CONSTEXPR std::int64_t add_wrap(std::int64_t a, std::int64_t b) BML_NOEXCEPT {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) +
                                    static_cast<std::uint64_t>(b));
 }
-BPS_CONSTEXPR std::int64_t sub_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+BML_CONSTEXPR std::int64_t sub_wrap(std::int64_t a, std::int64_t b) BML_NOEXCEPT {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) -
                                    static_cast<std::uint64_t>(b));
 }
-BPS_CONSTEXPR std::int64_t mul_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+BML_CONSTEXPR std::int64_t mul_wrap(std::int64_t a, std::int64_t b) BML_NOEXCEPT {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a) *
                                    static_cast<std::uint64_t>(b));
 }
-BPS_CONSTEXPR std::int64_t shl_wrap(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+BML_CONSTEXPR std::int64_t shl_wrap(std::int64_t a, std::int64_t b) BML_NOEXCEPT {
   return static_cast<std::int64_t>(static_cast<std::uint64_t>(a)
                                    << static_cast<unsigned>(b));
 }
-BPS_CONSTEXPR std::int64_t div_floor(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+BML_CONSTEXPR std::int64_t div_floor(std::int64_t a, std::int64_t b) BML_NOEXCEPT {
   if (b == 0) {
     return 0;
   }
@@ -1492,7 +1492,7 @@ BPS_CONSTEXPR std::int64_t div_floor(std::int64_t a, std::int64_t b) BPS_NOEXCEP
   }
   return q;
 }
-BPS_CONSTEXPR std::int64_t mod_sign(std::int64_t a, std::int64_t b) BPS_NOEXCEPT {
+BML_CONSTEXPR std::int64_t mod_sign(std::int64_t a, std::int64_t b) BML_NOEXCEPT {
   if (b == 0) {
     return 0;
   }
@@ -1505,7 +1505,7 @@ BPS_CONSTEXPR std::int64_t mod_sign(std::int64_t a, std::int64_t b) BPS_NOEXCEPT
   }
   return r;
 }
-BPS_CONSTEXPR std::int64_t sign_extend(std::int64_t v, std::int64_t bits) BPS_NOEXCEPT {
+BML_CONSTEXPR std::int64_t sign_extend(std::int64_t v, std::int64_t bits) BML_NOEXCEPT {
   if (bits <= 0 || bits >= 64) {
     return v;
   }
@@ -1549,10 +1549,10 @@ inline std::int64_t utf16_units(StringView s) {
   }
   return n;
 }
-inline std::int64_t utf8_len(StringView s) BPS_NOEXCEPT {
+inline std::int64_t utf8_len(StringView s) BML_NOEXCEPT {
   return static_cast<std::int64_t>(s.size());
 }
-inline std::int64_t str_len(StringView s) BPS_NOEXCEPT {
+inline std::int64_t str_len(StringView s) BML_NOEXCEPT {
   std::int64_t n = 0;
   for (std::size_t i = 0; i < s.size(); ++i) {
     if ((static_cast<std::uint8_t>(s[i]) & 0xC0) != 0x80) {
@@ -2752,7 +2752,7 @@ fn emit_header(
         let encode = sig_string(program, ci, false, &rname, &wname, std_ver)?;
         pack_sig(&mut src, &encode.0, &encode.1, ");");
     }
-    src.line("} // namespace bps");
+    src.line("} // namespace bml");
     Ok(finish(src.out))
 }
 
@@ -2796,12 +2796,12 @@ fn sig_string(
     let c = &program.codecs[codec];
     let body = if decode { &c.decode } else { &c.encode };
     if decode {
-        // Pre-C++17 has no `[[nodiscard]]`; the header's BPS_NODISCARD
+        // Pre-C++17 has no `[[nodiscard]]`; the header's BML_NODISCARD
         // macro expands to it (or nothing) per `__cplusplus`.
         let discard = if std_ver.supports_nodiscard() {
             "[[nodiscard]]"
         } else {
-            "BPS_NODISCARD"
+            "BML_NODISCARD"
         };
         let head = format!(
             "{discard} {} {}",
@@ -2933,9 +2933,9 @@ fn emit_sources(
     }
     let mut files = BTreeMap::new();
     for (stem, src) in bodies {
-        let mut out = String::from("#include \"bpsgen.hpp\"\n\nnamespace bps {\n");
+        let mut out = String::from("#include \"bmlgen.hpp\"\n\nnamespace bml {\n");
         out.push_str(&src.out);
-        out.push_str("} // namespace bps\n");
+        out.push_str("} // namespace bml\n");
         files.insert(stem, finish(out));
     }
     Ok(files)
@@ -3513,7 +3513,7 @@ impl<'a> Emitter<'a> {
 
     /// The `std::to_string` operand of a dynamic error message, printed inline
     /// as one expression; long throw lines break around it canonically.
-    /// Pre-C++11 uses the header's `bps_to_string` helper instead.
+    /// Pre-C++11 uses the header's `bml_to_string` helper instead.
     fn stringify_operand(&mut self, e: &Expr) -> String {
         let (ty, _) = self.program.expr_ty(self.body, e);
         let stringify = if matches!(ty, Ty::Int(IntTy::I128)) {
@@ -3521,7 +3521,7 @@ impl<'a> Emitter<'a> {
         } else if self.std.supports_braced_init() {
             "std::to_string"
         } else {
-            "bps_to_string"
+            "bml_to_string"
         };
         let v = e.clone();
         let s = self.val(&v);

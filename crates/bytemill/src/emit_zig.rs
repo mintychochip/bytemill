@@ -1,6 +1,6 @@
-//! `emit zig`: a `bpsgen.zig` index over one module per route category
+//! `emit zig`: a `bmlgen.zig` index over one module per route category
 //! (`runtime.zig`, `encoding.zig`, `play_clientbound.zig`, `shared.zig`, ...),
-//! each of typed structs, unions, enums, and codecs. `bpsgen.zig` re-exports
+//! each of typed structs, unions, enums, and codecs. `bmlgen.zig` re-exports
 //! every public declaration, so the public surface is unchanged. A module that
 //! reaches into another imports it once at file scope (`const encoding =
 //! @import("encoding.zig");`) and calls `encoding.decodeString(...)`, never an
@@ -44,7 +44,7 @@ use crate::ir::typed::{
     Stmt, Ty, TypeIdx, WriteOp, byte_literal, hex_literal,
 };
 
-/// Emit `bpsgen.zig` and its modules for `resolved` into `out_dir`.
+/// Emit `bmlgen.zig` and its modules for `resolved` into `out_dir`.
 pub fn emit_zig(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     emit_zig_with_version(resolved, out_dir, crate::ZigVersion::default())
 }
@@ -301,7 +301,7 @@ const PRIMITIVES: &[&str] = &[
 
 /// Extra names reserved for locals and parameters: the function signatures
 /// already bind `reader`, `writer`, and `allocator`.
-const LOCAL_RESERVED: &[&str] = &["reader", "writer", "allocator", "bps_rt"];
+const LOCAL_RESERVED: &[&str] = &["reader", "writer", "allocator", "bml_rt"];
 
 /// Escape one identifier. `reserved` marks names bound elsewhere in the
 /// emitted function (signature params, module imports), which cannot be
@@ -599,7 +599,7 @@ impl<'a> Printer<'a> {
     }
 
     /// `stem` -> module source: `runtime.zig`, one module per route category,
-    /// and the `bpsgen.zig` index that re-exports them all.
+    /// and the `bmlgen.zig` index that re-exports them all.
     fn files(&mut self) -> BpsResult<BTreeMap<String, String>> {
         // The constructs printed here are stable across every supported Zig
         // version, so the target only selects this shared formatting.
@@ -635,8 +635,8 @@ impl<'a> Printer<'a> {
             if body.contains("std.") {
                 src.push_str("const std = @import(\"std\");\n");
             }
-            if body.contains("bps_rt.") {
-                src.push_str("const bps_rt = @import(\"runtime.zig\");\n");
+            if body.contains("bml_rt.") {
+                src.push_str("const bml_rt = @import(\"runtime.zig\");\n");
             }
             for alias in &aliases {
                 src.push_str(&format!("const {alias} = @import(\"{alias}.zig\");\n"));
@@ -647,12 +647,12 @@ impl<'a> Printer<'a> {
             src.push_str(&body);
             files.insert(stem, src);
         }
-        files.insert("bpsgen".to_string(), index);
+        files.insert("bmlgen".to_string(), index);
         files.insert("runtime".to_string(), runtime);
         Ok(files)
     }
 
-    /// `bpsgen.zig`: re-export every public declaration, so the public API is
+    /// `bmlgen.zig`: re-export every public declaration, so the public API is
     /// what the single-module emission was.
     fn index(&self, runtime: &str) -> String {
         let mut entries: BTreeSet<(String, String)> = BTreeSet::new();
@@ -1000,12 +1000,12 @@ impl Printer<'_> {
             _ => {}
         }
         if decode {
-            param(&mut sig, "reader: *bps_rt.Reader");
+            param(&mut sig, "reader: *bml_rt.Reader");
         } else if recv.is_none() {
-            param(&mut sig, "writer: *bps_rt.Writer");
+            param(&mut sig, "writer: *bml_rt.Writer");
             param(&mut sig, &format!("value: {extra}"));
         } else {
-            param(&mut sig, "writer: *bps_rt.Writer");
+            param(&mut sig, "writer: *bml_rt.Writer");
         }
         for pid in &body.params {
             let p = &body.locals[*pid];
@@ -1030,7 +1030,7 @@ impl Printer<'_> {
         fgen.depth += if recv.is_some() { 1 } else { 0 };
         fgen.stmts(&body.stmts)?;
         let pad = if recv.is_some() { "    " } else { "" };
-        let mut out = format!("{pad}{sig}) bps_rt.Error!{ret} {{\n");
+        let mut out = format!("{pad}{sig}) bml_rt.Error!{ret} {{\n");
         // Report this codec at the deepest failure: `errdefer` runs inner to
         // outer, and `fail` keeps the first codec seen.
         let diag = match recv {
@@ -1150,14 +1150,14 @@ impl Printer<'_> {
             match &decl.payload {
                 None => arms.push_str(&format!("            .{vname} => {{}},\n")),
                 Some(p) => {
-                    let steps = cleanup(&self.owns, "bps_v", p, boxed, false);
+                    let steps = cleanup(&self.owns, "bml_v", p, boxed, false);
                     if steps.is_empty() {
                         arms.push_str(&format!("            .{vname} => {{}},\n"));
                     } else if steps.len() == 1 {
                         let step = steps[0].trim_end_matches(';');
-                        arms.push_str(&format!("            .{vname} => |bps_v| {step},\n"));
+                        arms.push_str(&format!("            .{vname} => |bml_v| {step},\n"));
                     } else {
-                        arms.push_str(&format!("            .{vname} => |bps_v| {{\n"));
+                        arms.push_str(&format!("            .{vname} => |bml_v| {{\n"));
                         for s in &steps {
                             arms.push_str(&format!("                {s}\n"));
                         }
@@ -1166,7 +1166,7 @@ impl Printer<'_> {
                 }
             }
         }
-        if !arms.contains("bps_v") {
+        if !arms.contains("bml_v") {
             return String::new();
         }
         format!(
@@ -1182,14 +1182,14 @@ fn cleanup(owns: &[bool], x: &str, ty: &Ty, boxed: bool, optional: bool) -> Vec<
     if !optional {
         return cleanup_inner(owns, x, ty, boxed);
     }
-    let inner = cleanup_inner(owns, "bps_v", ty, boxed);
+    let inner = cleanup_inner(owns, "bml_v", ty, boxed);
     if inner.is_empty() {
         return Vec::new();
     }
     if inner.len() == 1 {
-        return vec![format!("if ({x}) |bps_v| {}", inner[0])];
+        return vec![format!("if ({x}) |bml_v| {}", inner[0])];
     }
-    let mut out = vec![format!("if ({x}) |bps_v| {{")];
+    let mut out = vec![format!("if ({x}) |bml_v| {{")];
     out.extend(inner.into_iter().map(|s| format!("    {s}")));
     out.push("}".into());
     out
@@ -1211,14 +1211,14 @@ fn cleanup_inner(owns: &[bool], x: &str, ty: &Ty, boxed: bool) -> Vec<String> {
         Ty::Str | Ty::Bytes => vec![format!("allocator.free({x});")],
         Ty::List(elem) => {
             let mut out = Vec::new();
-            let steps = elem_cleanup(owns, "bps_e", elem);
+            let steps = elem_cleanup(owns, "bml_e", elem);
             if steps.is_empty() {
                 out.push(format!("allocator.free({x});"));
             } else if steps.len() == 1 {
-                out.push(format!("for ({x}) |*bps_e| {}", steps[0]));
+                out.push(format!("for ({x}) |*bml_e| {}", steps[0]));
                 out.push(format!("allocator.free({x});"));
             } else {
-                out.push(format!("for ({x}) |*bps_e| {{"));
+                out.push(format!("for ({x}) |*bml_e| {{"));
                 for s in steps {
                     out.push(format!("    {s}"));
                 }
@@ -1233,17 +1233,17 @@ fn cleanup_inner(owns: &[bool], x: &str, ty: &Ty, boxed: bool) -> Vec<String> {
     }
 }
 
-/// Cleanup of a list element behind `|*bps_e|`: `bps_e.*` is the element.
+/// Cleanup of a list element behind `|*bml_e|`: `bml_e.*` is the element.
 fn elem_cleanup(owns: &[bool], e: &str, elem: &Ty) -> Vec<String> {
     match elem {
         Ty::Str | Ty::Bytes => vec![format!("allocator.free({e}.*);")],
         Ty::List(inner) => {
             let mut out = Vec::new();
-            let steps = elem_cleanup(owns, "bps_f", inner);
+            let steps = elem_cleanup(owns, "bml_f", inner);
             if steps.is_empty() {
                 out.push(format!("allocator.free({e}.*);"));
             } else {
-                out.push(format!("for ({e}.*) |*bps_f| {{"));
+                out.push(format!("for ({e}.*) |*bml_f| {{"));
                 for s in steps {
                     out.push(format!("    {s}"));
                 }
@@ -1624,21 +1624,21 @@ impl<'a, 'p> FnGen<'a, 'p> {
     /// Unwind the decoded prefix of a list being built: `slice` is the built
     /// part (`tmp[0..filled]` or `arr.items`), `elem` the element type.
     fn partial_deinit(&mut self, slice: &str, elem: &Ty) {
-        let steps = elem_cleanup(&self.printer.owns, "bps_e", elem);
+        let steps = elem_cleanup(&self.printer.owns, "bml_e", elem);
         if steps.is_empty() {
             return;
         }
         if steps.len() == 1 {
             self.ln("errdefer {");
             self.depth += 1;
-            self.ln(&format!("for ({slice}) |*bps_e| {}", steps[0]));
+            self.ln(&format!("for ({slice}) |*bml_e| {}", steps[0]));
             self.depth -= 1;
             self.ln("}");
             return;
         }
         self.ln("errdefer {");
         self.depth += 1;
-        self.ln(&format!("for ({slice}) |*bps_e| {{"));
+        self.ln(&format!("for ({slice}) |*bml_e| {{"));
         self.depth += 1;
         for s in &steps {
             self.ln(s);
@@ -1709,8 +1709,8 @@ impl<'a, 'p> FnGen<'a, 'p> {
         let target = self
             .printer
             .zig_ty(&self.body.locals[id].ty.clone(), &self.here)?;
-        let blk = self.temp("bps_blk");
-        let ptr = self.temp("bps_p");
+        let blk = self.temp("bml_blk");
+        let ptr = self.temp("bml_p");
         self.uses_alloc = true;
         let pad0 = "    ".repeat(self.depth);
         let pad1 = "    ".repeat(self.depth + 1);
@@ -1998,7 +1998,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
     fn item_name(&self) -> String {
         match self.item {
             Some((id, _)) => self.name(id),
-            None => "bps_item".into(),
+            None => "bml_item".into(),
         }
     }
 }
@@ -2270,13 +2270,13 @@ impl<'a, 'p> FnGen<'a, 'p> {
             Ty::List(e) => self.printer.zig_ty(e, &self.here)?,
             _ => return Err(emit("zig: repeat list is not a list".to_string())),
         };
-        let rep = self.temp("bps_rep");
+        let rep = self.temp("bml_rep");
         match mode {
             RepeatMode::Count(n) => {
                 let count = self.cond(n)?;
                 let alloc_n = self.usize_arg(n)?;
-                let tmp = self.temp("bps_tmp");
-                let filled = self.temp("bps_filled");
+                let tmp = self.temp("bml_tmp");
+                let filled = self.temp("bml_filled");
                 self.ln(&format!("const {list_name}: {list_ty} = {rep}: {{"));
                 self.depth += 1;
                 self.ln(&format!("if ({count} < 0) return error.NegativeLength;"));
@@ -2311,7 +2311,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     RepeatMode::Until(t) => Some(t),
                     _ => None,
                 };
-                let arr = self.temp("bps_arr");
+                let arr = self.temp("bml_arr");
                 self.ln(&format!("const {list_name}: {list_ty} = {rep}: {{"));
                 self.depth += 1;
                 if let Some(t) = term {
@@ -2320,7 +2320,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     let want = match byte_literal(t, false) {
                         Some(byte) => byte,
                         None => {
-                            let term_n = self.temp("bps_term");
+                            let term_n = self.temp("bml_term");
                             let printed = self.expr(t)?;
                             let (tty, _) = self.printer.prog.expr_ty(self.body, t);
                             let cast = match tty {
@@ -2811,14 +2811,14 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     Expr::Int { .. } => b,
                     _ => format!("@intCast({b})"),
                 };
-                Ok(format!("bps_rt.signExtend({av}, {bv})"))
+                Ok(format!("bml_rt.signExtend({av}, {bv})"))
             }
             Func::Utf16Units => {
                 if args.len() != 1 {
                     return Err(emit("zig: utf16_units arity".to_string()));
                 }
                 let s = self.expr(&args[0])?;
-                Ok(format!("@as(i64, @intCast(bps_rt.utf16Units({s})))"))
+                Ok(format!("@as(i64, @intCast(bml_rt.utf16Units({s})))"))
             }
             Func::Utf8Len => {
                 if args.len() != 1 {
@@ -2832,7 +2832,7 @@ impl<'a, 'p> FnGen<'a, 'p> {
                     return Err(emit("zig: str_len arity".to_string()));
                 }
                 let s = self.expr(&args[0])?;
-                Ok(format!("bps_rt.strLen({s})"))
+                Ok(format!("bml_rt.strLen({s})"))
             }
             Func::BytesLen | Func::ListLen => {
                 if args.len() != 1 {

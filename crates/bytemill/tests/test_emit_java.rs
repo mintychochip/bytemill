@@ -1,4 +1,4 @@
-//! `emit java` generates a `bpsgen` package whose codecs decode and encode
+//! `emit java` generates a `bmlgen` package whose codecs decode and encode
 //! byte-exactly, executed through the `java` runtime when one is available.
 
 use std::path::{Path, PathBuf};
@@ -46,7 +46,7 @@ packet picked {
 
 /// Concatenated generated sources, so text assertions see the whole tree.
 fn generated(dir: &Path) -> String {
-    let pkg = dir.join("bpsgen");
+    let pkg = dir.join("bmlgen");
     let mut names: Vec<PathBuf> = std::fs::read_dir(&pkg)
         .unwrap()
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
@@ -215,12 +215,12 @@ fn java_varint_probe_roundtrip() {
         let tag = format!("{ver:?}").to_ascii_lowercase();
         let dir = scratch(&format!("roundtrip-{tag}"));
         bytemill::emit_java::emit_java_with_version(&resolved, &dir, ver).unwrap();
-        let pkg = dir.join("bpsgen");
+        let pkg = dir.join("bmlgen");
         assert!(pkg.join("Unrouted.java").is_file(), "missing Unrouted.java");
         assert!(pkg.join("Encoding.java").is_file(), "missing Encoding.java");
         assert!(pkg.join("Reader.java").is_file(), "missing Reader.java");
         assert!(pkg.join("Writer.java").is_file(), "missing Writer.java");
-        assert!(pkg.join("BpsError.java").is_file(), "missing BpsError.java");
+        assert!(pkg.join("BmlError.java").is_file(), "missing BmlError.java");
         if !run_check(&pkg) {
             eprintln!("java_varint_probe_roundtrip: no Java toolchain; skipping {ver:?} execution");
         }
@@ -337,7 +337,7 @@ const CHECK_JAVA: &str = r#"class Check {
         boolean requireThrew = false;
         try {
             Unrouted.Gated.decode(new Reader(new byte[]{(byte) 0x8A, 0x06}));
-        } catch (BpsError e) {
+        } catch (BmlError e) {
             requireThrew = true;
         }
         expect(requireThrew, "require must fail");
@@ -345,7 +345,7 @@ const CHECK_JAVA: &str = r#"class Check {
         boolean shortThrew = false;
         try {
             Unrouted.Probe.decode(new Reader(new byte[]{(byte) 0xAC}));
-        } catch (BpsError e) {
+        } catch (BmlError e) {
             shortThrew = true;
         }
         expect(shortThrew, "short buffer must fail");
@@ -425,7 +425,7 @@ fn roundtrip_schema_packets(schema_rel: &str, tag: &str, min_packets: usize) {
     let program = bytemill::ir::typed::typed(&resolved).unwrap();
     let dir = scratch(&format!("packets-{tag}"));
     bytemill::emit_java::emit_java_with_version(&resolved, &dir, JavaVersion::Java21).unwrap();
-    let pkg = dir.join("bpsgen");
+    let pkg = dir.join("bmlgen");
     let text = generated(&dir);
     let mut body = String::from("class Check {\n    public static void main(String[] args) {\n");
     let mut n = 0;
@@ -523,7 +523,7 @@ fn java_8_26_3_builds() {
             .unwrap();
     let dir = scratch("jdk8-26-3");
     bytemill::emit_java::emit_java_with_version(&resolved, &dir, JavaVersion::Java8).unwrap();
-    let pkg = dir.join("bpsgen");
+    let pkg = dir.join("bmlgen");
     let sources = java_sources(&pkg);
     assert!(sources.len() >= 10, "only {} .java files", sources.len());
     std::fs::write(pkg.join("Check.java"), CHECK_JAVA8).unwrap();

@@ -83,7 +83,7 @@ fn go_unit_codecs() {
     bytemill::emit_go::emit_go(&resolved, &dir).unwrap();
     assert_go_gates(&dir);
     let text = generated(&dir);
-    assert!(text.contains("// Package bpsgen"), "missing package doc");
+    assert!(text.contains("// Package bmlgen"), "missing package doc");
     assert!(text.contains("IDs []int32"), "initialism plural:\n{text}");
     assert!(
         text.contains("make([]int32, 0, int(n))"),
@@ -91,7 +91,7 @@ fn go_unit_codecs() {
     );
     std::fs::write(
         dir.join("unit_test.go"),
-        r#"package bpsgen
+        r#"package bmlgen
 
 import "errors"
 import "testing"
@@ -191,7 +191,7 @@ fn roundtrip_schema(schema_rel: &str, tag: &str, min_packets: usize) -> usize {
     );
     assert_go_gates(&dir);
     let mut body = String::from(
-        "package bpsgen\n\nimport (\n\t\"bytes\"\n\t\"testing\"\n)\n\nfunc TestPackets(t *testing.T) {\n",
+        "package bmlgen\n\nimport (\n\t\"bytes\"\n\t\"testing\"\n)\n\nfunc TestPackets(t *testing.T) {\n",
     );
     let mut n = 0;
     for packet in resolved.packets.values() {

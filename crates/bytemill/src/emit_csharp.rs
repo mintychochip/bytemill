@@ -6,12 +6,12 @@
 //!
 //! # Files
 //!
-//! `BpsGen/Runtime.cs` (reader, writer, errors, helpers) and one
-//! `BpsGen/{category}.cs` per route category (types and codecs, in program
+//! `BmlGen/Runtime.cs` (reader, writer, errors, helpers) and one
+//! `BmlGen/{category}.cs` per route category (types and codecs, in program
 //! order). A packet routed only as `play_clientbound` lands in
 //! `play_clientbound.cs`; a packet routed in several state/direction pairs is
 //! `shared.cs`; encodings, enums, frames, and unrouted packets are
-//! `encoding.cs`/`unrouted.cs`. Everything lives in `namespace BpsGen`.
+//! `encoding.cs`/`unrouted.cs`. Everything lives in `namespace BmlGen`.
 //!
 //! # Names
 //!
@@ -38,9 +38,9 @@
 //! # Codecs
 //!
 //! Every codec body lowers to plain C# statements over the runtime: failures
-//! throw `BpsError` carrying the codec name and the reader offset on decode;
+//! throw `BmlError` carrying the codec name and the reader offset on decode;
 //! integer arithmetic is unchecked (wrapping); signed division and modulo use
-//! `BpsInt` floor helpers when the dividend may be negative. All locals are
+//! `BmlInt` floor helpers when the dividend may be negative. All locals are
 //! declared up front with their zero value, so every path compiles.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -55,7 +55,7 @@ use crate::ir::typed::{
     Stmt, Ty, TypeIdx, VariantIdx, WriteOp, byte_literal, diverges, escape, hex_literal,
 };
 
-/// `emit csharp`: write `BpsGen/Runtime.cs` and one file per
+/// `emit csharp`: write `BmlGen/Runtime.cs` and one file per
 /// [`Program::output_stem`].
 pub fn emit_csharp(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     emit_csharp_with_version(resolved, out_dir, CSharpVersion::default())
@@ -69,7 +69,7 @@ pub fn emit_csharp_with_version(
     let program = crate::ir::typed(resolved)?;
     let mut printer = Printer::new(&program, ver)?;
     let files = printer.files()?;
-    let root = out_dir.join("BpsGen");
+    let root = out_dir.join("BmlGen");
     fs::create_dir_all(&root).map_err(|e| emit(e.to_string()))?;
     fs::write(root.join("Runtime.cs"), printer.runtime_cs()).map_err(|e| emit(e.to_string()))?;
     for (stem, body) in files {
@@ -280,7 +280,7 @@ impl<'a> Data<'a> {
         let mut taken = BTreeSet::new();
         // Runtime identifiers are taken before any type claims its name.
         for reserved in [
-            "BpsError", "Reader", "Writer", "BpsInt", "BpsText", "Runtime",
+            "BmlError", "Reader", "Writer", "BmlInt", "BmlText", "Runtime",
         ] {
             taken.insert(reserved.to_string());
         }
@@ -601,22 +601,22 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace BpsGen
+namespace BmlGen
 {
     /// <summary>Thrown when decoding or encoding fails.</summary>
-    public class BpsError : Exception
+    public class BmlError : Exception
     {
-        public BpsError(string message)
+        public BmlError(string message)
             : base(message)
         {
         }
 
-        public BpsError(string codec, string message)
+        public BmlError(string codec, string message)
             : base(codec + ": " + message)
         {
         }
 
-        public BpsError(string codec, int offset, string message)
+        public BmlError(string codec, int offset, string message)
             : base(codec + " at offset " + offset + ": " + message)
         {
         }
@@ -648,7 +648,7 @@ namespace BpsGen
         {
             if (_pos >= _span.Length)
             {
-                throw new BpsError("short buffer");
+                throw new BmlError("short buffer");
             }
             return _span[_pos];
         }
@@ -657,7 +657,7 @@ namespace BpsGen
         {
             if (n < 0 || _pos + n > _span.Length)
             {
-                throw new BpsError("short buffer");
+                throw new BmlError("short buffer");
             }
             _pos += n;
         }
@@ -666,7 +666,7 @@ namespace BpsGen
         {
             if (_pos >= _span.Length)
             {
-                throw new BpsError("short buffer");
+                throw new BmlError("short buffer");
             }
             return _span[_pos++];
         }
@@ -675,7 +675,7 @@ namespace BpsGen
         {
             if (n < 0 || _pos + n > _span.Length)
             {
-                throw new BpsError("short buffer");
+                throw new BmlError("short buffer");
             }
             byte[] result = _span.Slice(_pos, n).ToArray();
             _pos += n;
@@ -729,7 +729,7 @@ namespace BpsGen
         {
             if (n < 0 || value.Length > n)
             {
-                throw new BpsError("bytes longer than fixed length");
+                throw new BmlError("bytes longer than fixed length");
             }
             _buf.AddRange(value);
             for (long i = value.Length; i < n; i++)
@@ -765,7 +765,7 @@ namespace BpsGen
     }
 
     /// <summary>Integer arithmetic with BPS semantics (floor division).</summary>
-    public static class BpsInt
+    public static class BmlInt
     {
         public static long Div(long a, long b)
         {
@@ -801,7 +801,7 @@ namespace BpsGen
     }
 
     /// <summary>UTF-8 and string helpers.</summary>
-    public static class BpsText
+    public static class BmlText
     {
         private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
 
@@ -813,11 +813,11 @@ namespace BpsGen
             }
             catch (DecoderFallbackException e)
             {
-                throw new BpsError("invalid utf-8: " + e.Message);
+                throw new BmlError("invalid utf-8: " + e.Message);
             }
             catch (ArgumentException e)
             {
-                throw new BpsError("invalid utf-8: " + e.Message);
+                throw new BmlError("invalid utf-8: " + e.Message);
             }
         }
 
@@ -829,11 +829,11 @@ namespace BpsGen
             }
             catch (DecoderFallbackException)
             {
-                throw new BpsError(codec, offset, "invalid utf-8");
+                throw new BmlError(codec, offset, "invalid utf-8");
             }
             catch (ArgumentException)
             {
-                throw new BpsError(codec, offset, "invalid utf-8");
+                throw new BmlError(codec, offset, "invalid utf-8");
             }
         }
 
@@ -876,12 +876,12 @@ impl Printer<'_> {
 }
 
 // ----------------------------------------------------------------------
-// BpsGen/{stem}.cs
+// BmlGen/{stem}.cs
 // ----------------------------------------------------------------------
 
 fn cs_file(body: &str) -> String {
     let mut out = String::from(
-        "// <auto-generated>\n// This file was generated by bml from a BPS binary-protocol schema.\n// Do not edit: regenerate with `bml emit csharp`.\n#nullable disable\nusing System;\nusing System.Collections.Generic;\nusing System.Text;\n\nnamespace BpsGen\n{\n",
+        "// <auto-generated>\n// This file was generated by bml from a BPS binary-protocol schema.\n// Do not edit: regenerate with `bml emit csharp`.\n#nullable disable\nusing System;\nusing System.Collections.Generic;\nusing System.Text;\n\nnamespace BmlGen\n{\n",
     );
     for line in body.lines() {
         if line.trim().is_empty() {
@@ -1235,7 +1235,7 @@ impl Printer<'_> {
         bg.stmts(&decode_body.stmts)?;
         if !diverges(&decode_body.stmts) {
             bg.line(&format!(
-                "throw new BpsError({}, r.Offset, \"unreachable\");",
+                "throw new BmlError({}, r.Offset, \"unreachable\");",
                 cs_quote(&bg.codec)
             ));
         }
@@ -1486,14 +1486,14 @@ impl<'a> BodyGen<'a> {
     fn fail(&self, message: &str) -> String {
         if self.is_decode {
             format!(
-                "throw new BpsError({}, {}.Offset, {});",
+                "throw new BmlError({}, {}.Offset, {});",
                 cs_quote(&self.codec),
                 self.cursor,
                 cs_quote(message)
             )
         } else {
             format!(
-                "throw new BpsError({}, {});",
+                "throw new BmlError({}, {});",
                 cs_quote(&self.codec),
                 cs_quote(message)
             )
@@ -1540,12 +1540,12 @@ impl<'a> BodyGen<'a> {
                 let d = self.local(dst.local);
                 if self.is_decode {
                     self.line(&format!(
-                        "{d} = BpsText.DecodeUtf8({text}, {}, {}.Offset);",
+                        "{d} = BmlText.DecodeUtf8({text}, {}, {}.Offset);",
                         cs_quote(&self.codec),
                         self.cursor
                     ));
                 } else {
-                    self.line(&format!("{d} = BpsText.DecodeUtf8({text});"));
+                    self.line(&format!("{d} = BmlText.DecodeUtf8({text});"));
                 }
                 Ok(())
             }
@@ -1767,36 +1767,36 @@ impl<'a> BodyGen<'a> {
         }
     }
 
-    /// `new BpsError(...)` as an expression (for `?? throw`).
+    /// `new BmlError(...)` as an expression (for `?? throw`).
     fn fail_expr(&self, message: &str) -> String {
         if self.is_decode {
             format!(
-                "throw new BpsError({}, {}.Offset, {})",
+                "throw new BmlError({}, {}.Offset, {})",
                 cs_quote(&self.codec),
                 self.cursor,
                 cs_quote(message)
             )
         } else {
             format!(
-                "throw new BpsError({}, {})",
+                "throw new BmlError({}, {})",
                 cs_quote(&self.codec),
                 cs_quote(message)
             )
         }
     }
 
-    /// `BpsError(...)` constructor arguments for an interpolated message.
+    /// `BmlError(...)` constructor arguments for an interpolated message.
     fn fail_call(&self, message: &str) -> String {
         if self.is_decode {
             format!(
-                "BpsError({}, {}.Offset, ${})",
+                "BmlError({}, {}.Offset, ${})",
                 cs_quote(&self.codec),
                 self.cursor,
                 cs_quote(message)
             )
         } else {
             format!(
-                "BpsError({}, ${})",
+                "BmlError({}, ${})",
                 cs_quote(&self.codec),
                 cs_quote(message)
             )
@@ -1818,7 +1818,7 @@ impl<'a> BodyGen<'a> {
             let t = self.data.prog.codecs[codec].ty.unwrap();
             // A record property can share a type's PascalCase name; the
             // qualified name still resolves as a type inside the body.
-            format!("global::BpsGen.{}.Decode", self.data.type_cs[t])
+            format!("global::BmlGen.{}.Decode", self.data.type_cs[t])
         } else {
             format!(
                 "{}.Decode",
@@ -2033,19 +2033,19 @@ impl BodyGen<'_> {
                         Expr::Int { value, .. } => value.to_string(),
                         other => format!("(int)({})", self.as_i64(other)?),
                     };
-                    Ok(format!("BpsInt.SignExtend({value}, {bits})"))
+                    Ok(format!("BmlInt.SignExtend({value}, {bits})"))
                 }
                 Func::Utf16Units => {
                     let text = self.expr(&args[0])?;
-                    Ok(format!("BpsText.Utf16Units({text})"))
+                    Ok(format!("BmlText.Utf16Units({text})"))
                 }
                 Func::Utf8Len => {
                     let text = self.expr(&args[0])?;
-                    Ok(format!("BpsText.Utf8Len({text})"))
+                    Ok(format!("BmlText.Utf8Len({text})"))
                 }
                 Func::StrLen => {
                     let text = self.expr(&args[0])?;
-                    Ok(format!("BpsText.StrLen({text})"))
+                    Ok(format!("BmlText.StrLen({text})"))
                 }
                 Func::BytesLen => {
                     let text = self.expr(&args[0])?;
@@ -2068,7 +2068,7 @@ impl BodyGen<'_> {
             },
             Expr::StrBytes(inner) => {
                 let text = self.expr(inner)?;
-                Ok(format!("BpsText.EncodeUtf8({text})"))
+                Ok(format!("BmlText.EncodeUtf8({text})"))
             }
             Expr::Remaining => {
                 if !self.is_decode {
@@ -2145,9 +2145,9 @@ impl BodyGen<'_> {
         };
         if negative && matches!(op, BinOp::Div | BinOp::Mod) {
             let helper = if op == BinOp::Div {
-                "BpsInt.Div"
+                "BmlInt.Div"
             } else {
-                "BpsInt.Mod"
+                "BmlInt.Mod"
             };
             let left = self.as_i64(lhs)?;
             let right = self.as_i64(rhs)?;

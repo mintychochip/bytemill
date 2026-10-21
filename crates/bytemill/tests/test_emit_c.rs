@@ -80,7 +80,7 @@ fn clang_format_gate(dir: &std::path::Path) {
     }
 }
 
-/// Compile `check.c` against `bpsgen.c` with the strict gate, run it, and
+/// Compile `check.c` against `bmlgen.c` with the strict gate, run it, and
 /// return its stdout. `extra` adds flags such as `-O2`.
 fn compile_and_run(dir: &std::path::Path, extra: &[&str]) -> String {
     let mut sources: Vec<_> = std::fs::read_dir(dir)
@@ -156,29 +156,29 @@ fn c_varint_values() {
         "varint decode takes no allocator"
     );
     let body = format!(
-        r#"#include "bpsgen.h"
+        r#"#include "bmlgen.h"
 #include <stdio.h>
 #include <string.h>
 int main(void) {{
-    {{ uint8_t raw[] = {{0xac, 0x02}}; bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
-      if ({dec}(&r, &v) != BPS_OK || v != 300) {{ printf("decode 300 got %d\n", (int)v); return 1; }} }}
-    {{ bps_writer w = {{NULL, 0, 0, NULL, NULL}}; bps_alloc al = {{NULL, NULL, NULL}};
-      if ({enc}(&w, &al, 300) != BPS_OK || w.len != 2 || w.data[0] != 0xac || w.data[1] != 0x02) {{ printf("encode 300\n"); return 1; }}
-      bps_free(&al, w.data); }}
-    {{ uint8_t raw[] = {{0xff, 0xff, 0xff, 0xff, 0x0f}}; bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
-      if ({dec}(&r, &v) != BPS_OK || v != -1) {{ printf("decode -1\n"); return 1; }} }}
-    {{ bps_writer w = {{NULL, 0, 0, NULL, NULL}}; bps_alloc al = {{NULL, NULL, NULL}};
-      if ({enc}(&w, &al, -1) != BPS_OK || w.len != 5 || w.data[0] != 0xff || w.data[4] != 0x0f) {{ printf("encode -1\n"); return 1; }}
-      bps_free(&al, w.data); }}
-    {{ uint8_t raw[] = {{0xac}}; bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
-      bps_status s = {dec}(&r, &v);
-      if (s != BPS_ERR_SHORT || r.error_codec == NULL || strcmp(r.error_codec, "{dec}") != 0 || r.pos != 1) {{
-          printf("short %s %d\n", bps_status_str(s), (int)r.pos); return 1; }} }}
-    {{ uint8_t raw[] = {{0x80, 0x80, 0x80, 0x80, 0x80}}; bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
-      bps_status s = {dec}(&r, &v);
-      if (s != BPS_ERR_REQUIRE || r.error_detail == NULL
+    {{ uint8_t raw[] = {{0xac, 0x02}}; bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
+      if ({dec}(&r, &v) != BML_OK || v != 300) {{ printf("decode 300 got %d\n", (int)v); return 1; }} }}
+    {{ bml_writer w = {{NULL, 0, 0, NULL, NULL}}; bml_alloc al = {{NULL, NULL, NULL}};
+      if ({enc}(&w, &al, 300) != BML_OK || w.len != 2 || w.data[0] != 0xac || w.data[1] != 0x02) {{ printf("encode 300\n"); return 1; }}
+      bml_free(&al, w.data); }}
+    {{ uint8_t raw[] = {{0xff, 0xff, 0xff, 0xff, 0x0f}}; bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
+      if ({dec}(&r, &v) != BML_OK || v != -1) {{ printf("decode -1\n"); return 1; }} }}
+    {{ bml_writer w = {{NULL, 0, 0, NULL, NULL}}; bml_alloc al = {{NULL, NULL, NULL}};
+      if ({enc}(&w, &al, -1) != BML_OK || w.len != 5 || w.data[0] != 0xff || w.data[4] != 0x0f) {{ printf("encode -1\n"); return 1; }}
+      bml_free(&al, w.data); }}
+    {{ uint8_t raw[] = {{0xac}}; bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
+      bml_status s = {dec}(&r, &v);
+      if (s != BML_ERR_SHORT || r.error_codec == NULL || strcmp(r.error_codec, "{dec}") != 0 || r.pos != 1) {{
+          printf("short %s %d\n", bml_status_str(s), (int)r.pos); return 1; }} }}
+    {{ uint8_t raw[] = {{0x80, 0x80, 0x80, 0x80, 0x80}}; bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {vt} v = 0;
+      bml_status s = {dec}(&r, &v);
+      if (s != BML_ERR_REQUIRE || r.error_detail == NULL
           || strcmp(r.error_detail, "require failed: (b4 & 0x80) == 0") != 0) {{
-          printf("require %s\n", bps_status_str(s)); return 1; }} }}
+          printf("require %s\n", bml_status_str(s)); return 1; }} }}
     printf("varint ok\n");
     return 0;
 }}
@@ -235,27 +235,27 @@ packet probe_req {
         format!("{rdec}(&r, &q)")
     };
     let body = format!(
-        r#"#include "bpsgen.h"
+        r#"#include "bmlgen.h"
 #include <stdio.h>
 #include <string.h>
 int main(void) {{
-    bps_alloc al = {{NULL, NULL, NULL}};
+    bml_alloc al = {{NULL, NULL, NULL}};
     {{ uint8_t raw[] = {{0x3f, 0x80, 0x00, 0x00, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}};
-      bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {tn} v; memset(&v, 0, sizeof v);
-      if ({dcall} != BPS_OK || v.a != 1.0f || v.b != 1.0) {{ printf("decode floats\n"); return 1; }}
-      bps_writer w = {{NULL, 0, 0, NULL, NULL}};
-      if ({enc}(&w, &al, &v) != BPS_OK || w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{
+      bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {tn} v; memset(&v, 0, sizeof v);
+      if ({dcall} != BML_OK || v.a != 1.0f || v.b != 1.0) {{ printf("decode floats\n"); return 1; }}
+      bml_writer w = {{NULL, 0, 0, NULL, NULL}};
+      if ({enc}(&w, &al, &v) != BML_OK || w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{
           printf("encode floats\n"); return 1; }}
-      bps_free(&al, w.data);
+      bml_free(&al, w.data);
       {free}(&al, &v); }}
-    {{ uint8_t raw[] = {{0x3f, 0x80, 0x00}}; bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {tn} v; memset(&v, 0, sizeof v);
-      if ({dcall} != BPS_ERR_SHORT) {{ printf("short floats\n"); return 1; }}
+    {{ uint8_t raw[] = {{0x3f, 0x80, 0x00}}; bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {tn} v; memset(&v, 0, sizeof v);
+      if ({dcall} != BML_ERR_SHORT) {{ printf("short floats\n"); return 1; }}
       {free}(&al, &v); }}
-    {{ uint8_t raw[] = {{0x01}}; bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {rtn} q; memset(&q, 0, sizeof q);
-      bps_status s = {rdcall};
-      if (s != BPS_ERR_REQUIRE || r.error_codec == NULL || strcmp(r.error_codec, "{rdec}") != 0
+    {{ uint8_t raw[] = {{0x01}}; bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}}; {rtn} q; memset(&q, 0, sizeof q);
+      bml_status s = {rdcall};
+      if (s != BML_ERR_REQUIRE || r.error_codec == NULL || strcmp(r.error_codec, "{rdec}") != 0
           || r.error_detail == NULL || strcmp(r.error_detail, "require failed: v == 777") != 0) {{
-          printf("require %s\n", bps_status_str(s)); return 1; }}
+          printf("require %s\n", bml_status_str(s)); return 1; }}
       {rfree}(&al, &q); }}
     printf("probe ok\n");
     return 0;
@@ -268,7 +268,7 @@ int main(void) {{
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-const COUNTING_ALLOC: &str = r#"#include "bpsgen.h"
+const COUNTING_ALLOC: &str = r#"#include "bmlgen.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -349,7 +349,7 @@ fn packet_harness(resolved: &bytemill::ResolvedSchema, program: &Program) -> (St
         };
         let len = bytes.len();
         body.push_str(&format!(
-            "static void check_{n}(void) {{\n    static const uint8_t raw[] = {{{raw}}};\n    bps_reader r = {{raw, {len}, 0, NULL, NULL}};\n    bps_alloc al = {{cnt_malloc, cnt_free, NULL}};\n    {tn} v; memset(&v, 0, sizeof v);\n    bps_writer w = {{NULL, 0, 0, NULL, NULL}};\n    if ({dcall} != BPS_OK) {{ printf(\"decode {name}: %s %s\\n\", r.error_codec ? r.error_codec : \"?\", r.error_detail ? r.error_detail : \"?\"); fails += 1; check_live(\"{name}-decode\"); return; }}\n    if ({enc}(&w, &al, &v) != BPS_OK) {{ printf(\"encode {name}: %s %s\\n\", w.error_codec ? w.error_codec : \"?\", w.error_detail ? w.error_detail : \"?\"); {free}(&al, &v); bps_free(&al, w.data); w.data = NULL; fails += 1; check_live(\"{name}-encode\"); return; }}\n    if (w.len != {len} || ({len} != 0 && memcmp(w.data, raw, {len}) != 0)) {{ printf(\"bytes {name} %lu\\n\", (unsigned long)w.len); fails += 1; }}\n    bps_free(&al, w.data);\n    {free}(&al, &v);\n    check_live(\"{name}\");\n}}\n",
+            "static void check_{n}(void) {{\n    static const uint8_t raw[] = {{{raw}}};\n    bml_reader r = {{raw, {len}, 0, NULL, NULL}};\n    bml_alloc al = {{cnt_malloc, cnt_free, NULL}};\n    {tn} v; memset(&v, 0, sizeof v);\n    bml_writer w = {{NULL, 0, 0, NULL, NULL}};\n    if ({dcall} != BML_OK) {{ printf(\"decode {name}: %s %s\\n\", r.error_codec ? r.error_codec : \"?\", r.error_detail ? r.error_detail : \"?\"); fails += 1; check_live(\"{name}-decode\"); return; }}\n    if ({enc}(&w, &al, &v) != BML_OK) {{ printf(\"encode {name}: %s %s\\n\", w.error_codec ? w.error_codec : \"?\", w.error_detail ? w.error_detail : \"?\"); {free}(&al, &v); bml_free(&al, w.data); w.data = NULL; fails += 1; check_live(\"{name}-encode\"); return; }}\n    if (w.len != {len} || ({len} != 0 && memcmp(w.data, raw, {len}) != 0)) {{ printf(\"bytes {name} %lu\\n\", (unsigned long)w.len); fails += 1; }}\n    bml_free(&al, w.data);\n    {free}(&al, &v);\n    check_live(\"{name}\");\n}}\n",
         ));
         n += 1;
     }
@@ -407,20 +407,20 @@ fn c_field_names_never_collide_with_codec_locals() {
     clang_format_gate(&dir);
     std::fs::write(
         dir.join("check.c"),
-        r#"#include "bpsgen.h"
+        r#"#include "bmlgen.h"
 #include <stdio.h>
 #include <string.h>
 int main(void) {
     uint8_t raw[] = {1, 2, 3, 4, 5, 6};
-    bps_reader r = {raw, sizeof raw, 0, NULL, NULL};
-    bps_clash v;
-    if (bps_decode_clash(&r, &v) != BPS_OK) { printf("decode\n"); return 1; }
+    bml_reader r = {raw, sizeof raw, 0, NULL, NULL};
+    bml_clash v;
+    if (bml_decode_clash(&r, &v) != BML_OK) { printf("decode\n"); return 1; }
     if (v.s != 1 || v.r != 2 || v.a != 3 || v.out != 4 || v.w != 5 || v.value != 6) {
         printf("fields\n"); return 1;
     }
     uint8_t buf[16];
-    bps_writer w = {buf, 0, sizeof buf, NULL, NULL};
-    if (bps_encode_clash(&w, NULL, &v) != BPS_OK) { printf("encode\n"); return 1; }
+    bml_writer w = {buf, 0, sizeof buf, NULL, NULL};
+    if (bml_encode_clash(&w, NULL, &v) != BML_OK) { printf("encode\n"); return 1; }
     if (w.len != 6 || memcmp(w.data, raw, 6) != 0) { printf("bytes\n"); return 1; }
     printf("clash ok\n");
     return 0;
@@ -537,7 +537,7 @@ fn packet_roundtrip_block(program: &Program, name: &str, raw: &[u8]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "    {{ static const uint8_t raw[] = {{{bytes}}};\n      bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}};\n      bps_writer w = {{NULL, 0, 0, NULL, NULL}};\n      {tn} v;\n      memset(&v, 0, sizeof v);\n      if ({dcall} != BPS_OK) {{ printf(\"decode {name}\\n\"); return 1; }}\n      if ({enc}(&w, &al, &v) != BPS_OK) {{ printf(\"encode {name}\\n\"); return 1; }}\n      if (w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{ printf(\"bytes {name}\\n\"); return 1; }}\n      {free}(&al, &v);\n      bps_free(&al, w.data); }}\n"
+        "    {{ static const uint8_t raw[] = {{{bytes}}};\n      bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}};\n      bml_writer w = {{NULL, 0, 0, NULL, NULL}};\n      {tn} v;\n      memset(&v, 0, sizeof v);\n      if ({dcall} != BML_OK) {{ printf(\"decode {name}\\n\"); return 1; }}\n      if ({enc}(&w, &al, &v) != BML_OK) {{ printf(\"encode {name}\\n\"); return 1; }}\n      if (w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{ printf(\"bytes {name}\\n\"); return 1; }}\n      {free}(&al, &v);\n      bml_free(&al, w.data); }}\n"
     )
 }
 
@@ -553,7 +553,7 @@ fn varint_roundtrip_block(program: &Program, raw: &[u8], value: i64) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "    {{ static const uint8_t raw[] = {{{bytes}}};\n      bps_reader r = {{raw, sizeof raw, 0, NULL, NULL}};\n      bps_writer w = {{NULL, 0, 0, NULL, NULL}};\n      {vt} v = 0;\n      if ({dec}(&r, &v) != BPS_OK || v != {value}) {{ printf(\"decode varint\\n\"); return 1; }}\n      if ({enc}(&w, &al, {value}) != BPS_OK) {{ printf(\"encode varint\\n\"); return 1; }}\n      if (w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{ printf(\"bytes varint\\n\"); return 1; }}\n      bps_free(&al, w.data); }}\n"
+        "    {{ static const uint8_t raw[] = {{{bytes}}};\n      bml_reader r = {{raw, sizeof raw, 0, NULL, NULL}};\n      bml_writer w = {{NULL, 0, 0, NULL, NULL}};\n      {vt} v = 0;\n      if ({dec}(&r, &v) != BML_OK || v != {value}) {{ printf(\"decode varint\\n\"); return 1; }}\n      if ({enc}(&w, &al, {value}) != BML_OK) {{ printf(\"encode varint\\n\"); return 1; }}\n      if (w.len != sizeof raw || memcmp(w.data, raw, sizeof raw) != 0) {{ printf(\"bytes varint\\n\"); return 1; }}\n      bml_free(&al, w.data); }}\n"
     )
 }
 
@@ -564,7 +564,7 @@ fn std_roundtrip(std: bytemill::CStandard, flag: &str, tag: &str) {
     let dir = emit_dir(tag);
     emit_with(&resolved, &dir, std);
     let mut body = String::from(
-        "#include \"bpsgen.h\"\n#include <stdio.h>\n#include <string.h>\nint main(void) {\n    bps_alloc al = {NULL, NULL, NULL};\n",
+        "#include \"bmlgen.h\"\n#include <stdio.h>\n#include <string.h>\nint main(void) {\n    bml_alloc al = {NULL, NULL, NULL};\n",
     );
     body.push_str(&varint_roundtrip_block(&program, &[0xac, 0x02], 300));
     body.push_str(&packet_roundtrip_block(&program, "probe_seq", &[2, 7, 9]));

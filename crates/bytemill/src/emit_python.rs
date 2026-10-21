@@ -1,4 +1,4 @@
-//! `emit python`: a stdlib-only `bpsgen` package printed from the typed program.
+//! `emit python`: a stdlib-only `bmlgen` package printed from the typed program.
 //!
 //! Every codec becomes typed Python: records are
 //! `@dataclasses.dataclass(slots=True, kw_only=True)` classes with
@@ -14,9 +14,9 @@
 //! annotated only where `mypy --strict` needs it (`None`/`[]` initializers,
 //! multi-arm joins).
 //!
-//! Errors carry the offset as data: `BpsError.offset` is set by every
+//! Errors carry the offset as data: `BmlError.offset` is set by every
 //! constructor that knows a cursor position, and the same offset stays in the
-//! message text. Each codec body wraps in `try/except BpsError`, which tags
+//! message text. Each codec body wraps in `try/except BmlError`, which tags
 //! the codec path (`in_codec`) on the way out, so raises in the body are
 //! plain constructors (`raise X(...)`). The package passes
 //! `python3 -m compileall`, `ruff format --check`, `ruff check`, and
@@ -47,7 +47,7 @@ const KEYWORDS: &[&str] = &[
 /// Lines longer than this are split the way `ruff format` would split them.
 const MAX_WIDTH: usize = 88;
 
-const RUNTIME: &str = r#"class BpsError(Exception):
+const RUNTIME: &str = r#"class BmlError(Exception):
     """Base error for codec failures.
 
     ``offset`` is where the failure surfaced (``None`` when it has no
@@ -69,7 +69,7 @@ const RUNTIME: &str = r#"class BpsError(Exception):
         return f"{base} [in {' <- '.join(self.codecs)}]" if self.codecs else base
 
 
-class ShortBuffer(BpsError):
+class ShortBuffer(BmlError):
     """Not enough bytes left: needed ``need``, had ``have``, at ``offset``."""
 
     def __init__(self, offset: int, need: int, have: int) -> None:
@@ -78,35 +78,35 @@ class ShortBuffer(BpsError):
         )
 
 
-class RequireFailed(BpsError):
+class RequireFailed(BmlError):
     """A ``require`` did not hold: schema text in ``condition``."""
 
     def __init__(self, offset: int, condition: str) -> None:
         super().__init__(f"require failed at offset {offset}: {condition}", offset)
 
 
-class InvalidUtf8(BpsError):
+class InvalidUtf8(BmlError):
     """Bytes at ``offset`` are not valid UTF-8."""
 
     def __init__(self, offset: int) -> None:
         super().__init__(f"invalid UTF-8 at offset {offset}", offset)
 
 
-class NoMatchArm(BpsError):
+class NoMatchArm(BmlError):
     """A ``match`` had no arm for ``tag`` (decode) or no variant fit (encode)."""
 
     def __init__(self, offset: int, tag: int) -> None:
         super().__init__(f"no match arm for tag {tag} at offset {offset}", offset)
 
 
-class MissingField(BpsError):
+class MissingField(BmlError):
     """An absent optional field was needed: schema field ``field``."""
 
     def __init__(self, offset: int, field: str) -> None:
         super().__init__(f"missing optional field at offset {offset}: {field}", offset)
 
 
-class WrongVariant(BpsError):
+class WrongVariant(BmlError):
     """On encode, the value was not the variant the tag selects."""
 
     def __init__(self, offset: int, expected: str, tag: int) -> None:
@@ -115,14 +115,14 @@ class WrongVariant(BpsError):
         )
 
 
-class NegativeLength(BpsError):
+class NegativeLength(BmlError):
     """A decoded length/count prefix was negative."""
 
     def __init__(self, offset: int, length: int) -> None:
         super().__init__(f"negative length at offset {offset}: {length}", offset)
 
 
-class BytesTooLong(BpsError):
+class BytesTooLong(BmlError):
     """A ``bytes(n)`` value of ``length`` bytes does not fit in ``size``."""
 
     def __init__(self, offset: int, length: int, size: int) -> None:
@@ -131,7 +131,7 @@ class BytesTooLong(BpsError):
         )
 
 
-class EncodeUntilEnd(BpsError):
+class EncodeUntilEnd(BmlError):
     """A repeat-until-end list cannot be encoded (no terminator to write)."""
 
     def __init__(self) -> None:
@@ -263,7 +263,7 @@ def _missing_(cls, value: object) -> Self | None:
     return unknown
 "#;
 
-/// Emit the `bpsgen` package for `resolved` into `out_dir`.
+/// Emit the `bmlgen` package for `resolved` into `out_dir`.
 pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     emit_python_with_version(resolved, out_dir, crate::PythonVersion::default())
 }
@@ -275,7 +275,7 @@ pub fn emit_python_with_version(
 ) -> BpsResult<()> {
     let program = crate::ir::typed(resolved)?;
     let parts = emit_program(&program, ver)?;
-    let pkg = out_dir.join("bpsgen");
+    let pkg = out_dir.join("bmlgen");
     fs::create_dir_all(&pkg).map_err(|e| emit(e.to_string()))?;
     let deps = stem_deps(&program);
     let reps = collapse_cycles(&deps);
@@ -315,7 +315,7 @@ pub fn emit_python_with_version(
     let mut init =
         String::from("\"\"\"Generated BPS codecs, one module per route category.\"\"\"\n\n");
     for name in &names {
-        init.push_str(&format!("from bpsgen.{name} import *\n"));
+        init.push_str(&format!("from bmlgen.{name} import *\n"));
     }
     let mut public: Vec<String> = merged.values().flat_map(|body| all_names(body)).collect();
     public.sort_by_key(|name| isort_key(name));
@@ -382,7 +382,7 @@ fn py_preamble(stem: &str, body: &str, deps: &[String], ver: crate::PythonVersio
     }
     let first_party: Vec<String> = deps
         .iter()
-        .map(|dep| format!("from bpsgen.{dep} import *"))
+        .map(|dep| format!("from bmlgen.{dep} import *"))
         .collect();
     let groups: Vec<String> = [stdlib, first_party]
         .into_iter()
@@ -398,7 +398,7 @@ fn py_preamble(stem: &str, body: &str, deps: &[String], ver: crate::PythonVersio
 }
 
 /// Names a category module actually defines. Star-imports then cannot leak
-/// `struct` or `enum`, or one category's helper, into `bpsgen`.
+/// `struct` or `enum`, or one category's helper, into `bmlgen`.
 fn py_all(body: &str) -> String {
     let names = all_names(body);
     if names.is_empty() {
@@ -414,7 +414,7 @@ fn py_all(body: &str) -> String {
 
 /// The public names of one module body, in ruff's RUF022 order: classes,
 /// functions, `TypeAlias` aliases, and module constants a star-import
-/// re-exports (`from bpsgen.x import *` lines are not definitions).
+/// re-exports (`from bmlgen.x import *` lines are not definitions).
 fn all_names(body: &str) -> Vec<String> {
     let mut names = Vec::new();
     for line in body.lines() {
@@ -1417,7 +1417,7 @@ impl<'a> Emitter<'a> {
 
     /// A docstring plus its body; an empty body needs no `pass` (ruff PIE790:
     /// the docstring alone is a complete body). A non-empty body runs inside
-    /// `try/except BpsError`, which tags the codec path on the way out, so
+    /// `try/except BmlError`, which tags the codec path on the way out, so
     /// raises in the body are plain constructors.
     fn doc_and_body(&mut self, doc: &str, f: &FCtx, stmts: &[Stmt]) {
         self.nested(|e| {
@@ -1425,7 +1425,7 @@ impl<'a> Emitter<'a> {
             if !stmts.is_empty() {
                 e.line("try:");
                 e.fn_body(f, stmts);
-                e.line("except BpsError as exc:");
+                e.line("except BmlError as exc:");
                 e.indent += 1;
                 e.line(&format!("exc.in_codec(\"{}\")", f.cname));
                 e.line("raise");

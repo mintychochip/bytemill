@@ -1,4 +1,4 @@
-//! `emit c`: C11 `bpsgen.h` plus one `{category}.c` per route category.
+//! `emit c`: C11 `bmlgen.h` plus one `{category}.c` per route category.
 //!
 //! The emitted tree is `clang-format`-canonical (LLVM style, 2-space indent,
 //! 80 columns): the writer runs its output through `clang-format -i` when the
@@ -6,8 +6,8 @@
 //! result must find nothing to change. Missing the tool leaves the writer's
 //! output as it stands.
 //!
-//! Every codec of [`Program`] becomes a `bps_decode_<snake>` /
-//! `bps_encode_<snake>` pair over an explicit reader/writer; every record a
+//! Every codec of [`Program`] becomes a `bml_decode_<snake>` /
+//! `bml_encode_<snake>` pair over an explicit reader/writer; every record a
 //! `typedef struct`, every sum a tag enum (numbered from 1, so the zero
 //! state is invalid and freeing it is always safe) plus a struct with an
 //! anonymous union, every open enum a `typedef` of its base with constants.
@@ -16,14 +16,14 @@
 //! allocation sizes are spelled where the pointer is (`sizeof *p`), never from
 //! a repeated type name.
 //!
-//! There is no global state: every fallible call runs through `BPS_TRY` and
+//! There is no global state: every fallible call runs through `BML_TRY` and
 //! jumps to a shared `fail:` label, which reports the codec (`const char
 //! *error_codec`) and a detail (`const char *error_detail`, the `require`
 //! text, the missing field, or the status name) once, through the reader or
-//! writer next to the [`bps_status`] return; the offset is the reader's `pos`.
+//! writer next to the [`bml_status`] return; the offset is the reader's `pos`.
 //! Decode output is owned by the caller and released with the per-type
-//! `bps_free_<snake>` (or `bps_free_str` / `bps_free_bytes`); the writer
-//! buffer is released with `bps_free` on the same allocator. `NULL` (or NULL
+//! `bml_free_<snake>` (or `bml_free_str` / `bml_free_bytes`); the writer
+//! buffer is released with `bml_free` on the same allocator. `NULL` (or NULL
 //! callbacks) selects libc `malloc`/`free`.
 //!
 //! Records keep exactly the typed program's fields: `position` decodes
@@ -31,9 +31,9 @@
 //! the parts. Integer semantics follow the typed program: [`BinOp`]s that
 //! cannot overflow print as plain C operators, wrapping ones go through
 //! `uint64_t`, and `/`, `%`, `>>` on possibly-negative values use the
-//! `bps_div_floor` / `bps_mod_sign` / `bps_shr_arith` helpers. A sum with no
-//! arm for the tag fails with `BPS_ERR_NO_MATCH`; an encode whose value
-//! holds another variant fails with `BPS_ERR_VARIANT`.
+//! `bml_div_floor` / `bml_mod_sign` / `bml_shr_arith` helpers. A sum with no
+//! arm for the tag fails with `BML_ERR_NO_MATCH`; an encode whose value
+//! holds another variant fails with `BML_ERR_VARIANT`.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -96,23 +96,23 @@ const C_KEYWORDS: &[&str] = &[
 
 /// The emitted identifier of a codec's decode function.
 pub fn decode_fn(program: &Program, codec: CodecIdx) -> String {
-    format!("bps_decode_{}", program.codecs[codec].name.snake())
+    format!("bml_decode_{}", program.codecs[codec].name.snake())
 }
 
 /// The emitted identifier of a codec's encode function.
 pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
-    format!("bps_encode_{}", program.codecs[codec].name.snake())
+    format!("bml_encode_{}", program.codecs[codec].name.snake())
 }
 
 /// The emitted identifier of a named type.
 pub fn type_name(program: &Program, ty: TypeIdx) -> String {
-    format!("bps_{}", escape(program.types[ty].name.snake(), C_KEYWORDS))
+    format!("bml_{}", escape(program.types[ty].name.snake(), C_KEYWORDS))
 }
 
 /// The emitted identifier of a named type's free function.
 pub fn free_fn(program: &Program, ty: TypeIdx) -> String {
     format!(
-        "bps_free_{}",
+        "bml_free_{}",
         escape(program.types[ty].name.snake(), C_KEYWORDS)
     )
 }
@@ -130,7 +130,7 @@ fn tag_const(program: &Program, ty: TypeIdx, variant: usize) -> String {
         TypeKind::Sum { variants } => variants[variant].name.screaming(),
         _ => unreachable!("tag of a non-sum"),
     };
-    format!("BPS_{stem}_{arm}")
+    format!("BML_{stem}_{arm}")
 }
 
 /// The emitted constant of an enum member.
@@ -141,7 +141,7 @@ fn enum_const(program: &Program, ty: TypeIdx, member: usize) -> String {
         TypeKind::Enum { members, .. } => members[member].name.screaming(),
         _ => unreachable!("member of a non-enum"),
     };
-    format!("BPS_{stem}_{name}")
+    format!("BML_{stem}_{name}")
 }
 
 fn int_c(ty: IntTy) -> &'static str {
@@ -184,8 +184,8 @@ fn ctype(program: &Program, ty: &Ty) -> BpsResult<String> {
         Ty::Bool => Ok("bool".to_string()),
         Ty::F32 => Ok("float".to_string()),
         Ty::F64 => Ok("double".to_string()),
-        Ty::Str => Ok("bps_str".to_string()),
-        Ty::Bytes => Ok("bps_bytes".to_string()),
+        Ty::Str => Ok("bml_str".to_string()),
+        Ty::Bytes => Ok("bml_bytes".to_string()),
         Ty::List(_) => Err(emit("emit c: lists need a pointer and a length")),
         Ty::Named(t) => Ok(resolved_name(program, *t)?),
     }
@@ -297,7 +297,7 @@ pub fn emit_c_with_standard(
     let program = crate::ir::typed(resolved)?;
     let printer = Gen::new(&program, std)?;
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
-    let header_path = out_dir.join("bpsgen.h");
+    let header_path = out_dir.join("bmlgen.h");
     fs::write(&header_path, printer.header()?).map_err(|e| emit(e.to_string()))?;
     clang_format(&header_path);
     for (stem, body) in printer.sources()? {
@@ -554,105 +554,105 @@ fn named_in(ty: &Ty, out: &mut Vec<TypeIdx>) {
 const RUNTIME_DECLS: &str = r#"/* A fallible call inside a codec body: stores the status in `s` and jumps
    to `fail:` on error. The `fail` label reports the codec once (only when
    no nested codec already did) and, for decode, frees partial output. */
-#define BPS_TRY(call) do { s = (call); if (s != BPS_OK) goto fail; } while (0)
+#define BML_TRY(call) do { s = (call); if (s != BML_OK) goto fail; } while (0)
 typedef enum {
-    BPS_OK = 0,
-    BPS_ERR_SHORT,
-    BPS_ERR_REQUIRE,
-    BPS_ERR_UTF8,
-    BPS_ERR_NO_MATCH,
-    BPS_ERR_MISSING,
-    BPS_ERR_VARIANT,
-    BPS_ERR_NEG_LEN,
-    BPS_ERR_TOO_LONG,
-    BPS_ERR_UNTIL_END,
-    BPS_ERR_NOMEM
-} bps_status;
-const char *bps_status_str(bps_status s);
+    BML_OK = 0,
+    BML_ERR_SHORT,
+    BML_ERR_REQUIRE,
+    BML_ERR_UTF8,
+    BML_ERR_NO_MATCH,
+    BML_ERR_MISSING,
+    BML_ERR_VARIANT,
+    BML_ERR_NEG_LEN,
+    BML_ERR_TOO_LONG,
+    BML_ERR_UNTIL_END,
+    BML_ERR_NOMEM
+} bml_status;
+const char *bml_status_str(bml_status s);
 typedef struct {
     void *(*malloc_fn)(size_t n, void *ctx);
     void (*free_fn)(void *p, void *ctx);
     void *ctx;
-} bps_alloc;
-void *bps_malloc(const bps_alloc *a, size_t n);
-void bps_free(const bps_alloc *a, void *p);
+} bml_alloc;
+void *bml_malloc(const bml_alloc *a, size_t n);
+void bml_free(const bml_alloc *a, void *p);
 typedef struct {
     uint8_t *data;
     size_t len;
-} bps_bytes;
+} bml_bytes;
 typedef struct {
     char *data;
     size_t len;
-} bps_str;
-void bps_free_bytes(const bps_alloc *a, bps_bytes *b);
-void bps_free_str(const bps_alloc *a, bps_str *s);
-bool bps_str_eq(bps_str a, bps_str b);
+} bml_str;
+void bml_free_bytes(const bml_alloc *a, bml_bytes *b);
+void bml_free_str(const bml_alloc *a, bml_str *s);
+bool bml_str_eq(bml_str a, bml_str b);
 typedef struct {
     const uint8_t *data;
     size_t len;
     size_t pos;
     const char *error_codec;
     const char *error_detail;
-} bps_reader;
+} bml_reader;
 typedef struct {
     uint8_t *data;
     size_t len;
     size_t cap;
     const char *error_codec;
     const char *error_detail;
-} bps_writer;
-bps_status bps_read_u8(bps_reader *r, uint8_t *out);
-bps_status bps_peek_u8(bps_reader *r, uint8_t *out);
-bps_status bps_read_bytes(bps_reader *r, const bps_alloc *a, int64_t n, bps_bytes *out);
-bps_status bps_read_rest(bps_reader *r, const bps_alloc *a, bps_bytes *out);
-bps_status bps_read_f32(bps_reader *r, float *out);
-bps_status bps_read_f64(bps_reader *r, double *out);
-int64_t bps_remaining(const bps_reader *r);
-bps_status bps_grow(bps_writer *w, const bps_alloc *a, size_t need);
-bps_status bps_write_u8(bps_writer *w, const bps_alloc *a, uint8_t v);
-bps_status bps_write_bytes(bps_writer *w, const bps_alloc *a, const uint8_t *p, size_t n);
-bps_status bps_write_bytes_pad(bps_writer *w, const bps_alloc *a, const uint8_t *p, size_t n, int64_t total);
-bps_status bps_write_f32(bps_writer *w, const bps_alloc *a, float v);
-bps_status bps_write_f64(bps_writer *w, const bps_alloc *a, double v);
-bool bps_utf8_ok(const uint8_t *s, size_t n);
-int64_t bps_utf16_units(const uint8_t *s, size_t n);
-int64_t bps_str_len(const uint8_t *s, size_t n);
-int64_t bps_sign_extend(int64_t v, int64_t bits);
-int64_t bps_div_floor(int64_t a, int64_t b);
-int64_t bps_mod_sign(int64_t a, int64_t b);
-int64_t bps_shr_arith(int64_t a, int64_t b);
-int64_t bps_min_i64(int64_t a, int64_t b);
-int64_t bps_max_i64(int64_t a, int64_t b);
+} bml_writer;
+bml_status bml_read_u8(bml_reader *r, uint8_t *out);
+bml_status bml_peek_u8(bml_reader *r, uint8_t *out);
+bml_status bml_read_bytes(bml_reader *r, const bml_alloc *a, int64_t n, bml_bytes *out);
+bml_status bml_read_rest(bml_reader *r, const bml_alloc *a, bml_bytes *out);
+bml_status bml_read_f32(bml_reader *r, float *out);
+bml_status bml_read_f64(bml_reader *r, double *out);
+int64_t bml_remaining(const bml_reader *r);
+bml_status bml_grow(bml_writer *w, const bml_alloc *a, size_t need);
+bml_status bml_write_u8(bml_writer *w, const bml_alloc *a, uint8_t v);
+bml_status bml_write_bytes(bml_writer *w, const bml_alloc *a, const uint8_t *p, size_t n);
+bml_status bml_write_bytes_pad(bml_writer *w, const bml_alloc *a, const uint8_t *p, size_t n, int64_t total);
+bml_status bml_write_f32(bml_writer *w, const bml_alloc *a, float v);
+bml_status bml_write_f64(bml_writer *w, const bml_alloc *a, double v);
+bool bml_utf8_ok(const uint8_t *s, size_t n);
+int64_t bml_utf16_units(const uint8_t *s, size_t n);
+int64_t bml_str_len(const uint8_t *s, size_t n);
+int64_t bml_sign_extend(int64_t v, int64_t bits);
+int64_t bml_div_floor(int64_t a, int64_t b);
+int64_t bml_mod_sign(int64_t a, int64_t b);
+int64_t bml_shr_arith(int64_t a, int64_t b);
+int64_t bml_min_i64(int64_t a, int64_t b);
+int64_t bml_max_i64(int64_t a, int64_t b);
 "#;
 
-const RUNTIME_IMPLS: &str = r#"const char *bps_status_str(bps_status s) {
+const RUNTIME_IMPLS: &str = r#"const char *bml_status_str(bml_status s) {
     switch (s) {
-    case BPS_OK:
-        return "BPS_OK";
-    case BPS_ERR_SHORT:
-        return "BPS_ERR_SHORT";
-    case BPS_ERR_REQUIRE:
-        return "BPS_ERR_REQUIRE";
-    case BPS_ERR_UTF8:
-        return "BPS_ERR_UTF8";
-    case BPS_ERR_NO_MATCH:
-        return "BPS_ERR_NO_MATCH";
-    case BPS_ERR_MISSING:
-        return "BPS_ERR_MISSING";
-    case BPS_ERR_VARIANT:
-        return "BPS_ERR_VARIANT";
-    case BPS_ERR_NEG_LEN:
-        return "BPS_ERR_NEG_LEN";
-    case BPS_ERR_TOO_LONG:
-        return "BPS_ERR_TOO_LONG";
-    case BPS_ERR_UNTIL_END:
-        return "BPS_ERR_UNTIL_END";
-    case BPS_ERR_NOMEM:
-        return "BPS_ERR_NOMEM";
+    case BML_OK:
+        return "BML_OK";
+    case BML_ERR_SHORT:
+        return "BML_ERR_SHORT";
+    case BML_ERR_REQUIRE:
+        return "BML_ERR_REQUIRE";
+    case BML_ERR_UTF8:
+        return "BML_ERR_UTF8";
+    case BML_ERR_NO_MATCH:
+        return "BML_ERR_NO_MATCH";
+    case BML_ERR_MISSING:
+        return "BML_ERR_MISSING";
+    case BML_ERR_VARIANT:
+        return "BML_ERR_VARIANT";
+    case BML_ERR_NEG_LEN:
+        return "BML_ERR_NEG_LEN";
+    case BML_ERR_TOO_LONG:
+        return "BML_ERR_TOO_LONG";
+    case BML_ERR_UNTIL_END:
+        return "BML_ERR_UNTIL_END";
+    case BML_ERR_NOMEM:
+        return "BML_ERR_NOMEM";
     }
-    return "BPS_UNKNOWN";
+    return "BML_UNKNOWN";
 }
-void *bps_malloc(const bps_alloc *a, size_t n) {
+void *bml_malloc(const bml_alloc *a, size_t n) {
     if (n == 0) {
         n = 1;
     }
@@ -661,7 +661,7 @@ void *bps_malloc(const bps_alloc *a, size_t n) {
     }
     return malloc(n);
 }
-void bps_free(const bps_alloc *a, void *p) {
+void bml_free(const bml_alloc *a, void *p) {
     if (p == NULL) {
         return;
     }
@@ -671,45 +671,45 @@ void bps_free(const bps_alloc *a, void *p) {
     }
     free(p);
 }
-void bps_free_bytes(const bps_alloc *a, bps_bytes *b) {
-    bps_free(a, b->data);
+void bml_free_bytes(const bml_alloc *a, bml_bytes *b) {
+    bml_free(a, b->data);
     b->data = NULL;
     b->len = 0;
 }
-void bps_free_str(const bps_alloc *a, bps_str *s) {
-    bps_free(a, s->data);
+void bml_free_str(const bml_alloc *a, bml_str *s) {
+    bml_free(a, s->data);
     s->data = NULL;
     s->len = 0;
 }
-bool bps_str_eq(bps_str a, bps_str b) {
+bool bml_str_eq(bml_str a, bml_str b) {
     return a.len == b.len && (a.len == 0 || memcmp(a.data, b.data, a.len) == 0);
 }
-bps_status bps_read_u8(bps_reader *r, uint8_t *out) {
+bml_status bml_read_u8(bml_reader *r, uint8_t *out) {
     if (r->pos >= r->len) {
-        return BPS_ERR_SHORT;
+        return BML_ERR_SHORT;
     }
     *out = r->data[r->pos];
     r->pos += 1;
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_peek_u8(bps_reader *r, uint8_t *out) {
+bml_status bml_peek_u8(bml_reader *r, uint8_t *out) {
     if (r->pos >= r->len) {
-        return BPS_ERR_SHORT;
+        return BML_ERR_SHORT;
     }
     *out = r->data[r->pos];
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_read_bytes(bps_reader *r, const bps_alloc *a, int64_t n, bps_bytes *out) {
+bml_status bml_read_bytes(bml_reader *r, const bml_alloc *a, int64_t n, bml_bytes *out) {
     uint8_t *p;
     if (n < 0) {
-        return BPS_ERR_NEG_LEN;
+        return BML_ERR_NEG_LEN;
     }
     if ((uint64_t)n > (uint64_t)(r->len - r->pos)) {
-        return BPS_ERR_SHORT;
+        return BML_ERR_SHORT;
     }
-    p = bps_malloc(a, (size_t)n + 1);
+    p = bml_malloc(a, (size_t)n + 1);
     if (p == NULL) {
-        return BPS_ERR_NOMEM;
+        return BML_ERR_NOMEM;
     }
     if (n != 0) {
         memcpy(p, r->data + r->pos, (size_t)n);
@@ -718,31 +718,31 @@ bps_status bps_read_bytes(bps_reader *r, const bps_alloc *a, int64_t n, bps_byte
     r->pos += (size_t)n;
     out->data = p;
     out->len = (size_t)n;
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_read_rest(bps_reader *r, const bps_alloc *a, bps_bytes *out) {
-    return bps_read_bytes(r, a, (int64_t)(r->len - r->pos), out);
+bml_status bml_read_rest(bml_reader *r, const bml_alloc *a, bml_bytes *out) {
+    return bml_read_bytes(r, a, (int64_t)(r->len - r->pos), out);
 }
-bps_status bps_read_f32(bps_reader *r, float *out) {
+bml_status bml_read_f32(bml_reader *r, float *out) {
     uint8_t tmp[4];
     uint32_t u;
     float f;
     if (r->pos + 4 > r->len) {
-        return BPS_ERR_SHORT;
+        return BML_ERR_SHORT;
     }
     memcpy(tmp, r->data + r->pos, 4);
     r->pos += 4;
     u = ((uint32_t)tmp[0] << 24) | ((uint32_t)tmp[1] << 16) | ((uint32_t)tmp[2] << 8) | tmp[3];
     memcpy(&f, &u, 4);
     *out = f;
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_read_f64(bps_reader *r, double *out) {
+bml_status bml_read_f64(bml_reader *r, double *out) {
     uint64_t u = 0;
     size_t i;
     double d;
     if (r->pos + 8 > r->len) {
-        return BPS_ERR_SHORT;
+        return BML_ERR_SHORT;
     }
     for (i = 0; i < 8; i += 1) {
         u = (u << 8) | r->data[r->pos];
@@ -750,105 +750,105 @@ bps_status bps_read_f64(bps_reader *r, double *out) {
     }
     memcpy(&d, &u, 8);
     *out = d;
-    return BPS_OK;
+    return BML_OK;
 }
-int64_t bps_remaining(const bps_reader *r) {
+int64_t bml_remaining(const bml_reader *r) {
     return (int64_t)(r->len - r->pos);
 }
-bps_status bps_grow(bps_writer *w, const bps_alloc *a, size_t need) {
+bml_status bml_grow(bml_writer *w, const bml_alloc *a, size_t need) {
     size_t cap;
     uint8_t *p;
     if (need > (size_t)-1 - w->len) {
-        return BPS_ERR_NOMEM;
+        return BML_ERR_NOMEM;
     }
     if (w->len + need <= w->cap) {
-        return BPS_OK;
+        return BML_OK;
     }
     cap = w->cap != 0 ? w->cap : 64;
     while (w->len + need > cap) {
         if (cap > (size_t)-1 / 2) {
-            return BPS_ERR_NOMEM;
+            return BML_ERR_NOMEM;
         }
         cap *= 2;
     }
-    p = bps_malloc(a, cap);
+    p = bml_malloc(a, cap);
     if (p == NULL) {
-        return BPS_ERR_NOMEM;
+        return BML_ERR_NOMEM;
     }
     if (w->len != 0) {
         memcpy(p, w->data, w->len);
     }
-    bps_free(a, w->data);
+    bml_free(a, w->data);
     w->data = p;
     w->cap = cap;
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_write_u8(bps_writer *w, const bps_alloc *a, uint8_t v) {
-    bps_status s = bps_grow(w, a, 1);
-    if (s != BPS_OK) {
+bml_status bml_write_u8(bml_writer *w, const bml_alloc *a, uint8_t v) {
+    bml_status s = bml_grow(w, a, 1);
+    if (s != BML_OK) {
         return s;
     }
     w->data[w->len] = v;
     w->len += 1;
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_write_bytes(bps_writer *w, const bps_alloc *a, const uint8_t *p, size_t n) {
-    bps_status s = bps_grow(w, a, n);
-    if (s != BPS_OK) {
+bml_status bml_write_bytes(bml_writer *w, const bml_alloc *a, const uint8_t *p, size_t n) {
+    bml_status s = bml_grow(w, a, n);
+    if (s != BML_OK) {
         return s;
     }
     if (n != 0) {
         memcpy(w->data + w->len, p, n);
     }
     w->len += n;
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_write_bytes_pad(bps_writer *w, const bps_alloc *a, const uint8_t *p, size_t n, int64_t total) {
-    bps_status s;
+bml_status bml_write_bytes_pad(bml_writer *w, const bml_alloc *a, const uint8_t *p, size_t n, int64_t total) {
+    bml_status s;
     size_t i;
     if (total < 0) {
-        return BPS_ERR_NEG_LEN;
+        return BML_ERR_NEG_LEN;
     }
     if ((uint64_t)n > (uint64_t)total) {
-        return BPS_ERR_TOO_LONG;
+        return BML_ERR_TOO_LONG;
     }
-    s = bps_write_bytes(w, a, p, n);
-    if (s != BPS_OK) {
+    s = bml_write_bytes(w, a, p, n);
+    if (s != BML_OK) {
         return s;
     }
     for (i = n; (uint64_t)i < (uint64_t)total; i += 1) {
-        s = bps_write_u8(w, a, 0);
-        if (s != BPS_OK) {
+        s = bml_write_u8(w, a, 0);
+        if (s != BML_OK) {
             return s;
         }
     }
-    return BPS_OK;
+    return BML_OK;
 }
-bps_status bps_write_f32(bps_writer *w, const bps_alloc *a, float v) {
+bml_status bml_write_f32(bml_writer *w, const bml_alloc *a, float v) {
     uint32_t u;
     uint8_t tmp[4];
-    bps_status s;
+    bml_status s;
     memcpy(&u, &v, 4);
     tmp[0] = (uint8_t)(u >> 24);
     tmp[1] = (uint8_t)(u >> 16);
     tmp[2] = (uint8_t)(u >> 8);
     tmp[3] = (uint8_t)u;
-    s = bps_write_bytes(w, a, tmp, 4);
+    s = bml_write_bytes(w, a, tmp, 4);
     return s;
 }
-bps_status bps_write_f64(bps_writer *w, const bps_alloc *a, double v) {
+bml_status bml_write_f64(bml_writer *w, const bml_alloc *a, double v) {
     uint64_t u;
     uint8_t tmp[8];
     size_t i;
-    bps_status s;
+    bml_status s;
     memcpy(&u, &v, 8);
     for (i = 0; i < 8; i += 1) {
         tmp[i] = (uint8_t)(u >> (8 * (7 - i)));
     }
-    s = bps_write_bytes(w, a, tmp, 8);
+    s = bml_write_bytes(w, a, tmp, 8);
     return s;
 }
-bool bps_utf8_ok(const uint8_t *s, size_t n) {
+bool bml_utf8_ok(const uint8_t *s, size_t n) {
     size_t i = 0;
     while (i < n) {
         uint8_t c = s[i];
@@ -889,7 +889,7 @@ bool bps_utf8_ok(const uint8_t *s, size_t n) {
     }
     return true;
 }
-static int64_t bps_utf_units(const uint8_t *s, size_t n, bool utf16) {
+static int64_t bml_utf_units(const uint8_t *s, size_t n, bool utf16) {
     int64_t k = 0;
     size_t i = 0;
     while (i < n) {
@@ -935,13 +935,13 @@ static int64_t bps_utf_units(const uint8_t *s, size_t n, bool utf16) {
     }
     return k;
 }
-int64_t bps_utf16_units(const uint8_t *s, size_t n) {
-    return bps_utf_units(s, n, true);
+int64_t bml_utf16_units(const uint8_t *s, size_t n) {
+    return bml_utf_units(s, n, true);
 }
-int64_t bps_str_len(const uint8_t *s, size_t n) {
-    return bps_utf_units(s, n, false);
+int64_t bml_str_len(const uint8_t *s, size_t n) {
+    return bml_utf_units(s, n, false);
 }
-int64_t bps_sign_extend(int64_t v, int64_t bits) {
+int64_t bml_sign_extend(int64_t v, int64_t bits) {
     uint64_t u;
     uint64_t sign;
     uint64_t mask;
@@ -957,7 +957,7 @@ int64_t bps_sign_extend(int64_t v, int64_t bits) {
     }
     return (int64_t)u;
 }
-int64_t bps_div_floor(int64_t a, int64_t b) {
+int64_t bml_div_floor(int64_t a, int64_t b) {
     int64_t q;
     int64_t rr;
     if (b == 0) {
@@ -973,7 +973,7 @@ int64_t bps_div_floor(int64_t a, int64_t b) {
     }
     return q;
 }
-int64_t bps_mod_sign(int64_t a, int64_t b) {
+int64_t bml_mod_sign(int64_t a, int64_t b) {
     int64_t rr;
     if (b == 0) {
         return 0;
@@ -987,7 +987,7 @@ int64_t bps_mod_sign(int64_t a, int64_t b) {
     }
     return rr;
 }
-int64_t bps_shr_arith(int64_t a, int64_t b) {
+int64_t bml_shr_arith(int64_t a, int64_t b) {
     uint64_t u;
     if (b <= 0) {
         return a;
@@ -1001,10 +1001,10 @@ int64_t bps_shr_arith(int64_t a, int64_t b) {
     }
     return (int64_t)(~(~u >> (uint64_t)b));
 }
-int64_t bps_min_i64(int64_t a, int64_t b) {
+int64_t bml_min_i64(int64_t a, int64_t b) {
     return a < b ? a : b;
 }
-int64_t bps_max_i64(int64_t a, int64_t b) {
+int64_t bml_max_i64(int64_t a, int64_t b) {
     return a > b ? a : b;
 }
 "#;
@@ -1023,7 +1023,7 @@ impl<'a> Gen<'a> {
     fn header(&self) -> BpsResult<String> {
         let p = self.program;
         let mut h = String::new();
-        h.push_str("#ifndef BPSGEN_H\n#define BPSGEN_H\n");
+        h.push_str("#ifndef BMLGEN_H\n#define BMLGEN_H\n");
         h.push_str("/* Generated by bml emit c. Do not edit. */\n");
         h.push_str("#include <stddef.h>\n");
         if self.std.supports_stdint() {
@@ -1052,15 +1052,15 @@ impl<'a> Gen<'a> {
         }
         h.push_str("#include <string.h>\n#include <stdlib.h>\n\n");
         h.push_str("/* Runtime: cursors, owned values, errors, helpers. Decode output is\n");
-        h.push_str("   owned by the caller and released with bps_free_<type>; the writer\n");
-        h.push_str("   buffer is released with bps_free on the same allocator. A NULL\n");
+        h.push_str("   owned by the caller and released with bml_free_<type>; the writer\n");
+        h.push_str("   buffer is released with bml_free on the same allocator. A NULL\n");
         h.push_str("   allocator (or NULL callbacks) selects libc malloc/free. On failure\n");
         h.push_str("   the codec sets error_codec/error_detail (and the reader's pos is\n");
         h.push_str("   the error offset); nested failures propagate untouched. */\n");
         h.push_str(RUNTIME_DECLS);
         if self.c89() {
             h.push_str("/* Pre-C99 C has no compound literals: build strings by call. */\n");
-            h.push_str("bps_str bps_make_str(const char *s, size_t n);\n");
+            h.push_str("bml_str bml_make_str(const char *s, size_t n);\n");
         }
         h.push('\n');
         // Forward declarations for reference cycles.
@@ -1194,9 +1194,9 @@ impl<'a> Gen<'a> {
         Ok(())
     }
 
-    /// `int32_t name;`, `bps_foo *items; size_t items_len;` for lists (the
+    /// `int32_t name;`, `bml_foo *items; size_t items_len;` for lists (the
     /// length is the resolved member name, which may have bumped), and
-    /// `bps_foo *next;` for boxed recursive fields (no length).
+    /// `bml_foo *next;` for boxed recursive fields (no length).
     fn member_decl(&self, ty: &Ty, c: &str, len: Option<&str>, boxed: bool) -> BpsResult<String> {
         match ty {
             Ty::List(_) => {
@@ -1242,14 +1242,14 @@ impl<'a> Gen<'a> {
 
     fn decode_sig(&self, codec: CodecIdx) -> BpsResult<String> {
         let p = self.program;
-        let mut parts = vec!["bps_reader *r".to_string()];
+        let mut parts = vec!["bml_reader *r".to_string()];
         if self.dec_alloc[codec] {
-            parts.push("const bps_alloc *a".to_string());
+            parts.push("const bml_alloc *a".to_string());
         }
         parts.extend(self.param_decls(codec, true)?);
         parts.push(format!("{} *out", ctype(p, &p.codecs[codec].value)?));
         Ok(format!(
-            "bps_status {}({})",
+            "bml_status {}({})",
             decode_fn(p, codec),
             parts.join(", ")
         ))
@@ -1260,8 +1260,8 @@ impl<'a> Gen<'a> {
         let body = &p.codecs[codec].encode;
         let nm = name_map(p, codec, false);
         let mut parts = vec![
-            "bps_writer *w".to_string(),
-            "const bps_alloc *a".to_string(),
+            "bml_writer *w".to_string(),
+            "const bml_alloc *a".to_string(),
         ];
         parts.extend(self.param_decls(codec, false)?);
         let v = body.value.expect("encode bodies take an input value");
@@ -1272,7 +1272,7 @@ impl<'a> Gen<'a> {
             parts.push(format!("{} {vn}", ctype(p, &p.codecs[codec].value)?));
         }
         Ok(format!(
-            "bps_status {}({})",
+            "bml_status {}({})",
             encode_fn(p, codec),
             parts.join(", ")
         ))
@@ -1281,7 +1281,7 @@ impl<'a> Gen<'a> {
     fn free_sig(&self, ty: TypeIdx) -> BpsResult<String> {
         let _ = resolved_name(self.program, ty)?;
         Ok(format!(
-            "void {}(const bps_alloc *a, {} *v)",
+            "void {}(const bml_alloc *a, {} *v)",
             free_fn(self.program, ty),
             type_name(self.program, ty)
         ))
@@ -1292,7 +1292,7 @@ impl<'a> Gen<'a> {
 // ----------------------------------------------------------------------
 
 fn c_preamble() -> String {
-    "/* Generated by bml emit c. Do not edit. */\n#include \"bpsgen.h\"\n#include <string.h>\n\n"
+    "/* Generated by bml emit c. Do not edit. */\n#include \"bmlgen.h\"\n#include <string.h>\n\n"
         .to_string()
 }
 
@@ -1300,11 +1300,11 @@ impl<'a> Gen<'a> {
     fn sources(&self) -> BpsResult<BTreeMap<String, String>> {
         let mut files: BTreeMap<String, String> = BTreeMap::new();
         let mut runtime = format!(
-            "/* Generated by bml emit c. Do not edit. */\n#include \"bpsgen.h\"\n#include <string.h>\n\n{RUNTIME_IMPLS}\n"
+            "/* Generated by bml emit c. Do not edit. */\n#include \"bmlgen.h\"\n#include <string.h>\n\n{RUNTIME_IMPLS}\n"
         );
         if self.c89() {
             runtime.push_str(
-                "bps_str bps_make_str(const char *s, size_t n) {\n    bps_str b;\n    b.data = (char *)s;\n    b.len = n;\n    return b;\n}\n",
+                "bml_str bml_make_str(const char *s, size_t n) {\n    bml_str b;\n    b.data = (char *)s;\n    b.len = n;\n    return b;\n}\n",
             );
         }
         files.insert("runtime".to_string(), runtime);
@@ -1435,7 +1435,7 @@ impl<'a> Gen<'a> {
             _ => free_fn(p, *t),
         };
         Ok(format!(
-            "{pad}{f}(a, {target});\n{pad}bps_free(a, (void *)({target}));\n"
+            "{pad}{f}(a, {target});\n{pad}bml_free(a, (void *)({target}));\n"
         ))
     }
 
@@ -1455,8 +1455,8 @@ impl<'a> Gen<'a> {
         let pad: String = "    ".repeat(depth);
         match ty {
             Ty::Int(_) | Ty::Bool | Ty::F32 | Ty::F64 => Ok(String::new()),
-            Ty::Str => Ok(format!("{pad}bps_free_str(a, {});\n", addr_of(target))),
-            Ty::Bytes => Ok(format!("{pad}bps_free_bytes(a, {});\n", addr_of(target))),
+            Ty::Str => Ok(format!("{pad}bml_free_str(a, {});\n", addr_of(target))),
+            Ty::Bytes => Ok(format!("{pad}bml_free_bytes(a, {});\n", addr_of(target))),
             Ty::List(elem) => {
                 let e = ctype(p, inner(ty))?;
                 let bound = len
@@ -1490,7 +1490,7 @@ impl<'a> Gen<'a> {
                     out.push_str(&format!("{pad}}}\n"));
                     let _ = e;
                 }
-                out.push_str(&format!("{pad}bps_free(a, (void *)({target}));\n"));
+                out.push_str(&format!("{pad}bml_free(a, (void *)({target}));\n"));
                 Ok(out)
             }
             Ty::Named(t) => match &p.types[*t].kind {
@@ -1892,10 +1892,10 @@ impl<'p> FnEmit<'p> {
         }
         if self.need_s {
             if self.c89() {
-                self.hoist.push("bps_status s;".to_string());
-                self.line("s = BPS_OK;");
+                self.hoist.push("bml_status s;".to_string());
+                self.line("s = BML_OK;");
             } else {
-                self.line("bps_status s = BPS_OK;");
+                self.line("bml_status s = BML_OK;");
             }
         }
         let stmts = self.body.stmts.clone();
@@ -1912,7 +1912,7 @@ impl<'p> FnEmit<'p> {
             if falls_through {
                 self.line(&format!("r->error_codec = \"{}\";", self.fn_name));
                 self.line("r->error_detail = \"unreachable\";");
-                self.line("return BPS_ERR_NO_MATCH;");
+                self.line("return BML_ERR_NO_MATCH;");
             }
             if self.need_s {
                 self.label("fail");
@@ -1925,7 +1925,7 @@ impl<'p> FnEmit<'p> {
             }
         } else {
             if falls_through {
-                self.line("return BPS_OK;");
+                self.line("return BML_OK;");
             }
             if self.need_s {
                 self.label("fail");
@@ -1995,11 +1995,11 @@ impl<'p> FnEmit<'p> {
         Ok(())
     }
 
-    /// A fallible call: `BPS_TRY` stores the status in `s` and jumps to the
+    /// A fallible call: `BML_TRY` stores the status in `s` and jumps to the
     /// shared `fail:` label, which reports the codec once (a nested codec
     /// already did; helpers leave the fields alone for it to claim).
     fn try_call(&mut self, call: &str) {
-        self.line(&format!("BPS_TRY({call});"));
+        self.line(&format!("BML_TRY({call});"));
     }
 
     /// The shared `fail:` label body: report this codec, but only when no
@@ -2011,7 +2011,7 @@ impl<'p> FnEmit<'p> {
         self.line(&format!("{rw}->error_codec = \"{}\";", self.fn_name));
         self.line(&format!("if ({rw}->error_detail == NULL) {{"));
         self.ind += 1;
-        self.line(&format!("{rw}->error_detail = bps_status_str(s);"));
+        self.line(&format!("{rw}->error_detail = bml_status_str(s);"));
         self.ind -= 1;
         self.line("}");
         self.ind -= 1;
@@ -2055,7 +2055,7 @@ impl<'p> FnEmit<'p> {
                 self.line(&format!("if ({c}) {{"));
                 self.ind += 1;
                 self.fail_direct(
-                    "BPS_ERR_REQUIRE",
+                    "BML_ERR_REQUIRE",
                     &format!("\"require failed: {}\"", esc(text)),
                 );
                 self.ind -= 1;
@@ -2101,7 +2101,7 @@ impl<'p> FnEmit<'p> {
             Stmt::Return(e) => self.dec_return(e),
             Stmt::Fail(Failure::EncodeUntilEnd) => {
                 self.fail_direct(
-                    "BPS_ERR_UNTIL_END",
+                    "BML_ERR_UNTIL_END",
                     "\"encode not supported for repeat mode until_end\"",
                 );
                 Ok(())
@@ -2120,10 +2120,10 @@ impl<'p> FnEmit<'p> {
             && let Expr::StrBytes(s) = value
         {
             let (d, n) = self.str_parts(s)?;
-            self.line(&format!("{lhs}.data = bps_malloc(a, (size_t)({n}) + 1);"));
+            self.line(&format!("{lhs}.data = bml_malloc(a, (size_t)({n}) + 1);"));
             self.line(&format!("if ({lhs}.data == NULL) {{"));
             self.ind += 1;
-            self.fail_direct("BPS_ERR_NOMEM", "\"out of memory\"");
+            self.fail_direct("BML_ERR_NOMEM", "\"out of memory\"");
             self.ind -= 1;
             self.line("}");
             self.line(&format!("memcpy({lhs}.data, {d}, (size_t)({n}));"));
@@ -2163,11 +2163,11 @@ impl<'p> FnEmit<'p> {
         let Bind { local, some, .. } = *dst;
         let lhs = self.nm.local[local].clone();
         let call = match op {
-            ReadOp::U8 => format!("bps_read_u8(r, &{lhs})"),
-            ReadOp::F32 => format!("bps_read_f32(r, &{lhs})"),
-            ReadOp::F64 => format!("bps_read_f64(r, &{lhs})"),
-            ReadOp::Bytes(n) => format!("bps_read_bytes(r, a, {}, &{lhs})", self.expr(n)?),
-            ReadOp::Rest => format!("bps_read_rest(r, a, &{lhs})"),
+            ReadOp::U8 => format!("bml_read_u8(r, &{lhs})"),
+            ReadOp::F32 => format!("bml_read_f32(r, &{lhs})"),
+            ReadOp::F64 => format!("bml_read_f64(r, &{lhs})"),
+            ReadOp::Bytes(n) => format!("bml_read_bytes(r, a, {}, &{lhs})", self.expr(n)?),
+            ReadOp::Rest => format!("bml_read_rest(r, a, &{lhs})"),
         };
         self.try_call(&call);
         if some {
@@ -2203,9 +2203,9 @@ impl<'p> FnEmit<'p> {
         let Bind { local, some, .. } = *dst;
         let sc = self.nm.local[*l].clone();
         let dc = self.nm.local[local].clone();
-        self.line(&format!("if (!bps_utf8_ok({sc}.data, {sc}.len)) {{"));
+        self.line(&format!("if (!bml_utf8_ok({sc}.data, {sc}.len)) {{"));
         self.ind += 1;
-        self.fail_direct("BPS_ERR_UTF8", "\"invalid utf-8\"");
+        self.fail_direct("BML_ERR_UTF8", "\"invalid utf-8\"");
         self.ind -= 1;
         self.line("}");
         self.line(&format!("{dc}.data = (char *){sc}.data;"));
@@ -2233,7 +2233,7 @@ impl<'p> FnEmit<'p> {
         let dc = self.nm.local[local].clone();
         self.line(&format!("if (!{h}) {{"));
         self.ind += 1;
-        self.fail_direct("BPS_ERR_MISSING", &format!("\"missing `{}`\"", esc(field)));
+        self.fail_direct("BML_ERR_MISSING", &format!("\"missing `{}`\"", esc(field)));
         self.ind -= 1;
         self.line("}");
         self.line(&format!("{dc} = {sc};"));
@@ -2287,7 +2287,7 @@ impl<'p> FnEmit<'p> {
             None => {
                 self.line("default:");
                 self.ind += 1;
-                self.fail_direct("BPS_ERR_NO_MATCH", "\"no match arm for tag\"");
+                self.fail_direct("BML_ERR_NO_MATCH", "\"no match arm for tag\"");
                 self.ind -= 1;
             }
         }
@@ -2324,7 +2324,7 @@ impl<'p> FnEmit<'p> {
                 self.decl_temp("int64_t", &cnt, &nv);
                 self.line(&format!("if ({cnt} < 0) {{"));
                 self.ind += 1;
-                self.fail_direct("BPS_ERR_NEG_LEN", "\"negative count\"");
+                self.fail_direct("BML_ERR_NEG_LEN", "\"negative count\"");
                 self.ind -= 1;
                 self.line("}");
                 self.for_temp("int64_t", &k, &cnt);
@@ -2344,10 +2344,10 @@ impl<'p> FnEmit<'p> {
                         format!("(int64_t){pk} == {}", self.atom(t, term))
                     }
                 };
-                self.line("while (bps_remaining(r) > 0) {");
+                self.line("while (bml_remaining(r) > 0) {");
                 self.ind += 1;
                 self.decl_temp("uint8_t", &pk, "0");
-                self.try_call(&format!("bps_peek_u8(r, &{pk})"));
+                self.try_call(&format!("bml_peek_u8(r, &{pk})"));
                 self.line(&format!("if ({check}) {{"));
                 self.ind += 1;
                 self.line("r->pos += 1;");
@@ -2360,7 +2360,7 @@ impl<'p> FnEmit<'p> {
                 self.line("}");
             }
             RepeatMode::UntilEnd => {
-                self.line("while (bps_remaining(r) > 0) {");
+                self.line("while (bml_remaining(r) > 0) {");
                 self.ind += 1;
                 self.dec_stmts(body)?;
                 self.append(list, item)?;
@@ -2391,11 +2391,11 @@ impl<'p> FnEmit<'p> {
         self.decl_temp(
             &format!("{elem} *"),
             &np,
-            &format!("bps_malloc(a, {ncap} * sizeof *{np})"),
+            &format!("bml_malloc(a, {ncap} * sizeof *{np})"),
         );
         self.line(&format!("if ({np} == NULL) {{"));
         self.ind += 1;
-        self.fail_direct("BPS_ERR_NOMEM", "\"out of memory\"");
+        self.fail_direct("BML_ERR_NOMEM", "\"out of memory\"");
         self.ind -= 1;
         self.line("}");
         self.line(&format!("if ({ln} != 0) {{"));
@@ -2403,7 +2403,7 @@ impl<'p> FnEmit<'p> {
         self.line(&format!("memcpy({np}, {lc}, {ln} * sizeof *{np});"));
         self.ind -= 1;
         self.line("}");
-        self.line(&format!("bps_free(a, {lc});"));
+        self.line(&format!("bml_free(a, {lc});"));
         self.line(&format!("{lc} = {np};"));
         self.line(&format!("{cp} = {ncap};"));
         self.ind -= 1;
@@ -2429,7 +2429,7 @@ impl<'p> FnEmit<'p> {
                     };
                     let m = self.mem(*ty, i);
                     let alloc = format!(
-                        "out->{} = bps_malloc(a, sizeof(*out->{}));",
+                        "out->{} = bml_malloc(a, sizeof(*out->{}));",
                         m.value, m.value
                     );
                     if self.p.fields(*ty)[i].optional {
@@ -2439,7 +2439,7 @@ impl<'p> FnEmit<'p> {
                         self.line(&alloc);
                         self.line(&format!("if (out->{} == NULL) {{", m.value));
                         self.ind += 1;
-                        self.fail_direct("BPS_ERR_NOMEM", "\"out of memory\"");
+                        self.fail_direct("BML_ERR_NOMEM", "\"out of memory\"");
                         self.ind -= 1;
                         self.line("}");
                         self.ind -= 1;
@@ -2452,7 +2452,7 @@ impl<'p> FnEmit<'p> {
                         self.line(&alloc);
                         self.line(&format!("if (out->{} == NULL) {{", m.value));
                         self.ind += 1;
-                        self.fail_direct("BPS_ERR_NOMEM", "\"out of memory\"");
+                        self.fail_direct("BML_ERR_NOMEM", "\"out of memory\"");
                         self.ind -= 1;
                         self.line("}");
                     }
@@ -2519,7 +2519,7 @@ impl<'p> FnEmit<'p> {
                 self.free_local(*l)?;
             }
         }
-        self.line("return BPS_OK;");
+        self.line("return BML_OK;");
         Ok(())
     }
 
@@ -2532,8 +2532,8 @@ impl<'p> FnEmit<'p> {
             self.ind += 1;
         }
         match &ty {
-            Ty::Str => self.line(&format!("bps_free_str(a, &{c});")),
-            Ty::Bytes => self.line(&format!("bps_free_bytes(a, &{c});")),
+            Ty::Str => self.line(&format!("bml_free_str(a, &{c});")),
+            Ty::Bytes => self.line(&format!("bml_free_bytes(a, &{c});")),
             Ty::List(elem) => {
                 if owns_ty(self.p, elem) {
                     let k = self.temp("k");
@@ -2544,7 +2544,7 @@ impl<'p> FnEmit<'p> {
                     self.ind -= 1;
                     self.line("}");
                 }
-                self.line(&format!("bps_free(a, {c});"));
+                self.line(&format!("bml_free(a, {c});"));
             }
             Ty::Named(t) => {
                 let r = match &self.p.types[*t].kind {
@@ -2566,8 +2566,8 @@ impl<'p> FnEmit<'p> {
 
     fn free_elem(&mut self, ty: &Ty, target: &str) -> BpsResult<()> {
         match ty {
-            Ty::Str => self.line(&format!("bps_free_str(a, {});", addr_of(target))),
-            Ty::Bytes => self.line(&format!("bps_free_bytes(a, {});", addr_of(target))),
+            Ty::Str => self.line(&format!("bml_free_str(a, {});", addr_of(target))),
+            Ty::Bytes => self.line(&format!("bml_free_bytes(a, {});", addr_of(target))),
             Ty::Named(t) => {
                 let r = match &self.p.types[*t].kind {
                     TypeKind::Alias { target } => *target,
@@ -2606,7 +2606,7 @@ impl<'p> FnEmit<'p> {
                 self.line(&format!("if ({c}) {{"));
                 self.ind += 1;
                 self.fail_direct(
-                    "BPS_ERR_REQUIRE",
+                    "BML_ERR_REQUIRE",
                     &format!("\"require failed: {}\"", esc(text)),
                 );
                 self.ind -= 1;
@@ -2645,12 +2645,12 @@ impl<'p> FnEmit<'p> {
                 variant,
             } => self.enc_expect(dst, sum, *ty, *variant),
             Stmt::Return(_) => {
-                self.line("return BPS_OK;");
+                self.line("return BML_OK;");
                 Ok(())
             }
             Stmt::Fail(Failure::EncodeUntilEnd) => {
                 self.fail_direct(
-                    "BPS_ERR_UNTIL_END",
+                    "BML_ERR_UNTIL_END",
                     "\"encode not supported for repeat mode until_end\"",
                 );
                 Ok(())
@@ -2694,24 +2694,24 @@ impl<'p> FnEmit<'p> {
                     Some(byte) => byte,
                     None => self.expr(value)?,
                 };
-                format!("bps_write_u8(w, a, {v})")
+                format!("bml_write_u8(w, a, {v})")
             }
             WriteOp::F32 => {
                 let v = self.expr(value)?;
-                format!("bps_write_f32(w, a, {v})")
+                format!("bml_write_f32(w, a, {v})")
             }
             WriteOp::F64 => {
                 let v = self.expr(value)?;
-                format!("bps_write_f64(w, a, {v})")
+                format!("bml_write_f64(w, a, {v})")
             }
             WriteOp::Bytes(n) => {
                 let total = self.expr(n)?;
                 let (d, ln) = self.bytes_parts(value)?;
-                format!("bps_write_bytes_pad(w, a, {d}, {ln}, {total})")
+                format!("bml_write_bytes_pad(w, a, {d}, {ln}, {total})")
             }
             WriteOp::Rest => {
                 let (d, ln) = self.bytes_parts(value)?;
-                format!("bps_write_bytes(w, a, {d}, {ln})")
+                format!("bml_write_bytes(w, a, {d}, {ln})")
             }
         };
         self.try_call(&call);
@@ -2756,7 +2756,7 @@ impl<'p> FnEmit<'p> {
         let dc = self.nm.local[local].clone();
         self.line(&format!("if (!{h}) {{"));
         self.ind += 1;
-        self.fail_direct("BPS_ERR_MISSING", &format!("\"missing `{}`\"", esc(field)));
+        self.fail_direct("BML_ERR_MISSING", &format!("\"missing `{}`\"", esc(field)));
         self.ind -= 1;
         self.line("}");
         self.line(&format!("{dc} = {v};"));
@@ -2804,7 +2804,7 @@ impl<'p> FnEmit<'p> {
             tag_const(self.p, ty, variant)
         ));
         self.ind += 1;
-        self.fail_direct("BPS_ERR_VARIANT", "\"wrong variant\"");
+        self.fail_direct("BML_ERR_VARIANT", "\"wrong variant\"");
         self.ind -= 1;
         self.line("}");
         if let Some(d) = dst {
@@ -2869,7 +2869,7 @@ impl<'p> FnEmit<'p> {
             Expr::StrBytes(_) => Err(emit("emit c: string bytes outside a byte write")),
             Expr::Remaining => {
                 if self.decode {
-                    Ok("bps_remaining(r)".to_string())
+                    Ok("bml_remaining(r)".to_string())
                 } else {
                     Err(emit("emit c: bytes remaining in an encode body"))
                 }
@@ -2903,9 +2903,9 @@ impl<'p> FnEmit<'p> {
                 let a = self.str_val(lhs)?;
                 let b = self.str_val(rhs)?;
                 if op == BinOp::Eq {
-                    return Ok(format!("bps_str_eq({a}, {b})"));
+                    return Ok(format!("bml_str_eq({a}, {b})"));
                 }
-                return Ok(format!("!bps_str_eq({a}, {b})"));
+                return Ok(format!("!bml_str_eq({a}, {b})"));
             }
             return Ok(format!(
                 "{} {} {}",
@@ -2932,8 +2932,8 @@ impl<'p> FnEmit<'p> {
                     Ok(format!("{l} {} {r}", op.symbol()))
                 }
             }
-            BinOp::Div => Ok(format!("bps_div_floor((int64_t)({l}), (int64_t)({r}))")),
-            BinOp::Mod => Ok(format!("bps_mod_sign((int64_t)({l}), (int64_t)({r}))")),
+            BinOp::Div => Ok(format!("bml_div_floor((int64_t)({l}), (int64_t)({r}))")),
+            BinOp::Mod => Ok(format!("bml_mod_sign((int64_t)({l}), (int64_t)({r}))")),
             BinOp::Shl => {
                 if wraps {
                     Ok(format!("(int64_t)((uint64_t)({l}) << (uint64_t)({r}))"))
@@ -2948,7 +2948,7 @@ impl<'p> FnEmit<'p> {
                     .int_range(self.body, lhs)
                     .is_none_or(|(lo, _)| lo < 0);
                 if signed && neg {
-                    Ok(format!("bps_shr_arith((int64_t)({l}), (int64_t)({r}))"))
+                    Ok(format!("bml_shr_arith((int64_t)({l}), (int64_t)({r}))"))
                 } else {
                     Ok(format!("{l} >> {r}"))
                 }
@@ -3072,28 +3072,28 @@ impl<'p> FnEmit<'p> {
     fn call(&mut self, func: Func, args: &[Expr]) -> BpsResult<String> {
         match func {
             Func::SignExtend => Ok(format!(
-                "bps_sign_extend({}, {})",
+                "bml_sign_extend({}, {})",
                 self.expr(&args[0])?,
                 self.expr(&args[1])?
             )),
             Func::Utf16Units => {
                 let (d, n) = self.str_parts(&args[0])?;
-                Ok(format!("bps_utf16_units({d}, {n})"))
+                Ok(format!("bml_utf16_units({d}, {n})"))
             }
             Func::Utf8Len => Ok(self.str_parts(&args[0])?.1),
             Func::StrLen => {
                 let (d, n) = self.str_parts(&args[0])?;
-                Ok(format!("bps_str_len({d}, {n})"))
+                Ok(format!("bml_str_len({d}, {n})"))
             }
             Func::BytesLen => Ok(self.bytes_parts(&args[0])?.1),
             Func::ListLen => self.len_of(&args[0]),
             Func::Min => Ok(format!(
-                "bps_min_i64({}, {})",
+                "bml_min_i64({}, {})",
                 self.expr(&args[0])?,
                 self.expr(&args[1])?
             )),
             Func::Max => Ok(format!(
-                "bps_max_i64({}, {})",
+                "bml_max_i64({}, {})",
                 self.expr(&args[0])?,
                 self.expr(&args[1])?
             )),
@@ -3312,9 +3312,9 @@ impl<'p> FnEmit<'p> {
             Expr::Get(x) => self.str_val(x),
             Expr::Str(s) => {
                 if self.c89() {
-                    Ok(format!("bps_make_str(\"{}\", {})", esc(s), s.len()))
+                    Ok(format!("bml_make_str(\"{}\", {})", esc(s), s.len()))
                 } else {
-                    Ok(format!("(bps_str){{\"{}\", {}}}", esc(s), s.len()))
+                    Ok(format!("(bml_str){{\"{}\", {}}}", esc(s), s.len()))
                 }
             }
             _ => Err(emit("emit c: a string value here")),

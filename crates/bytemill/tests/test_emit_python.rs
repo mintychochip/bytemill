@@ -15,7 +15,7 @@ fn scratch(name: &str) -> PathBuf {
 
 fn py_compile(dir: &std::path::Path) {
     let out = Command::new("python3")
-        .args(["-m", "compileall", "-q", "bpsgen"])
+        .args(["-m", "compileall", "-q", "bmlgen"])
         .current_dir(dir)
         .output()
         .unwrap();
@@ -67,7 +67,7 @@ fn python_varint_values() {
         dir.join("check.py"),
         r#"import struct
 
-import bpsgen
+import bmlgen
 
 
 def eq(got, want, msg):
@@ -75,74 +75,74 @@ def eq(got, want, msg):
 
 
 # varint 300 <-> ac 02
-r = bpsgen.Reader(bytes([0xAC, 0x02]))
-eq(bpsgen.decode_varint(r), 300, "decode 300")
+r = bmlgen.Reader(bytes([0xAC, 0x02]))
+eq(bmlgen.decode_varint(r), 300, "decode 300")
 eq(r.pos, 2, "pos after 300")
-w = bpsgen.Writer()
-bpsgen.encode_varint(w, 300)
+w = bmlgen.Writer()
+bmlgen.encode_varint(w, 300)
 eq(w.get_bytes(), bytes([0xAC, 0x02]), "encode 300")
 # varint -1 <-> ff ff ff ff 0f
-r = bpsgen.Reader(bytes([0xFF, 0xFF, 0xFF, 0xFF, 0x0F]))
-eq(bpsgen.decode_varint(r), -1, "decode -1")
-w = bpsgen.Writer()
-bpsgen.encode_varint(w, -1)
+r = bmlgen.Reader(bytes([0xFF, 0xFF, 0xFF, 0xFF, 0x0F]))
+eq(bmlgen.decode_varint(r), -1, "decode -1")
+w = bmlgen.Writer()
+bmlgen.encode_varint(w, -1)
 eq(w.get_bytes(), bytes([0xFF, 0xFF, 0xFF, 0xFF, 0x0F]), "encode -1")
 # probe packet round trip
-v = bpsgen.Probe.decode(bpsgen.Reader(bytes([0xAC, 0x02])))
+v = bmlgen.Probe.decode(bmlgen.Reader(bytes([0xAC, 0x02])))
 eq(v.n, 300, "probe field")
-w = bpsgen.Writer()
+w = bmlgen.Writer()
 v.encode(w)
 eq(w.get_bytes(), bytes([0xAC, 0x02]), "probe bytes")
 # floats through the runtime
-r = bpsgen.Reader(struct.pack(">f", 1.5))
+r = bmlgen.Reader(struct.pack(">f", 1.5))
 eq(r.read_f32(), 1.5, "f32")
-r = bpsgen.Reader(struct.pack(">d", -2.25))
+r = bmlgen.Reader(struct.pack(">d", -2.25))
 eq(r.read_f64(), -2.25, "f64")
-w = bpsgen.Writer()
+w = bmlgen.Writer()
 w.write_f32(1.5)
 w.write_f64(-2.25)
 eq(w.get_bytes(), struct.pack(">f", 1.5) + struct.pack(">d", -2.25), "float bytes")
 # a short buffer carries the offset and the inner-to-outer codec path
 try:
-    bpsgen.Probe.decode(bpsgen.Reader(b""))
+    bmlgen.Probe.decode(bmlgen.Reader(b""))
     raise AssertionError("expected ShortBuffer")
-except bpsgen.ShortBuffer as exc:
+except bmlgen.ShortBuffer as exc:
     assert "offset 0" in str(exc), f"offset missing: {exc}"
     assert "need 1, have 0" in str(exc), f"counts missing: {exc}"
     assert "[in varint <- probe]" in str(exc), f"codec path missing: {exc}"
 # a require failure names the condition and the codec
 try:
-    bpsgen.ProbeGuarded.decode(bpsgen.Reader(bytes([0x00])))
+    bmlgen.ProbeGuarded.decode(bmlgen.Reader(bytes([0x00])))
     raise AssertionError("expected RequireFailed")
-except bpsgen.RequireFailed as exc:
+except bmlgen.RequireFailed as exc:
     assert "n == 300" in str(exc), f"condition missing: {exc}"
     assert "probe_guarded" in str(exc), f"codec path missing: {exc}"
-w = bpsgen.Writer()
+w = bmlgen.Writer()
 # the typed program checks requires on decode only: encode writes as-is
-bpsgen.ProbeGuarded(n=0).encode(w)
+bmlgen.ProbeGuarded(n=0).encode(w)
 eq(w.get_bytes(), bytes([0x00]), "unguarded encode bytes")
 # a failure carries the offset as data, not only inside the message
 try:
-    bpsgen.Probe.decode(bpsgen.Reader(b""))
+    bmlgen.Probe.decode(bmlgen.Reader(b""))
     raise AssertionError("expected ShortBuffer")
-except bpsgen.ShortBuffer as exc:
+except bmlgen.ShortBuffer as exc:
     eq(exc.offset, 0, "exc.offset")
 # an open enum keeps an unknown value as a real member
-unknown = bpsgen.Intent(7)
+unknown = bmlgen.Intent(7)
 eq(int(unknown), 7, "unknown enum int")
 eq(unknown.name, "UNKNOWN_7", "unknown enum name")
 assert repr(unknown), "unknown enum repr"
-eq(bpsgen.Intent(1), bpsgen.Intent.STATUS, "known enum member")
-r = bpsgen.Reader(bytes([0x07]))
-eq(int(bpsgen.decode_intent(r)), 7, "decode unknown enum")
-w = bpsgen.Writer()
-bpsgen.encode_intent(w, unknown)
+eq(bmlgen.Intent(1), bmlgen.Intent.STATUS, "known enum member")
+r = bmlgen.Reader(bytes([0x07]))
+eq(int(bmlgen.decode_intent(r)), 7, "decode unknown enum")
+w = bmlgen.Writer()
+bmlgen.encode_intent(w, unknown)
 eq(w.get_bytes(), bytes([0x07]), "encode unknown enum")
 # the package surface is explicit: every public name is in __all__
 missing = [
     name
-    for name in ("Reader", "Writer", "BpsError", "Intent", "Probe", "Routed")
-    if name not in bpsgen.__all__
+    for name in ("Reader", "Writer", "BmlError", "Intent", "Probe", "Routed")
+    if name not in bmlgen.__all__
 ]
 assert not missing, f"__all__ is missing {missing}"
 print("values ok")
@@ -164,7 +164,7 @@ fn packets_roundtrip(schema_rel: &str, dir_name: &str, min_packets: usize) {
     bytemill::emit_python::emit_python(&resolved, &dir).unwrap();
     py_compile(&dir);
     let mut body = String::from(
-        "import bpsgen\nfails = []\n\n\ndef check(name, raw, cls):\n    try:\n        value = cls.decode(bpsgen.Reader(raw))\n    except Exception as e:\n        fails.append(f\"{name} decode {type(e).__name__}: {e}\")\n        return\n    try:\n        w = bpsgen.Writer()\n        value.encode(w)\n    except Exception as e:\n        fails.append(f\"{name} encode {type(e).__name__}: {e}\")\n        return\n    if w.get_bytes() != raw:\n        fails.append(f\"{name} bytes got {w.get_bytes().hex()} want {raw.hex()}\")\n\n\n",
+        "import bmlgen\nfails = []\n\n\ndef check(name, raw, cls):\n    try:\n        value = cls.decode(bmlgen.Reader(raw))\n    except Exception as e:\n        fails.append(f\"{name} decode {type(e).__name__}: {e}\")\n        return\n    try:\n        w = bmlgen.Writer()\n        value.encode(w)\n    except Exception as e:\n        fails.append(f\"{name} encode {type(e).__name__}: {e}\")\n        return\n    if w.get_bytes() != raw:\n        fails.append(f\"{name} bytes got {w.get_bytes().hex()} want {raw.hex()}\")\n\n\n",
     );
     let mut n = 0;
     for packet in resolved.packets.values() {
@@ -189,7 +189,7 @@ fn packets_roundtrip(schema_rel: &str, dir_name: &str, min_packets: usize) {
             .collect::<Vec<_>>()
             .join(", ");
         body.push_str(&format!(
-            "check({:?}, bytes([{list}]), bpsgen.{cls})\n",
+            "check({:?}, bytes([{list}]), bmlgen.{cls})\n",
             packet.name
         ));
         n += 1;
@@ -224,7 +224,7 @@ fn version_schema() -> bytemill::ResolvedSchema {
 
 fn py_files(dir: &std::path::Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut stack = vec![dir.join("bpsgen")];
+    let mut stack = vec![dir.join("bmlgen")];
     while let Some(d) = stack.pop() {
         for entry in std::fs::read_dir(&d).unwrap() {
             let path = entry.unwrap().path();
@@ -253,12 +253,12 @@ fn all_py(dir: &std::path::Path) -> String {
 /// The emitted `if`/`elif`/`else` fallback must decode exactly what the
 /// `match` version decodes: every tag arm, the default arm, and the
 /// optional field both absent and present.
-const VERSION_SMOKE: &str = r#"import bpsgen
+const VERSION_SMOKE: &str = r#"import bmlgen
 
 
 def roundtrip(raw):
-    value = bpsgen.Probe.decode(bpsgen.Reader(bytes(raw)))
-    w = bpsgen.Writer()
+    value = bmlgen.Probe.decode(bmlgen.Reader(bytes(raw)))
+    w = bmlgen.Writer()
     value.encode(w)
     assert w.get_bytes() == bytes(raw), (w.get_bytes(), bytes(raw))
     return value
@@ -277,7 +277,7 @@ roundtrip([7, 1, 1])
 v = roundtrip([0, 5, 0, 7])
 assert v.extra == 7, vars(v)
 # the open enum still fabricates unknown members
-assert bpsgen.Intent(7).name == "UNKNOWN_7"
+assert bmlgen.Intent(7).name == "UNKNOWN_7"
 print("version smoke ok")
 "#;
 
