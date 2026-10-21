@@ -64,7 +64,7 @@ import "minecraft_core.bps"    // string, uuid, position, nbt, slot
 
 ## Use Cases
 
-- **Game Network Protocols & Emulators**: Multiplayer protocols (e.g., Minecraft, Hytale) rely on variable-length integers (`varint`), bitfields, dynamic length prefixes, compression framing, and stateful direction tables that Protobuf cannot express. BPS specifies the entire packet hierarchy in one schema and emits typed codecs for clients, proxies, and servers.
+- **Game Network Protocols & Emulators**: Multiplayer protocols (e.g., Minecraft, Hytale) rely on variable-length integers (`varint`), bitfields, dynamic length prefixes, compression framing, and stateful direction tables that Protobuf cannot express. A single BPS schema specifies the entire packet hierarchy, and Bytemill emits typed codecs for clients, proxies, and servers.
 - **Embedded, IoT, & Network Telemetry**: Binary telemetry streams, CAN bus frames, and network appliances use bit-packed fields, non-standard integer widths (12-bit signed coordinates, 3-byte ints), and explicit endianness. Bytemill maps these directly to native C, C++, Rust, or Zig structs without heap allocation or parsing overhead.
 - **High-Throughput Polyglot Services**: When gRPC / Protobuf serialization overhead or dynamic reflection is a bottleneck, Bytemill produces zero-copy, zero-reflection decoders in nine languages (Go, Rust, C++, C, Python, Java, C#, TypeScript, Zig) from a single protocol definition, keeping cross-language services byte-compatible.
 - **Protocol Reverse Engineering & Auditing**: Capture packet streams, formalize the wire format in a readable `.bps` specification, and immediately generate decoders and validation test suites across multiple languages, eliminating transcription bugs between reverse-engineered specs and working code.
@@ -186,7 +186,7 @@ bml emit csharp:10 schemas/std/varint.bps --out ./bml_cs
 
 `bml targets` prints the target and standard matrix as JSON; `crates/bytemill/src/compat.rs` is the
 source it reads, and `tests/test_compat.rs` pins every version against `EmitOptions::for_target`.
-Every printer lowers schemas to a shared typed intermediate representation (`ir::typed::Program`) and outputs native types without dynamic reflection or string-keyed dictionaries. Generated codecs are verified byte-for-byte against the BPS reference interpreter (`ir::exec`).
+Every printer lowers schemas to a shared typed intermediate representation (`ir::typed::Program`) and outputs native types without dynamic reflection or string-keyed dictionaries. Generated codecs are verified byte-for-byte against Bytemill's reference interpreter (`ir::exec`).
 
 ---
 
