@@ -315,7 +315,7 @@ const HELPERS: &[(&str, &str)] = &[
 
 const GOLDEN_RS: &str = r#"//! Differential golden vectors, mirroring tests/test_varint.py.
 
-use bps_generated::decode_frame;
+use bml_generated::decode_frame;
 
 #[test]
 fn handshake_frame() {
@@ -871,7 +871,7 @@ pub fn emit_rust(resolved: &ResolvedSchema, out_dir: &Path) -> BpsResult<()> {
     )?;
     write_file(
         &out_dir.join("Cargo.toml"),
-        "[package]\nname = \"bps_generated\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nserde_json = \"1\"\n",
+        "[package]\nname = \"bml_generated\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nserde_json = \"1\"\n",
     )?;
 
     let tests = out_dir.join("tests");

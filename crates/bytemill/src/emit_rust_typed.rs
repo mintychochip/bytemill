@@ -221,7 +221,7 @@ fn claim(want: String, taken: &mut HashSet<String>) -> String {
 
 fn cargo_toml(edition: crate::RustEdition) -> String {
     format!(
-        "[package]\nname = \"bps_generated\"\nversion = \"0.1.0\"\nedition = \"{}\"\n\
+        "[package]\nname = \"bml_generated\"\nversion = \"0.1.0\"\nedition = \"{}\"\n\
          description = \"Generated BPS encoders and decoders.\"\n",
         edition.as_str(),
     )

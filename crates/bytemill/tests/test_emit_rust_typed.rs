@@ -69,7 +69,7 @@ fn packet_codec(program: &Program, name: &str) -> CodecIdx {
 fn roundtrip_body(resolved: &bytemill::ResolvedSchema, program: &Program) -> (String, usize) {
     use bytemill::interp::encode_packet;
     use bytemill::synth::synthesize_packet;
-    let mut body = String::from("use bps_generated::*;\n");
+    let mut body = String::from("use bml_generated::*;\n");
     let mut n = 0usize;
     for packet in resolved.packets.values() {
         let value = match synthesize_packet(resolved, packet) {
@@ -230,7 +230,7 @@ fn rust_typed_unit_vectors() {
     );
 
     let tests = format!(
-        "use bps_generated::*;\n\
+        "use bml_generated::*;\n\
          #[test]\nfn varint_300() {{\n    let mut r = Reader::new(&[0xac, 0x02]);\n    let v = {decode_varint}(&mut r).unwrap();\n    assert_eq!(v, 300);\n    let mut w = Writer::new();\n    {encode_varint}(&mut w, 300).unwrap();\n    assert_eq!(w.into_bytes(), vec![0xac, 0x02]);\n}}\n\
          #[test]\nfn varint_neg1() {{\n    let mut r = Reader::new(&[0xff, 0xff, 0xff, 0xff, 0x0f]);\n    let v = {decode_varint}(&mut r).unwrap();\n    assert_eq!(v, -1);\n    let mut w = Writer::new();\n    {encode_varint}(&mut w, -1).unwrap();\n    assert_eq!(w.into_bytes(), vec![0xff, 0xff, 0xff, 0xff, 0x0f]);\n}}\n\
          #[test]\nfn probe_floats() {{\n    let raw: &[u8] = &[0xac, 0x02, 0x3f, 0xc0, 0x00, 0x00, 0x3f, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];\n    let mut r = Reader::new(raw);\n    let v = {probe_ty}::decode(&mut r).unwrap();\n    assert_eq!(v.n, 300);\n    assert_eq!(v.x, 1.5f32);\n    assert_eq!(v.y, 1.5f64);\n    assert_eq!(r.remaining(), 0);\n    let mut w = Writer::new();\n    v.encode(&mut w).unwrap();\n    assert_eq!(w.into_bytes(), raw);\n}}\n\
