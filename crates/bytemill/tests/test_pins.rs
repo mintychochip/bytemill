@@ -4,7 +4,7 @@ mod common;
 
 use bytemill::interp::{decode_packet, encode_packet};
 use bytemill::minestom::build_units;
-use bytemill::pins::{build_pins, pins_json};
+use bytemill::pins::{build_pins, pins_json, pins_json_is_owned};
 
 fn side_of(direction: &str) -> &'static str {
     match direction {
@@ -113,4 +113,16 @@ fn pin_rows_match_the_id_tables_and_round_trip() {
         _ => None,
     });
     assert_eq!(json_rows, Some(rows.len()));
+}
+
+/// The pin file is the generator's under the current marker and under the one it carried before
+/// the CLI became `bml`, so a tree generated back then is refreshed instead of refused.
+#[test]
+fn the_pin_file_is_owned_under_the_current_and_the_pre_rename_marker() {
+    let current = pins_json(&[]);
+    assert!(current.starts_with("{\"_generated\": \"bml emit rstom-tree\""), "{current}");
+    assert!(pins_json_is_owned(&current));
+    assert!(pins_json_is_owned("{\"_generated\": \"bps/pins.py\", \"rows\": []}"));
+    assert!(!pins_json_is_owned("{\"_generated\": \"somebody else\", \"rows\": []}"));
+    assert!(!pins_json_is_owned("[]"));
 }

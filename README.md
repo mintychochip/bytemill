@@ -207,8 +207,8 @@ Every printer lowers schemas to a shared typed intermediate representation (`ir:
 Bytemill supports in-tree code generation for the Rust Minestom server (`rstom`):
 
 ```bash
-# Standalone drop-in mirror crate for rstom-packets
-bml emit rstom $ROOT --out ../rstom/crates/bytemill_rstom
+# Standalone drop-in mirror crate for rstom-packets (its package is named `bml_rstom`)
+bml emit rstom $ROOT --out ../rstom/crates/bml_rstom
 
 # In-place generation within rstom workspace using AST shape ledgers
 bml shapes extract $ROOT --rstom ../rstom --eligible --out targets/rstom/shapes

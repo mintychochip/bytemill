@@ -409,9 +409,9 @@ pub fn emit_tree(
     let units = build_units(resolved, classes)?;
     let rows = build_pins(resolved, &units)?;
     let tests = workspace.join("crates").join("rstom").join("tests");
-    let rust_path = tests.join("bps_wire_pins.rs");
-    let json_path = tests.join("bps").join("wire_pins.json");
-    let known_path = tests.join("bps").join("wire_pins_known.json");
+    let rust_path = tests.join("bml_wire_pins.rs");
+    let json_path = tests.join("bml").join("wire_pins.json");
+    let known_path = tests.join("bml").join("wire_pins_known.json");
 
     let mut planned: Vec<(PathBuf, String)> = vec![
         (rust_path, rustfmt_text(PINS_TEST_RS)?),

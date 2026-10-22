@@ -65,7 +65,7 @@ static SHARED: LazyLock<Shared> = LazyLock::new(|| {
     let table =
         common::rstom_tables::real_table().expect("rstom worktree's packets.json not present");
     let units = bytemill::minestom::build_units(&resolved, &table).expect("build units");
-    let out = unique_temp_dir("full").join("bps_rstom");
+    let out = unique_temp_dir("full").join("bml_rstom");
     // Absolute, so the crate also builds from here: the test never writes into rstom.
     let rstom_path = common::rstom_tables::rstom_dir()
         .join("crates/rstom")
@@ -538,7 +538,7 @@ fn emitted_crate_compiles_and_passes_its_tests() {
 }
 
 #[test]
-fn every_packet_pins_the_rust_encoder_to_the_python_reference() {
+fn every_packet_pins_the_rust_encoder_to_the_bml_reference() {
     let shared = shared();
     let mut tests: Vec<PathBuf> = std::fs::read_dir(shared.out.join("tests"))
         .unwrap()
@@ -555,7 +555,7 @@ fn every_packet_pins_the_rust_encoder_to_the_python_reference() {
     let mut unpinned = Vec::new();
     for t in &tests {
         let text = std::fs::read_to_string(t).unwrap();
-        if !text.contains("Pinned by the Python interpreter") {
+        if !text.contains("Pinned by the BML interpreter") {
             let stem = t.file_stem().unwrap().to_string_lossy().into_owned();
             unpinned.push(stem.strip_prefix("roundtrip_").unwrap_or(&stem).to_string());
         }
@@ -563,6 +563,38 @@ fn every_packet_pins_the_rust_encoder_to_the_python_reference() {
     unpinned.sort();
     assert_eq!(tests.len(), shared.units.len(), "one test per struct");
     assert!(unpinned.is_empty(), "packets that only check consistency: {unpinned:?}");
+}
+
+/// Every file of the emitted crate says bml: the crate is `bml_rstom`, and no source or test file
+/// still names `bps` (the old tool, its Python modules or its crate). The manifests are left out of
+/// the scan: `Cargo.toml` names the rstom checkout by path, and a checkout may be called `rstom-bps`.
+#[test]
+fn the_emitted_crate_never_says_bps() {
+    fn walk(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            let name = entry.file_name();
+            if path.is_dir() {
+                if name != "target" {
+                    walk(&path, found);
+                }
+            } else if name != "Cargo.lock"
+                && name != "Cargo.toml"
+                && std::fs::read_to_string(&path)
+                    .map(|text| text.to_lowercase().contains("bps"))
+                    .unwrap_or(false)
+            {
+                found.push(path);
+            }
+        }
+    }
+    let shared = shared();
+    let manifest = std::fs::read_to_string(shared.out.join("Cargo.toml")).unwrap();
+    assert!(manifest.contains("name = \"bml_rstom\""), "{manifest}");
+    let mut found = Vec::new();
+    walk(&shared.out, &mut found);
+    found.sort();
+    assert!(found.is_empty(), "files that still say bps: {found:?}");
 }
 
 #[test]

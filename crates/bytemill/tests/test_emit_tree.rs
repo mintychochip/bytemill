@@ -46,9 +46,9 @@ fn probe_workspace(tag: &str) -> ProbeWorkspace {
 fn paths(workspace: &Path) -> [(&'static str, PathBuf); 3] {
     let base = workspace.join("crates/rstom/tests");
     [
-        ("gate", base.join("bps_wire_pins.rs")),
-        ("pins", base.join("bps/wire_pins.json")),
-        ("known", base.join("bps/wire_pins_known.json")),
+        ("gate", base.join("bml_wire_pins.rs")),
+        ("pins", base.join("bml/wire_pins.json")),
+        ("known", base.join("bml/wire_pins_known.json")),
     ]
 }
 
@@ -61,9 +61,9 @@ fn writes_the_pin_gate_and_nothing_else_without_shapes() {
     let written = emit_tree(&ws.resolved, &ws.root.join("rstom"), &table, &shapes, false).unwrap();
     let rel: std::collections::HashSet<String> = written.into_iter().collect();
     let expected: std::collections::HashSet<String> = [
-        "crates/rstom/tests/bps_wire_pins.rs",
-        "crates/rstom/tests/bps/wire_pins.json",
-        "crates/rstom/tests/bps/wire_pins_known.json",
+        "crates/rstom/tests/bml_wire_pins.rs",
+        "crates/rstom/tests/bml/wire_pins.json",
+        "crates/rstom/tests/bml/wire_pins_known.json",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -74,6 +74,15 @@ fn writes_the_pin_gate_and_nothing_else_without_shapes() {
     }
     let known = paths(&ws.root.join("rstom"))[2].1.clone();
     assert_eq!(std::fs::read_to_string(&known).unwrap(), "[]\n");
+    // The gate and its pins say bml, and nothing in them says bps.
+    let gate = std::fs::read_to_string(&paths(&ws.root.join("rstom"))[0].1).unwrap();
+    assert!(gate.contains("fn every_id_table_entry_matches_its_bml_pin()"), "{gate}");
+    assert!(gate.contains("/tests/bml\""), "{gate}");
+    let pins = std::fs::read_to_string(&paths(&ws.root.join("rstom"))[1].1).unwrap();
+    assert!(pins.starts_with("{\"_generated\": \"bml emit rstom-tree\""), "{pins}");
+    for (what, text) in [("gate", &gate), ("pins", &pins)] {
+        assert!(!text.to_lowercase().contains("bps"), "the {what} still says bps");
+    }
     let src = ws.root.join("rstom/crates/rstom/src");
     assert!(!src.exists());
 }
