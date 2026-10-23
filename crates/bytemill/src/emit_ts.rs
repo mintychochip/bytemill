@@ -478,6 +478,10 @@ pub fn emit_typescript_with_vectors(
             embedded.push(v);
         }
     }
+    if embedded.is_empty() {
+        // No vector has a codec here: write no test rather than one that checks nothing.
+        return Ok(None);
+    }
     let test = vectors_test(&program, &embedded);
     fs::write(out_dir.join("vectors.test.ts"), test).map_err(|e| emit(e.to_string()))?;
     Ok(Some(TestRun {

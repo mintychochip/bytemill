@@ -105,7 +105,9 @@ pub const COMMANDS: &[Command] = &[
                 {...}, \"id\": N, \"packet\": \"name\"}`, and bytes after the frame are \
                 ignored.\n\n\
                 With --spans, the JSON also includes a `spans` tree (`offset` and `len` per \
-                field). With --hexdump, a human-readable annotated dump is printed instead. \
+                field); with --state and --direction it also carries `frame`, the frame's own \
+                header values (for Minecraft: `length` and `id`), and the header fields get \
+                spans too. With --hexdump, a human-readable annotated dump is printed instead. \
                 The two flags are mutually exclusive. With --compression, span offsets refer \
                 to the unwrapped frame bytes (after the compression envelope is removed).",
         options: &[
@@ -214,7 +216,8 @@ pub const COMMANDS: &[Command] = &[
         about: "Reads a JSONL capture (one object per line with `direction` and `hex` fields) \
                 from --file or stdin and feeds each chunk through the tracer in order. Prints \
                 one JSON event per line as they are produced (packets, state changes, errors). \
-                Exits 3 if any error event was emitted.\n\n\
+                Exits 3 if any error event was emitted or the capture ends inside a frame (an \
+                `incomplete` event).\n\n\
                 --secret is the 32-hex-digit shared secret for encrypted streams. --state is the \
                 initial connection state (default `handshaking`). The schema must use a \
                 Minecraft-style routed frame.",

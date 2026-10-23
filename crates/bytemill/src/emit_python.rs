@@ -388,6 +388,10 @@ pub fn emit_python_with_vectors(
         test_src.push_str(&check_call);
         n_vectors += 1;
     }
+    if n_vectors == 0 {
+        // No vector has a codec here: write no test rather than one that checks nothing.
+        return Ok(None);
+    }
     test_src.push_str(
         "        if fails:\n            print(\"\\n\".join(fails[:30]))\n            print(\"count\", len(fails))\n            self.fail(f\"{len(fails)} roundtrip failures\")\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
     );

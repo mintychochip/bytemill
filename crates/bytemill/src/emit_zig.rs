@@ -123,6 +123,10 @@ test "packet {} {}" {{
         ));
         n += 1;
     }
+    if n == 0 {
+        // No vector has a codec here: write no test rather than one that checks nothing.
+        return Ok(None);
+    }
     let test_file = "vectors_test.zig";
     fs::write(out_dir.join(test_file), &src).map_err(|e| emit(e.to_string()))?;
     Ok(Some(TestRun {

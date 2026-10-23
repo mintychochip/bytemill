@@ -364,6 +364,35 @@ fn a_require_equality_pins_the_field_in_either_operand_order() {
 }
 
 #[test]
+fn a_require_that_is_not_a_plain_equality_pins_nothing() {
+    // Only a top-level `field == constant` leaves one valid value. A disjunction or a `!=` leaves
+    // the field free: the generator must still produce several vectors that satisfy the require.
+    let resolved =
+        schema("packet a { v: u8 require v == 7 || v == 9 }\npacket b { w: u8 require w != 3 }\n");
+    let set = vectors::generate(&resolved, &spec(6, 1)).unwrap();
+    assert!(set.skipped.is_empty(), "{:?}", set.skipped);
+    let by_packet = |name: &str| -> Vec<&str> {
+        set.vectors
+            .iter()
+            .filter(|vector| vector.packet == name)
+            .map(|vector| vector.hex.as_str())
+            .collect()
+    };
+    let a = by_packet("a");
+    assert!(
+        a.contains(&"07") && a.contains(&"09"),
+        "both disjuncts occur: {a:?}"
+    );
+    assert!(a.iter().all(|hex| *hex == "07" || *hex == "09"), "{a:?}");
+    let b = by_packet("b");
+    assert!(
+        b.len() >= 2,
+        "a `!=` must not pin the field to one value: {b:?}"
+    );
+    assert!(b.iter().all(|hex| *hex != "03"), "{b:?}");
+}
+
+#[test]
 fn the_minecraft_handshake_is_generated_because_its_require_pins_the_protocol_version() {
     let resolved = common::load_minecraft().unwrap();
     let set = vectors::generate_for(&resolved, &["handshake".to_string()], &spec(3, 1)).unwrap();

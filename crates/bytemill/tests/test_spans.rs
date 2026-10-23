@@ -92,10 +92,10 @@ fn check_tiling(schema: &ResolvedSchema, packet: &str, seed: u64) -> usize {
         Ok(e) => e,
         Err(_) => return 0,
     };
-    let (spanned_env, spans) = match decode_packet_spans(schema, packet, &data, true) {
-        Ok(x) => x,
-        Err(_) => return 0,
-    };
+    let (spanned_env, spans) =
+        decode_packet_spans(schema, packet, &data, true).unwrap_or_else(|e| {
+            panic!("{packet} (seed {seed}): plain decode succeeded but spanned decode failed: {e}")
+        });
     assert_eq!(plain, spanned_env);
 
     // collect top level spans sorted by offset

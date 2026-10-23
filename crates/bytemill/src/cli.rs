@@ -1057,14 +1057,19 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
                 initial_state: a.state.clone().unwrap_or_else(|| "handshaking".to_string()),
             };
             let events = trace::trace(&resolved, opts, &chunks)?;
-            let mut had_error = false;
+            let mut failed = false;
             for ev in &events {
                 println!("{}", trace::event_json(ev));
-                if matches!(ev, trace::Event::Error { .. }) {
-                    had_error = true;
+                // A frame that fails to decode, or a capture that ends inside a frame, means the
+                // capture or the schema is wrong: a script must not see success.
+                if matches!(
+                    ev,
+                    trace::Event::Error { .. } | trace::Event::Incomplete { .. }
+                ) {
+                    failed = true;
                 }
             }
-            Ok(if had_error { 3 } else { 0 })
+            Ok(if failed { 3 } else { 0 })
         }
         _ => Ok(0),
     }

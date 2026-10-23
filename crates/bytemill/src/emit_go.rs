@@ -106,16 +106,17 @@ fn write_go_package(
     for (stem, body) in files {
         fs::write(out_dir.join(format!("{stem}.go")), body).map_err(|e| emit(e.to_string()))?;
     }
-    if vectors.is_empty() {
+    let embedded = vectors
+        .iter()
+        .filter(|v| packet_codec(program, &v.packet).is_some())
+        .count();
+    if embedded == 0 {
+        // No vector has a codec here: write no test rather than one that checks nothing.
         return Ok(None);
     }
     let test_src = build_vectors_test_go(program, vectors)?;
     let test_name = "vectors_test.go";
     fs::write(out_dir.join(test_name), test_src).map_err(|e| emit(e.to_string()))?;
-    let embedded = vectors
-        .iter()
-        .filter(|v| packet_codec(program, &v.packet).is_some())
-        .count();
     Ok(Some(TestRun {
         file: test_name.to_string(),
         command: "go test -count=1 ./...".to_string(),

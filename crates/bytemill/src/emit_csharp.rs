@@ -117,6 +117,10 @@ pub fn emit_csharp_with_vectors(
         ));
         n += 1;
     }
+    if n == 0 {
+        // No vector has a codec here: write no test rather than one that checks nothing.
+        return Ok(None);
+    }
     let lang = match ver {
         CSharpVersion::CSharp8 => "8",
         CSharpVersion::CSharp9 => "9",

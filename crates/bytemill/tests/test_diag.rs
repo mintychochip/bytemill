@@ -357,3 +357,41 @@ fn cli_check_bad_format_exits_2() {
     assert!(e.contains("check: argument --format: invalid choice"));
     common::cleanup(&dir);
 }
+
+#[test]
+fn cli_check_missing_file_exits_3_in_both_formats() {
+    // A load error without a source position must still be reported as an error, never as `ok`.
+    let dir = common::temp_tree("cli_missing");
+    let missing = dir.join("nope.bml");
+    let path = missing.to_str().unwrap();
+
+    let human = run_bml(&["check", path]);
+    assert_eq!(human.status.code(), Some(3));
+    assert!(
+        out_stderr(&human).contains("schema not found"),
+        "{}",
+        out_stderr(&human)
+    );
+    assert!(!out_stdout(&human).contains("ok"), "{}", out_stdout(&human));
+
+    let json = run_bml(&["check", "--format", "json", path]);
+    assert_eq!(json.status.code(), Some(3));
+    let parsed = loads(&out_stdout(&json)).expect("valid json");
+    let Value::Map(root) = &parsed else {
+        panic!("root map");
+    };
+    assert_eq!(root.get("ok"), Some(&Value::Bool(false)));
+    let Some(Value::List(diags)) = root.get("diagnostics") else {
+        panic!("diagnostics list");
+    };
+    assert_eq!(diags.len(), 1);
+    let Value::Map(diag) = &diags[0] else {
+        panic!("diagnostic map");
+    };
+    let Some(Value::Str(message)) = diag.get("message") else {
+        panic!("message string");
+    };
+    assert!(message.contains("schema not found"), "{message}");
+    assert_eq!(diag.get("severity"), Some(&Value::str("error")));
+    common::cleanup(&dir);
+}

@@ -316,7 +316,12 @@ pub fn emit_c_with_vectors(
         fs::write(&path, body).map_err(|e| emit(e.to_string()))?;
         clang_format(&path);
     }
-    if vectors.is_empty() {
+    let count = vectors
+        .iter()
+        .filter(|v| program.packet_codec(&v.packet).is_some())
+        .count();
+    if count == 0 {
+        // No vector has a codec here: write no test rather than one that checks nothing.
         return Ok(None);
     }
     let test_src = printer.vectors_test(vectors)?;
@@ -333,10 +338,7 @@ pub fn emit_c_with_vectors(
         "cc {} -Wall -Wextra{} -Werror -o vectors_test *.c && ./vectors_test",
         flag, pedantic
     );
-    let count = vectors
-        .iter()
-        .filter(|v| program.packet_codec(&v.packet).is_some())
-        .count();
+
     Ok(Some(TestRun {
         file: "vectors_test.c".to_string(),
         command,
@@ -1440,7 +1442,10 @@ impl<'a> Gen<'a> {
                 format!("{dec}(&r, &v)")
             };
             let bs = v.bytes()?;
-            let len = bs.len();
+            // The reader, the strictness check and the comparison all use the real array size, so
+            // a payload that lost or gained a byte cannot pass. The empty payload's `{0}`
+            // placeholder has size 1, hence the literal 0 there.
+            let len = if bs.is_empty() { "0" } else { "sizeof raw" };
             let raw = if bs.is_empty() {
                 "0".to_string()
             } else {

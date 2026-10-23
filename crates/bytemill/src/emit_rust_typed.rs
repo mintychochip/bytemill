@@ -195,9 +195,9 @@ pub fn emit_rust_typed_with_vectors(
     fs::create_dir_all(&tests).map_err(|e| emit(e.to_string()))?;
     let test_file = tests.join("vectors.rs");
     fs::write(&test_file, &test_src).map_err(|e| emit(e.to_string()))?;
-    // emit already-formatted text (array wrapping mirrors rustfmt) so the
-    // shipped test is clippy -D warnings and fmt clean without running
-    // rustfmt at emit time.
+    // Formatted like every other generated source: the writer's array wrapping only approximates
+    // rustfmt's, so the shipped test goes through `rustfmt` when it is installed.
+    rustfmt_paths(std::slice::from_ref(&test_file), edition);
     Ok(Some(TestRun {
         file: "tests/vectors.rs".to_string(),
         command: "cargo test --test vectors".to_string(),
@@ -973,9 +973,6 @@ impl<'a> Gen<'a> {
             "super"
         };
         let mut w = W::new();
-        if !packets_side {
-            w.line("#![allow(clippy::identity_op, reason = \"encodings mask values to their declared width\")]");
-        }
         let mut imported = false;
         if uses.model && packets_side {
             w.line(&format!("use {up}::model::*;"));

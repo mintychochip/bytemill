@@ -55,17 +55,8 @@ fn run(tr: &TestRun, dir: &Path, target: &Path) -> Output {
 }
 
 fn gate_vectors(dir: &Path, target: &Path, leg: &str, min: usize, count: usize) -> Output {
-    // The harness's own `tests/*.rs` are formatted in place (they are test
-    // scaffolding, not printer output); the `fmt --check` gate below then
-    // verifies the printer's `src/*.rs` untouched.
-    if let Ok(tests) = std::fs::read_dir(dir.join("tests")) {
-        for entry in tests.flatten() {
-            let _ = std::process::Command::new("rustfmt")
-                .args(["--edition", "2024"])
-                .arg(entry.path())
-                .status();
-        }
-    }
+    // `tests/vectors.rs` is printer output: the `fmt --check` gate below must see it exactly as
+    // emitted, so nothing is reformatted here.
     assert!(count >= min, "{leg}: only {count} vectors (need {min})");
     println!("{leg}: round-tripped {count} vectors");
     let fmt_ok = has_tool(dir, target, &["fmt", "--version"]);
