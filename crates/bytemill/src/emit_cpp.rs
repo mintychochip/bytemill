@@ -3769,31 +3769,36 @@ impl<'a> Emitter<'a> {
             RepeatMode::Count(n) => {
                 let n = n.clone();
                 let nv = self.paren_child(&n, BinOp::Lt, true);
-                self.src.open(&format!("if ({nv} < 0)"));
-                let nn = n.clone();
-                let msg = format!("negative length \" + {}", self.stringify_operand(&nn));
-                if self.is_encode {
-                    pack_call(
-                        &mut self.src,
-                        "throw EncodeError",
-                        &[format!("\"{}\"", self.snake), format!("\"{msg}")],
-                        ");",
-                        false,
-                    );
-                } else {
-                    pack_call(
-                        &mut self.src,
-                        "throw DecodeError",
-                        &[
-                            format!("\"{}\"", self.snake),
-                            format!("{}.pos()", self.rname),
-                            format!("\"{msg}"),
-                        ],
-                        ");",
-                        false,
-                    );
+                // A count whose type cannot be negative (`varuint32`, `u16be`, ...) needs no
+                // check, and `-Wtype-limits` (part of `-Wextra`) rejects `unsigned < 0`.
+                let may_be_negative =
+                    !matches!(self.program.int_range(self.body, &n), Some((lo, _)) if lo >= 0);
+                if may_be_negative {
+                    self.src.open(&format!("if ({nv} < 0)"));
+                    let msg = format!("negative length \" + {}", self.stringify_operand(&n));
+                    if self.is_encode {
+                        pack_call(
+                            &mut self.src,
+                            "throw EncodeError",
+                            &[format!("\"{}\"", self.snake), format!("\"{msg}")],
+                            ");",
+                            false,
+                        );
+                    } else {
+                        pack_call(
+                            &mut self.src,
+                            "throw DecodeError",
+                            &[
+                                format!("\"{}\"", self.snake),
+                                format!("{}.pos()", self.rname),
+                                format!("\"{msg}"),
+                            ],
+                            ");",
+                            false,
+                        );
+                    }
+                    self.src.close("}");
                 }
-                self.src.close("}");
                 let d = self.loop_depth;
                 let init = format!("std::int64_t _i{d} = 0");
                 let cond = format!("_i{d} < {nv}");

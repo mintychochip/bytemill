@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use bytemill::ir::typed::{IntTy, Program, Ty};
-use bytemill::vectors::{TestRun, Vector};
+use bytemill::vectors::{TestRun, Vector, VectorSpec};
 use bytemill::{
     CSharpVersion, CStandard, CppStandard, GoVersion, JavaVersion, PythonVersion, RustEdition,
     TsTarget, ZigVersion,
@@ -1199,4 +1199,285 @@ fn std_boundary_vectors_zig() {
     assert_tr_count(&tr, &vectors);
     run_zig_vectors(&dir, &tr);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn bedrock_source() -> String {
+    std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/leb128.bml")).unwrap()
+        + r"
+encoding bstring {
+    byte_len: varuint32
+    value:    bytes(byte_len) as utf8
+}
+encoding vec3f = {
+    x: f32le
+    y: f32le
+    z: f32le
+}
+packet move_player {
+    runtime_id: varuint64
+    position:   vec3f
+    pitch:      f32le
+    yaw:        f32le
+    mode:       u8
+    on_ground:  boolean
+    tick:       varuint64
+}
+packet text {
+    kind:        u8
+    source:      bstring
+    message:     bstring
+    param_count: varuint32
+    params:      bstring[] count = param_count
+    xuid:        bstring
+}
+packet set_score {
+    entry_id:  varint64
+    objective: bstring
+    score:     i32le
+    delta:     varint32
+    ratio:     f64le
+}
+"
+}
+
+fn resolved_bedrock() -> bytemill::ResolvedSchema {
+    bytemill::analyze(&bytemill::parse(&bedrock_source()).unwrap()).unwrap()
+}
+
+/// Generated vectors (3 packets × 6) plus hand `text` / `set_score` wires verified with `bml encode`.
+fn bedrock_vectors(resolved: &bytemill::ResolvedSchema) -> Vec<Vector> {
+    let set = bytemill::vectors::generate(
+        resolved,
+        &VectorSpec {
+            per_packet: 6,
+            seed: 1,
+        },
+    )
+    .unwrap();
+    assert!(
+        set.skipped.is_empty(),
+        "bedrock vector generator skipped: {:?}",
+        set.skipped
+    );
+    assert_eq!(
+        set.vectors.len(),
+        18,
+        "expected 18 generated bedrock vectors"
+    );
+    let mut vectors = set.vectors;
+    // text: kind 1, source "Steve", message "hi", one param "x", empty xuid
+    vectors.push(leb_vector("text", "0105537465766502686901017800"));
+    // set_score: entry_id -2, objective "obj", score -1, delta i32::MIN, ratio 1.5
+    vectors.push(leb_vector(
+        "set_score",
+        "03036f626affffffffffffffff0f000000000000f83f",
+    ));
+    vectors
+}
+
+#[derive(Clone, Copy)]
+enum BedrockPrinter {
+    RustTyped,
+    Go,
+    Python,
+    Java,
+    CSharp,
+    C,
+    Cpp,
+    TypeScript,
+    Zig,
+}
+
+impl BedrockPrinter {
+    const ALL: [Self; 9] = [
+        Self::RustTyped,
+        Self::Go,
+        Self::Python,
+        Self::Java,
+        Self::CSharp,
+        Self::C,
+        Self::Cpp,
+        Self::TypeScript,
+        Self::Zig,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::RustTyped => "rust-typed",
+            Self::Go => "go",
+            Self::Python => "python",
+            Self::Java => "java",
+            Self::CSharp => "csharp",
+            Self::C => "c",
+            Self::Cpp => "cpp",
+            Self::TypeScript => "typescript",
+            Self::Zig => "zig",
+        }
+    }
+}
+
+#[test]
+fn bedrock_style_schema_round_trips_natively_in_all_nine_printers() {
+    let resolved = resolved_bedrock();
+    let vectors = bedrock_vectors(&resolved);
+    assert_eq!(vectors.len(), 20);
+
+    for printer in BedrockPrinter::ALL {
+        let lang = printer.label();
+        match printer {
+            BedrockPrinter::RustTyped => {
+                let dir = scratch(&format!("bedrock-{lang}"));
+                let target = fresh_rust_target("bedrock-rust");
+                let tr = bytemill::emit_rust_typed::emit_rust_typed_with_vectors(
+                    &resolved,
+                    &dir,
+                    RustEdition::default(),
+                    &vectors,
+                )
+                .unwrap()
+                .expect("bedrock vectors");
+                assert_tr_count(&tr, &vectors);
+                run_rust_vectors(&dir, &target, &tr);
+                let _ = std::fs::remove_dir_all(&dir);
+                let _ = std::fs::remove_dir_all(&target);
+            }
+            BedrockPrinter::Go => {
+                let go_installed = Command::new("go")
+                    .arg("version")
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+                if !go_installed {
+                    eprintln!("bedrock {lang}: no go; skipping");
+                    continue;
+                }
+                let dir = scratch(&format!("bedrock-{lang}"));
+                let tr = bytemill::emit_go::emit_go_with_vectors(
+                    &resolved,
+                    &dir,
+                    GoVersion::default(),
+                    &vectors,
+                )
+                .unwrap()
+                .expect("bedrock vectors");
+                assert_tr_count(&tr, &vectors);
+                run_go_vectors(&dir, &tr);
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            BedrockPrinter::Python => {
+                let dir = scratch(&format!("bedrock-{lang}"));
+                let tr = bytemill::emit_python::emit_python_with_vectors(
+                    &resolved,
+                    &dir,
+                    PythonVersion::default(),
+                    &vectors,
+                )
+                .unwrap()
+                .expect("bedrock vectors");
+                assert_tr_count(&tr, &vectors);
+                run_python_vectors(&dir, &tr);
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            BedrockPrinter::Java => {
+                let dir = scratch(&format!("bedrock-{lang}"));
+                let tr = bytemill::emit_java::emit_java_with_vectors(
+                    &resolved,
+                    &dir,
+                    JavaVersion::default(),
+                    &vectors,
+                )
+                .unwrap()
+                .expect("bedrock vectors");
+                assert_tr_count(&tr, &vectors);
+                if !run_java_vectors(&dir, &tr) {
+                    eprintln!("bedrock {lang}: no java; skipping run");
+                }
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            BedrockPrinter::CSharp => {
+                let dir = scratch(&format!("bedrock-{lang}"));
+                let tr = bytemill::emit_csharp::emit_csharp_with_vectors(
+                    &resolved,
+                    &dir,
+                    CSharpVersion::default(),
+                    &vectors,
+                )
+                .unwrap()
+                .expect("bedrock vectors");
+                assert_tr_count(&tr, &vectors);
+                if !run_csharp_vectors(&dir, &tr) {
+                    eprintln!("bedrock {lang}: no dotnet; skipping run");
+                }
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            BedrockPrinter::C => {
+                for (std, tag) in [
+                    (CStandard::default(), "c11"),
+                    (CStandard::C89, "c89"),
+                    (CStandard::C23, "c23"),
+                ] {
+                    let dir = scratch(&format!("bedrock-{lang}-{tag}"));
+                    let tr = bytemill::emit_c::emit_c_with_vectors(&resolved, &dir, std, &vectors)
+                        .unwrap()
+                        .expect("bedrock vectors");
+                    assert_tr_count(&tr, &vectors);
+                    run_c_vectors(&dir, &tr);
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
+            }
+            BedrockPrinter::Cpp => {
+                for (std, tag) in [
+                    (CppStandard::default(), "cpp20"),
+                    (CppStandard::Cpp98, "cpp98"),
+                    (CppStandard::Cpp23, "cpp23"),
+                ] {
+                    let dir = scratch(&format!("bedrock-{lang}-{tag}"));
+                    let tr =
+                        bytemill::emit_cpp::emit_cpp_with_vectors(&resolved, &dir, std, &vectors)
+                            .unwrap()
+                            .expect("bedrock vectors");
+                    assert_tr_count(&tr, &vectors);
+                    run_cpp_vectors(&dir, &tr);
+                    let _ = std::fs::remove_dir_all(&dir);
+                }
+            }
+            BedrockPrinter::TypeScript => {
+                if !has_tool("node") {
+                    eprintln!("bedrock {lang}: no node; skipping");
+                    continue;
+                }
+                let dir = scratch(&format!("bedrock-{lang}"));
+                let tr = bytemill::emit_ts::emit_typescript_with_vectors(
+                    &resolved,
+                    &dir,
+                    TsTarget::default(),
+                    &vectors,
+                )
+                .unwrap()
+                .expect("bedrock vectors");
+                assert_tr_count(&tr, &vectors);
+                run_ts_vectors(&dir, &tr);
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            BedrockPrinter::Zig => {
+                if !std::path::Path::new(&zig()).is_file() {
+                    eprintln!("bedrock {lang}: zig not at {}; skipping", zig());
+                    continue;
+                }
+                let dir = scratch(&format!("bedrock-{lang}"));
+                let tr = bytemill::emit_zig::emit_zig_with_vectors(
+                    &resolved,
+                    &dir,
+                    ZigVersion::default(),
+                    &vectors,
+                )
+                .unwrap()
+                .expect("bedrock vectors");
+                assert_tr_count(&tr, &vectors);
+                run_zig_vectors(&dir, &tr);
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+        }
+    }
 }
