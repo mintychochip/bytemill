@@ -689,6 +689,67 @@ fn std_gates_cpp_leb128_all_standards() {
     }
 }
 
+/// A list counted by a `u64` can hold a count above `i64::MAX`. The C++ printer casts the count to
+/// `std::int64_t` for its loop, so such a count turns negative: the decode must reject it with the
+/// printer's negative-length check, not decode an empty list and carry on. Counts of 32 bits or
+/// fewer cannot be negative after the cast and carry no check (g++ `-Wtype-limits` rejects the
+/// comparison); the Bedrock-style test covers that side.
+#[test]
+fn cpp_list_counted_by_u64_rejects_a_count_above_i64_max() {
+    let source = std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap()
+        + &std::fs::read_to_string(repo("schemas/std/leb128.bml")).unwrap()
+        + r"
+packet big_count {
+    n:     varuint64
+    items: u16be[] count = n
+    tail:  u8
+}
+";
+    let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
+    let program = bytemill::ir::typed::typed(&resolved).unwrap();
+    let codec = program.packet_codec("big_count").expect("big_count codec");
+    let decode = bytemill::emit_cpp::decode_fn(&program, codec);
+    let check = format!(
+        r#"#include "bmlgen.hpp"
+#include <cstdio>
+int main() {{
+  using namespace bml;
+  {{
+    // count 2, two u16be items, tail 7: decodes and consumes every byte
+    const std::uint8_t ok[] = {{0x02, 0x00, 0x01, 0x00, 0x02, 0x07}};
+    Reader r(ok, sizeof ok);
+    (void){decode}(r);
+    if (r.remaining() != 0) {{ std::printf("small count left bytes\n"); return 1; }}
+  }}
+  {{
+    // count 2^63 (nine 0x80 bytes, then 0x01) and a tail byte: the count is above i64::MAX
+    const std::uint8_t big[] = {{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01, 0x07}};
+    Reader r(big, sizeof big);
+    try {{
+      (void){decode}(r);
+    }} catch (const DecodeError &) {{
+      std::printf("rejected\n");
+      return 0;
+    }}
+    std::printf("accepted a count above i64::MAX as an empty list\n");
+    return 1;
+  }}
+}}
+"#
+    );
+    for (std, flag, strict) in [
+        (bytemill::CppStandard::Cpp98, "c++98", false),
+        (bytemill::CppStandard::Cpp11, "c++11", true),
+        (bytemill::CppStandard::Cpp20, "c++20", true),
+    ] {
+        let dir = scratch(&format!("cpp-big-count-{}", std.name()));
+        bytemill::emit_cpp::emit_cpp_with_standard(&resolved, &dir, std).unwrap();
+        std::fs::write(dir.join("check.cpp"), &check).unwrap();
+        compile_cpp_std(&dir, flag, strict);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 fn tsc_gate(dir: &Path) {
     if !has_tool("tsc") {
         eprintln!("skipping tsc: not installed");
