@@ -1,0 +1,66 @@
+// Unsigned LEB128 varuint32/varuint64 and zigzag varint32/varint64.
+//
+// Built from `u8` (the only integer primitive) like every integer type in
+// schemas/std. The interpreter runs the definitions directly. Emitters lower
+// the field expressions and the final yield expression.
+//
+// The wire: each byte holds 7 bits of the integer (LSB first); its 0x80 bit
+// means "more bytes follow". The final byte is required to have 0x80 clear.
+// varuint32 uses at most 5 bytes (final contributes 4 bits); varuint64 uses
+// at most 10 (final contributes 1 bit).
+//
+// In the encoding bodies:
+//   `b1: u8 if (b0 & 0x80) != 0`   the byte is present only if the prior byte
+//                                  had its continuation bit set.
+//   `= expr` after a field         the value to write for that byte on encode.
+//                                  `value` is the semantic integer, already in
+//                                  its width (u32/u64) for the unsigned forms;
+//                                  decode ignores the = exprs and reads the bytes.
+//   `= expr` after the closing }   the decoded semantic value: low groups ORed
+//                                  (and sign-extended for the zigzag forms).
+//   `require (b4 & 0x80) == 0`     after all bytes, reject if the last one still
+//                                  claims a follower (non-canonical length).
+//
+// Zigzag forms use a `raw` computed field of the matching varuint to hold the
+// wire integer; the yield un-zigzags it. The mapping: 0->0, -1->1, 1->2, -2->3,
+// i32::MIN <-> 0xFFFFFFFF (as LEB), i64::MIN <-> 0xFFFFFFFFFFFFFFFF (as LEB).
+//
+// All subexpressions are written to keep inferred storage <= 64 bits so that
+// every printer (including Go/Java/C/C#) can emit them (PROJECT.md B1).
+//
+// Wire examples (hex, LSB first):
+//   varuint32: 0=00, 127=7f, 128=8001, 300=ac02, 16384=808001, 2^32-1=ffffffff0f
+//   varuint64: 2^64-1=ffffffffffffffffff01
+//   varint32: 0=00, -1=01, 1=02, -2=03, 2147483647=feffffff0f, -2147483648=ffffffff0f
+//   varint64: i64::MAX=feffffffffffffffff01, i64::MIN=ffffffffffffffffff01, -1=01
+
+encoding varuint32 = {
+    b0: u8 = (value & 0x7F) | (((value >> 7) != 0) ? 0x80 : 0)
+    b1: u8 if (b0 & 0x80) != 0 = ((value >> 7) & 0x7F) | (((value >> 14) != 0) ? 0x80 : 0)
+    b2: u8 if (b1 & 0x80) != 0 = ((value >> 14) & 0x7F) | (((value >> 21) != 0) ? 0x80 : 0)
+    b3: u8 if (b2 & 0x80) != 0 = ((value >> 21) & 0x7F) | (((value >> 28) != 0) ? 0x80 : 0)
+    b4: u8 if (b3 & 0x80) != 0 = (value >> 28) & 0x0F
+    require (b4 & 0x80) == 0
+} = (b0 & 0x7F) | ((b1 & 0x7F) << 7) | ((b2 & 0x7F) << 14) | ((b3 & 0x7F) << 21) | ((b4 & 0x0F) << 28)
+
+encoding varuint64 = {
+    b0: u8 = (value & 0x7F) | (((value >> 7) != 0) ? 0x80 : 0)
+    b1: u8 if (b0 & 0x80) != 0 = ((value >> 7) & 0x7F) | (((value >> 14) != 0) ? 0x80 : 0)
+    b2: u8 if (b1 & 0x80) != 0 = ((value >> 14) & 0x7F) | (((value >> 21) != 0) ? 0x80 : 0)
+    b3: u8 if (b2 & 0x80) != 0 = ((value >> 21) & 0x7F) | (((value >> 28) != 0) ? 0x80 : 0)
+    b4: u8 if (b3 & 0x80) != 0 = ((value >> 28) & 0x7F) | (((value >> 35) != 0) ? 0x80 : 0)
+    b5: u8 if (b4 & 0x80) != 0 = ((value >> 35) & 0x7F) | (((value >> 42) != 0) ? 0x80 : 0)
+    b6: u8 if (b5 & 0x80) != 0 = ((value >> 42) & 0x7F) | (((value >> 49) != 0) ? 0x80 : 0)
+    b7: u8 if (b6 & 0x80) != 0 = ((value >> 49) & 0x7F) | (((value >> 56) != 0) ? 0x80 : 0)
+    b8: u8 if (b7 & 0x80) != 0 = ((value >> 56) & 0x7F) | (((value >> 63) != 0) ? 0x80 : 0)
+    b9: u8 if (b8 & 0x80) != 0 = (value >> 63) & 0x01
+    require (b9 & 0x80) == 0
+} = (b0 & 0x7F) | ((b1 & 0x7F) << 7) | ((b2 & 0x7F) << 14) | ((b3 & 0x7F) << 21) | ((b4 & 0x7F) << 28) | ((b5 & 0x7F) << 35) | ((b6 & 0x7F) << 42) | ((b7 & 0x7F) << 49) | ((b8 & 0x7F) << 56) | ((b9 & 0x01) << 63)
+
+encoding varint32 = {
+    raw: varuint32 = ((value << 1) ^ (value >> 31)) & 0xFFFFFFFF
+} = sign_extend((raw >> 1) ^ (0 - (raw & 1)), 32)
+
+encoding varint64 = {
+    raw: varuint64 = ((value << 1) ^ (value >> 63)) & 0xFFFFFFFFFFFFFFFF
+} = sign_extend((raw >> 1) ^ (0 - (raw & 1)), 64)

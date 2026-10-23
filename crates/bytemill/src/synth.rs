@@ -104,6 +104,8 @@ fn prim(name: &str) -> Option<Value> {
         "u64be" | "i64be" => Value::Int(0x0102_0304_0506_0708),
         "f32be" => Value::Float(1.5),
         "f64be" => Value::Float(2.25),
+        "f32le" => Value::Float(1.5),
+        "f64le" => Value::Float(2.25),
         "varint" | "varlong" => Value::Int(1),
         "boolean" => Value::Bool(true),
         "angle" => Value::Int(64),

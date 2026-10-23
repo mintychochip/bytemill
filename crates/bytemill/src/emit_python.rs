@@ -35,6 +35,7 @@ use crate::ir::typed::{
     Program, ReadOp, RepeatMode, Stmt, Ty, TypeIdx, WriteOp,
 };
 use crate::ir::typed::{Origin, TypeKind};
+use crate::vectors::{TestRun, Vector};
 
 /// Python keywords plus the soft keywords the guide escapes with a trailing `_`.
 const KEYWORDS: &[&str] = &[
@@ -190,6 +191,14 @@ class Reader:
         """Read a big-endian 64-bit float."""
         return float(struct.unpack(">d", self.read_bytes(8))[0])
 
+    def read_f32_le(self) -> float:
+        """Read a little-endian 32-bit float."""
+        return float(struct.unpack("<f", self.read_bytes(4))[0])
+
+    def read_f64_le(self) -> float:
+        """Read a little-endian 64-bit float."""
+        return float(struct.unpack("<d", self.read_bytes(8))[0])
+
 
 class Writer:
     """Byte buffer writer; ``get_bytes()`` freezes the output."""
@@ -227,14 +236,23 @@ class Writer:
         """Write ``value`` as a big-endian 64-bit float."""
         self.buf.extend(struct.pack(">d", value))
 
+    def write_f32_le(self, value: float) -> None:
+        """Write ``value`` as a little-endian 32-bit float."""
+        self.buf.extend(struct.pack("<f", value))
+
+    def write_f64_le(self, value: float) -> None:
+        """Write ``value`` as a little-endian 64-bit float."""
+        self.buf.extend(struct.pack("<d", value))
+
     def get_bytes(self) -> bytes:
         """Return the written bytes."""
         return bytes(self.buf)
 
 
 def sign_extend(value: int, bits: int) -> int:
-    """Two's-complement sign extension of ``value`` from ``bits`` width."""
-    return value - (1 << bits) if value & (1 << (bits - 1)) else value
+    """The low ``bits`` bits of ``value`` read as a two's-complement integer."""
+    value &= (1 << bits) - 1
+    return value - (1 << bits) if value >> (bits - 1) else value
 
 
 def utf16_units(text: str) -> int:
@@ -268,11 +286,12 @@ pub fn emit_python(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
     emit_python_with_version(resolved, out_dir, crate::PythonVersion::default())
 }
 
-pub fn emit_python_with_version(
+pub fn emit_python_with_vectors(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     ver: crate::PythonVersion,
-) -> BmlResult<()> {
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = crate::ir::typed(resolved)?;
     let parts = emit_program(&program, ver)?;
     let pkg = out_dir.join("bmlgen");
@@ -326,6 +345,70 @@ pub fn emit_python_with_version(
     }
     init.push_str("]\n");
     fs::write(pkg.join("__init__.py"), init).map_err(|e| emit(e.to_string()))?;
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+    // Emit test_vectors.py (sibling to bmlgen/). Embeds vectors as literals; strict
+    // decode by inspecting reader.remaining; re-encode + compare. Clean for ruff
+    // format/check + mypy --strict on all supported Python (3.8+ via postponed annos).
+    let mut test_src = String::from(
+        "\"\"\"Round-trip tests for embedded vectors.\n\nRun as: python3 -m unittest -q test_vectors\nor as:  python3 test_vectors.py\n\"\"\"\n\nfrom __future__ import annotations\n\nimport unittest\n\nimport bmlgen\n\n\nclass TestVectors(unittest.TestCase):\n    def test_roundtrips(self) -> None:\n        fails: list[str] = []\n\n        def check(name: str, raw: bytes, cls_name: str) -> None:\n            try:\n                reader = bmlgen.Reader(raw)\n                value = getattr(bmlgen, cls_name).decode(reader)\n                if reader.remaining != 0:\n                    fails.append(\n                        f\"{name} strict: {reader.remaining} bytes left of {len(raw)}\"\n                    )\n                    return\n            except Exception as exc:  # noqa: BLE001\n                fails.append(f\"{name} decode {type(exc).__name__}: {exc}\")\n                return\n            try:\n                writer = bmlgen.Writer()\n                value.encode(writer)\n            except Exception as exc:  # noqa: BLE001\n                fails.append(f\"{name} encode {type(exc).__name__}: {exc}\")\n                return\n            got = writer.get_bytes()\n            if got != raw:\n                fails.append(f\"{name} bytes got {got.hex()} want {raw.hex()}\")\n\n",
+    );
+    let mut n_vectors = 0usize;
+    for v in vectors {
+        let raw = v.bytes()?;
+        let Some(codec) = program.packet_codec(&v.packet) else {
+            continue;
+        };
+        let dec = decode_fn(&program, codec);
+        let Some(cls) = dec.strip_suffix(".decode") else {
+            continue;
+        };
+        let bytes_lit = {
+            let hexes: Vec<String> = raw.iter().map(|&b| format!("0x{:02X}", b)).collect();
+            if hexes.len() <= 6 {
+                format!("bytes([{}])", hexes.join(", "))
+            } else {
+                let mut b = String::from("bytes(\n                [\n");
+                for (i, h) in hexes.iter().enumerate() {
+                    if i > 0 {
+                        b.push_str(",\n");
+                    }
+                    b.push_str("                    ");
+                    b.push_str(h);
+                }
+                b.push_str(",\n                ]\n            )");
+                b
+            }
+        };
+        let check_call = format!(
+            "        check(\n            {:?},\n            {},\n            \"{}\",\n        )\n",
+            v.packet, bytes_lit, cls
+        );
+        test_src.push_str(&check_call);
+        n_vectors += 1;
+    }
+    if n_vectors == 0 {
+        // No vector has a codec here: write no test rather than one that checks nothing.
+        return Ok(None);
+    }
+    test_src.push_str(
+        "        if fails:\n            print(\"\\n\".join(fails[:30]))\n            print(\"count\", len(fails))\n            self.fail(f\"{len(fails)} roundtrip failures\")\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n"
+    );
+    fs::write(out_dir.join("test_vectors.py"), test_src).map_err(|e| emit(e.to_string()))?;
+    Ok(Some(TestRun {
+        file: "test_vectors.py".to_string(),
+        command: "python3 -m unittest -q test_vectors".to_string(),
+        vectors: n_vectors,
+    }))
+}
+
+pub fn emit_python_with_version(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    ver: crate::PythonVersion,
+) -> BmlResult<()> {
+    let _ = emit_python_with_vectors(resolved, out_dir, ver, &[])?;
     Ok(())
 }
 
@@ -574,7 +657,12 @@ fn note_stmt(
         Stmt::Utf8 { src, .. } | Stmt::Write { value: src, .. } => note_expr(deps, prog, from, src),
         Stmt::Read { op, .. } => match op {
             ReadOp::Bytes(n) => note_expr(deps, prog, from, n),
-            ReadOp::U8 | ReadOp::F32 | ReadOp::F64 | ReadOp::Rest => {}
+            ReadOp::U8
+            | ReadOp::F32
+            | ReadOp::F64
+            | ReadOp::F32Le
+            | ReadOp::F64Le
+            | ReadOp::Rest => {}
         },
         Stmt::If { cond, then, els } => {
             note_expr(deps, prog, from, cond);
@@ -1944,6 +2032,8 @@ impl<'a> Emitter<'a> {
             ReadOp::U8 => "r.read_u8()".to_string(),
             ReadOp::F32 => "r.read_f32()".to_string(),
             ReadOp::F64 => "r.read_f64()".to_string(),
+            ReadOp::F32Le => "r.read_f32_le()".to_string(),
+            ReadOp::F64Le => "r.read_f64_le()".to_string(),
             ReadOp::Bytes(n) => format!("r.read_bytes({})", self.top_or_emit(f, n)),
             ReadOp::Rest => "r.read_rest()".to_string(),
         }
@@ -1975,6 +2065,8 @@ impl<'a> Emitter<'a> {
             },
             WriteOp::F32 => format!("w.write_f32({v})"),
             WriteOp::F64 => format!("w.write_f64({v})"),
+            WriteOp::F32Le => format!("w.write_f32_le({v})"),
+            WriteOp::F64Le => format!("w.write_f64_le({v})"),
             WriteOp::Bytes(n) => {
                 format!("w.write_bytes_fixed({v}, {})", self.top_or_emit(f, n))
             }
@@ -2352,7 +2444,7 @@ impl<'a> Emitter<'a> {
     fn render(&self, f: &FCtx, e: &Expr) -> Result<(String, u8), Long> {
         match e {
             Expr::Int { value, .. } => Ok((value.to_string(), 99)),
-            Expr::Bool(b) => Ok((b.to_string(), 99)),
+            Expr::Bool(b) => Ok((String::from(if *b { "True" } else { "False" }), 99)),
             Expr::Str(s) => Ok((py_str(s), 99)),
             Expr::Local(id) => {
                 // An inlined `Unwrap` temp renders as its source.

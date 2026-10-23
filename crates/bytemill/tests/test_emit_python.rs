@@ -355,3 +355,44 @@ fn python_version_py311() {
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&default_dir);
 }
+
+#[test]
+fn python_match_arm_boolean_false_literal() {
+    let integers = std::fs::read_to_string(repo("schemas/std/integers.bml")).unwrap();
+    let source = integers
+        + r"
+packet p {
+    action: u8
+    match action {
+        0 => { has: boolean }
+        _ => { has = false }
+    }
+}
+";
+    let resolved = bytemill::analyze(&bytemill::parse(&source).unwrap()).unwrap();
+    let dir = scratch("bool-false");
+    bytemill::emit_python::emit_python(&resolved, &dir).unwrap();
+    py_compile(&dir);
+    let emitted = all_py(&dir);
+    assert!(
+        !emitted.contains("= false") && !emitted.contains(", false)") && !emitted.contains("(false"),
+        "boolean literals must be capitalized True/False, not JS-style false"
+    );
+    std::fs::write(
+        dir.join("check.py"),
+        r#"import bmlgen
+
+def main() -> None:
+    arm = bmlgen.P.decode(bmlgen.Reader(bytes([0x01])))
+    assert arm.has is False
+    field = bmlgen.P.decode(bmlgen.Reader(bytes([0x00, 0x01])))
+    assert field.has is True
+
+if __name__ == "__main__":
+    main()
+"#,
+    )
+    .unwrap();
+    run_check(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -5,7 +5,7 @@
 
 use crate::ast::*;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefKind {
     Type,
     Spread,

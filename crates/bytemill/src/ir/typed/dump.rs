@@ -178,6 +178,8 @@ impl Program {
                         ReadOp::U8 => "u8".to_string(),
                         ReadOp::F32 => "f32".into(),
                         ReadOp::F64 => "f64".into(),
+                        ReadOp::F32Le => "f32le".into(),
+                        ReadOp::F64Le => "f64le".into(),
                         ReadOp::Bytes(n) => format!("bytes({})", self.expr(body, n)),
                         ReadOp::Rest => "rest".into(),
                     };
@@ -205,6 +207,8 @@ impl Program {
                         WriteOp::U8 => "u8".to_string(),
                         WriteOp::F32 => "f32".into(),
                         WriteOp::F64 => "f64".into(),
+                        WriteOp::F32Le => "f32le".into(),
+                        WriteOp::F64Le => "f64le".into(),
                         WriteOp::Bytes(n) => format!("bytes({})", self.expr(body, n)),
                         WriteOp::Rest => "rest".into(),
                     };

@@ -170,12 +170,7 @@ fn eval_call(name: &str, args: &[Value]) -> BmlResult<Value> {
             if bits <= 0 || bits > 128 {
                 return Err(decode(format!("sign_extend bits out of range: {bits}")));
             }
-            let mask: i128 = 1i128 << (bits as u32 - 1);
-            Ok(Value::Int(if v & mask != 0 {
-                (v ^ mask) - mask
-            } else {
-                v
-            }))
+            Ok(Value::Int(sign_extend_i128(v, bits as u32)))
         }
         "utf16_units" => {
             let s = as_str(&args[0])?;
@@ -203,6 +198,22 @@ fn eval_call(name: &str, args: &[Value]) -> BmlResult<Value> {
             Ok(Value::Bool(hay.contains(&needle)))
         }
         _ => Err(decode(format!("unknown call {}", py_repr_str(name)))),
+    }
+}
+
+/// Low `bits` of `v`, read as two's complement. `bits` is in `1..=128`;
+/// `1u128 << 128` does not fit, and 128 bits is already the whole `i128`.
+fn sign_extend_i128(v: i128, bits: u32) -> i128 {
+    if bits == 128 {
+        return v;
+    }
+    let mask = (1u128 << bits) - 1;
+    let low = (v as u128) & mask;
+    let sign = 1u128 << (bits - 1);
+    if low & sign != 0 {
+        (low | !mask) as i128
+    } else {
+        low as i128
     }
 }
 

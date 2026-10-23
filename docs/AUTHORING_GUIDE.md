@@ -34,15 +34,16 @@ Files connect through `import` (§2). A name must be declared in exactly one fil
 
 ## 2. Imports: where every name comes from
 
-The compiler implements five types: `u8`, `bytes(n)`, `rest`, `f32be`, and
-`f64be`. Every other type is an `encoding` declared in a `.bml` file, fixed-width
-integers, `boolean`, `varint`, and `varlong` included. A file uses one by
-importing the file that declares it:
+The compiler implements seven types: `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`,
+`f32le`, and `f64le`. Every other type is an `encoding` declared in a `.bml`
+file, fixed-width integers, `boolean`, `varint`, and `varlong` included. A file
+uses one by importing the file that declares it:
 
 | Import | Provides |
 | --- | --- |
 | `import "std/integers.bml"` | `i8`, `boolean`, `u16be`, `i16be`, `u32be`, `i32be`, `u64be`, `i64be`, and the six little-endian forms (`u16le` … `i64le`) |
 | `import "std/varint.bml"` | `varint`, `varlong` |
+| `import "std/leb128.bml"` | `varuint32`, `varuint64`, zigzag `varint32`, `varint64` (encode is canonical; decode accepts padded forms such as `8000` = 0 and rejects a continuation bit on the last allowed byte) |
 | `import "minecraft_core.bml"` | `string`, `identifier`, `uuid`, `position`, `angle`, `nbt`, `text_component`, `slot`, `hashed_slot`, `bitset`, `fixed_bitset`, `entity_metadata`, and the other shared layouts |
 
 The rules:
@@ -54,7 +55,7 @@ The rules:
   line in that same file.
 - The path is relative to the file that contains the `import`. Each file loads
   once, however many files import it.
-- The five primitives are the only names that need no import.
+- The seven primitives are the only names that need no import.
 - `bml` takes one or more files. A file that imports everything else is the
   root: `schemas/minecraft_26_3_wiki.bml` imports every packet file, so
   `bml check schemas/minecraft_26_3_wiki.bml` loads the whole protocol.
@@ -97,17 +98,25 @@ encoding angle      = u8
 
 ### Where the tools still know a name
 
-Imports decide what a *schema* may use. Two tool behaviors still depend on a std
-name directly, because they are not generated from the schema:
+Imports decide what a *schema* may use. A few tool behaviors still depend on a
+std name directly, because they are not generated from the schema:
 
 - The interpreter reads a frame's length and packet id as `varint`
-  (`decode_frame_payload` in `crates/bytemill/src/interp/engine.rs`), whatever the `frame`
-  declaration says. It also writes the length of a `string`, `identifier` or
-  `nbt_string` given as a string value with `varint` (`u16be` for `nbt_string`).
+  (`decode_frame_payload` in `crates/bytemill/src/interp/engine.rs`), whatever the
+  `frame` declaration says.
+- `bml encode` / `bml decode` follow each encoding's own definition: any
+  **string-shaped** encoding (leading integer length field of any declared type,
+  then `value: bytes(len) as utf8`) decodes to a JSON string and encodes with
+  **its** length type; `uuid` encodes through its declared half fields. JSON for a
+  string-shaped encoding under a name other than `string` is a plain string (not
+  `{"value":…}`). `sign_extend(v, bits)` truncates to the low `bits` bits for
+  every `v` (required for zigzag LEB128 and bit-packed fields).
 - `emit rust` and `emit rstom` recognise the std scalar names (`PRIMITIVES` in
-  `crates/bytemill/src/emit_rust.rs`, `WIRE_TYPES` in `crates/bytemill/src/emit_rstom.rs`) and emit hand-written
-  helpers instead of translating the definition. A scalar encoding outside that
-  set is an `EmitError`, not wrong code.
+  `crates/bytemill/src/emit_rust.rs`, `WIRE_TYPES` in
+  `crates/bytemill/src/emit_rstom.rs`) and emit hand-written helpers instead of
+  translating the definition. A scalar encoding outside that set is an
+  `EmitError`, not wrong code. `emit rstom` / `rstom-tree` reject `f32le` /
+  `f64le` schemas with an error.
 
 So editing `std/varint.bml` changes the interpreter; emitted Rust follows only
 when its helpers change too. `crates/bytemill/tests/test_emit_rstom.rs` compares the two.
@@ -297,6 +306,15 @@ sound = { sound_event_id: varint, if sound_event_id == 0 { ... sound_event }, ..
 
 ## 7. Verify as you write
 
+### Reading diagnostics
+
+`bml check` prints `error: …`, ` --> file:line:col`, the source line with a
+caret, and sometimes `help:` (suggested import, nearby declaration). Several
+errors appear in source order. `bml check --format json` emits one object
+`{"diagnostics":[…],"ok":bool}` with sorted keys (`help` omitted when absent).
+Success is unchanged: a valid schema prints `ok`. A missing import file is
+reported without a caret; a missing `}` at EOF points at the last field.
+
 ```bash
 bml check schemas/your.bml          # parse + resolve + type-check
 bml routes schemas/your.bml         # the routing table
@@ -317,6 +335,18 @@ And decode a frame:
 echo '10008906096c6f63616c686f737463dd01' | bml decode schemas/your.bml \
   --state handshaking --direction serverbound --hex
 ```
+
+Cross-check generated payloads against the interpreter:
+
+```bash
+bml gen schemas/your.bml | bml wire-check schemas/your.bml
+# checked N, failed 0
+```
+
+`wire-check` also accepts minimal lines `{"packet","hex"}`. To see where a byte
+went wrong, decode with `--hexdump` (annotated rows; unread tail as `unread`) or
+`--spans` (JSON `spans` tree with `offset` / `len`; mutually exclusive with
+`--hexdump`).
 
 The gates that must stay green (see `crates/bytemill/tests/`):
 

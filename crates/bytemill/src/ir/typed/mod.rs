@@ -531,15 +531,20 @@ pub enum RepeatMode {
     UntilEnd,
 }
 
-/// Wire primitives. Floats are big-endian IEEE 754.
+/// Wire primitives. `F32`/`F64` are big-endian IEEE 754; `F32Le`/`F64Le` are
+/// little-endian.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReadOp {
     /// `u8`
     U8,
-    /// `f32`
+    /// `f32be` (big-endian)
     F32,
-    /// `f64`
+    /// `f64be` (big-endian)
     F64,
+    /// `f32le` (little-endian)
+    F32Le,
+    /// `f64le` (little-endian)
+    F64Le,
     /// Exactly `n` bytes (`i64`).
     Bytes(Expr),
     /// Every remaining byte.
@@ -549,8 +554,14 @@ pub enum ReadOp {
 #[derive(Clone, Debug, PartialEq)]
 pub enum WriteOp {
     U8,
+    /// `f32be` (big-endian)
     F32,
+    /// `f64be` (big-endian)
     F64,
+    /// `f32le` (little-endian)
+    F32Le,
+    /// `f64le` (little-endian)
+    F64Le,
     /// The value padded with zero bytes to `n` (`i64`); longer fails.
     Bytes(Expr),
     Rest,

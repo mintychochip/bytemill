@@ -16,7 +16,8 @@ use crate::ast::{
     BlockItem, EncBody, Expr, FieldType, RepeatMode, ResolvedSchema, Tag, TypeRef, WireField,
     arm_tag_list, select_match_arm,
 };
-use crate::interp::eval_expr;
+use crate::interp::cursor::Cursor;
+use crate::interp::{decode_type_ref, encode_bare, eval_expr};
 use crate::value::{Env, Value};
 
 type R<T> = Result<T, String>;
@@ -205,7 +206,17 @@ fn scan_items(cx: &mut ScanCx<'_>, items: &[BlockItem], h: &mut Hints) {
                     scan_items(cx, &b.items, h);
                 }
             }
-            BlockItem::Require(_) => {}
+            BlockItem::Require(e) => {
+                // `require x == 777` leaves exactly one valid value for `x`.
+                if let Expr::Binop(op, l, r) = e
+                    && op.as_str() == "=="
+                    && let (Expr::Ident(n), Expr::Int(c)) | (Expr::Int(c), Expr::Ident(n)) =
+                        (&**l, &**r)
+                {
+                    h.exact.entry(n.clone()).or_default().push(*c);
+                }
+                scan_expr(e, h);
+            }
         }
     }
 }
@@ -526,6 +537,16 @@ impl Gen<'_> {
                 self.buf.extend_from_slice(&f.to_be_bytes());
                 return Ok(Value::Float(f));
             }
+            "f32le" => {
+                let f = self.float();
+                self.buf.extend_from_slice(&(f as f32).to_le_bytes());
+                return Ok(Value::Float(f64::from(f as f32)));
+            }
+            "f64le" => {
+                let f = self.float();
+                self.buf.extend_from_slice(&f.to_le_bytes());
+                return Ok(Value::Float(f));
+            }
             "rest" => {
                 let n = self.rng.below(4) as usize;
                 let bytes: Vec<u8> = (0..n).map(|_| self.rng.below(256) as u8).collect();
@@ -579,7 +600,53 @@ impl Gen<'_> {
             EncBody::Ref(inner) => self.type_ref(inner, &scope, name, hints),
             EncBody::Block(b) => {
                 if enc.yield_expr.is_some() {
-                    Err(format!("scalar encoding {:?} has no generator", enc.name))
+                    let field = want("");
+                    let mut chosen = None;
+                    for _attempt in 0..32u32 {
+                        let v = if let Some(c) = hints.exact.get(&field)
+                            && !c.is_empty()
+                        {
+                            c[self.rng.below(c.len() as u64) as usize]
+                        } else if hints.small.contains(&field) {
+                            i128::from(self.rng.below(4))
+                        } else if let Some(c) = hints.consts.get(&field)
+                            && !c.is_empty()
+                            && self.rng.below(10) < 8
+                        {
+                            c[self.rng.below(c.len() as u64) as usize]
+                        } else {
+                            match self.rng.below(10) {
+                                0..=3 => i128::from(self.rng.below(6)),
+                                4 => 0,
+                                5 => -1,
+                                6 => 1,
+                                _ => i128::from((self.rng.below(200) as i32) - 50),
+                            }
+                        };
+                        let tr = TypeRef {
+                            name: r.name.clone(),
+                            args: r.args.clone(),
+                            transforms: r.transforms.clone(),
+                        };
+                        let enc_res = encode_bare(&tr, &Value::Int(v), self.resolved, &scope)
+                            .map_err(|e| e.to_string());
+                        if let Ok(Some(wire)) = enc_res {
+                            let mut cur = Cursor::new(&wire);
+                            let dec_res = decode_type_ref(&tr, &mut cur, self.resolved, &scope)
+                                .map_err(|e| e.to_string());
+                            if let Ok(decoded) = dec_res
+                                && cur.remaining() == 0
+                            {
+                                self.buf.extend_from_slice(&wire);
+                                chosen = Some(decoded);
+                                break;
+                            }
+                        }
+                    }
+                    match chosen {
+                        Some(val) => Ok(val),
+                        None => Err(format!("scalar encoding {:?} has no generator", enc.name)),
+                    }
                 } else {
                     let inner = hints.merged(scan_block(self.resolved, &b.items));
                     let mut out = Env::new();

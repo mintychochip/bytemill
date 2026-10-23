@@ -19,7 +19,7 @@ use crate::ast::{Expr as AstExpr, ResolvedSchema};
 use crate::errors::{BmlResult, emit};
 use crate::ir::{IrArm, IrSchema, Stmt as IrStmt, Storage, Ty as IrTy, TypeDef, WireOp, lower};
 
-const BUILTINS: [&str; 5] = ["u8", "f32be", "f64be", "bytes", "rest"];
+const BUILTINS: [&str; 7] = ["u8", "f32be", "f64be", "f32le", "f64le", "bytes", "rest"];
 const ELEM: &str = "__elem";
 
 /// Lower `resolved` and build its typed program.
@@ -1293,6 +1293,8 @@ impl<'a> Builder<'a> {
                 "u8" => ReadOp::U8,
                 "f32be" => ReadOp::F32,
                 "f64be" => ReadOp::F64,
+                "f32le" => ReadOp::F32Le,
+                "f64le" => ReadOp::F64Le,
                 "rest" => ReadOp::Rest,
                 _ => {
                     let len = args
@@ -1341,6 +1343,8 @@ impl<'a> Builder<'a> {
             WireOp::U8 => ReadOp::U8,
             WireOp::F32be => ReadOp::F32,
             WireOp::F64be => ReadOp::F64,
+            WireOp::F32le => ReadOp::F32Le,
+            WireOp::F64le => ReadOp::F64Le,
             WireOp::Rest => ReadOp::Rest,
             WireOp::Bytes { len } => {
                 let te = self.expr(f, len, Mode::Stmt)?;
@@ -1979,6 +1983,8 @@ impl<'a> Builder<'a> {
                 "u8" => WireOp::U8,
                 "f32be" => WireOp::F32be,
                 "f64be" => WireOp::F64be,
+                "f32le" => WireOp::F32le,
+                "f64le" => WireOp::F64le,
                 "rest" => WireOp::Rest,
                 _ => WireOp::Bytes {
                     len: args
@@ -2011,6 +2017,14 @@ impl<'a> Builder<'a> {
             },
             WireOp::F64be => Stmt::Write {
                 op: WriteOp::F64,
+                value: self.coerce(value, &Ty::F64)?,
+            },
+            WireOp::F32le => Stmt::Write {
+                op: WriteOp::F32Le,
+                value: self.coerce(value, &Ty::F32)?,
+            },
+            WireOp::F64le => Stmt::Write {
+                op: WriteOp::F64Le,
                 value: self.coerce(value, &Ty::F64)?,
             },
             WireOp::Rest => Stmt::Write {
@@ -3309,6 +3323,8 @@ fn read_ty(op: &WireOp) -> Ty {
         WireOp::U8 => Ty::Int(IntTy::U8),
         WireOp::F32be => Ty::F32,
         WireOp::F64be => Ty::F64,
+        WireOp::F32le => Ty::F32,
+        WireOp::F64le => Ty::F64,
         WireOp::Bytes { .. } | WireOp::Rest => Ty::Bytes,
     }
 }
@@ -3318,6 +3334,8 @@ fn read_op_ty(op: &ReadOp) -> Ty {
         ReadOp::U8 => Ty::Int(IntTy::U8),
         ReadOp::F32 => Ty::F32,
         ReadOp::F64 => Ty::F64,
+        ReadOp::F32Le => Ty::F32,
+        ReadOp::F64Le => Ty::F64,
         ReadOp::Bytes(_) | ReadOp::Rest => Ty::Bytes,
     }
 }

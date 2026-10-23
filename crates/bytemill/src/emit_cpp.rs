@@ -54,6 +54,7 @@ use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Func, IntTy, LocalId, Name, Origin, Program, ReadOp, RepeatMode,
     Stmt, Ty, TypeIdx, escape, hex_literal, typed,
 };
+use crate::vectors::{TestRun, Vector};
 
 /// C++20 keywords and alternative tokens, plus POSIX/glibc and math macro
 /// hazards from the idiom guide. An emitted snake_case identifier colliding
@@ -188,6 +189,16 @@ pub fn emit_cpp_with_standard(
     out_dir: &Path,
     std_ver: crate::CppStandard,
 ) -> BmlResult<()> {
+    let _ = emit_cpp_with_vectors(resolved, out_dir, std_ver, &[])?;
+    Ok(())
+}
+
+pub fn emit_cpp_with_vectors(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    std_ver: crate::CppStandard,
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = typed(resolved)?;
     let layout = Layout::build(&program);
     check_top_level(&program, &layout)?;
@@ -209,7 +220,28 @@ pub fn emit_cpp_with_standard(
             clang_format(&path);
         }
     }
-    Ok(())
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+    let (test_src, vcount) = emit_vectors_test(&program, std_ver, vectors)?;
+    if vcount == 0 {
+        return Ok(None);
+    }
+    let test_file = "vectors_test.cpp".to_string();
+    let test_path = out_dir.join(&test_file);
+    std::fs::write(&test_path, test_src).map_err(|e| emit(e.to_string()))?;
+    if format {
+        clang_format(&test_path);
+    }
+    let cmd = format!(
+        "g++ {} -Wall -Wextra -Werror -o vectors_test *.cpp && ./vectors_test",
+        std_ver.flag()
+    );
+    Ok(Some(TestRun {
+        file: test_file,
+        command: cmd,
+        vectors: vcount,
+    }))
 }
 
 /// Format in place when `clang-format` is installed. The printer stays inside
@@ -230,6 +262,83 @@ pub fn decode_fn(program: &Program, codec: CodecIdx) -> String {
 /// The emitted encode function for a codec: `encode_<snake>`.
 pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
     format!("encode_{}", program.codecs[codec].name.snake())
+}
+fn display_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn emit_vectors_test(
+    program: &Program,
+    _std_ver: crate::CppStandard,
+    vectors: &[Vector],
+) -> BmlResult<(String, usize)> {
+    let mut body = String::from(
+        "#include \"bmlgen.hpp\"\n#include <cstdio>\n#include <cstring>\n#include <string>\n#include <vector>\nusing namespace bml;\nstatic int fails = 0;\n",
+    );
+    let mut calls = String::new();
+    let mut n = 0usize;
+    let mut vcount = 0usize;
+    for (vi, v) in vectors.iter().enumerate() {
+        let ci = match program.packet_codec(&v.packet) {
+            Some(c) => c,
+            None => continue,
+        };
+        if !program.codecs[ci].params.is_empty() {
+            continue;
+        }
+        let decode = decode_fn(program, ci);
+        let encode = encode_fn(program, ci);
+        let tname = pascal(&program.codecs[ci].name);
+        let name = display_name(&v.packet);
+        let bytes = v.bytes()?;
+        let is_empty = bytes.is_empty();
+        let lit = if is_empty {
+            "{}".to_string()
+        } else {
+            let mut lit = String::from("{");
+            let mut col = 1usize;
+            for (i, &b) in bytes.iter().enumerate() {
+                let item = format!("0x{:02x}", b);
+                let sep = if i == 0 { "" } else { ", " };
+                if col + sep.len() + item.len() > 70 && i != 0 {
+                    lit.push_str(",\n  ");
+                    col = 2;
+                } else if i != 0 {
+                    lit.push_str(sep);
+                    col += sep.len();
+                }
+                lit.push_str(&item);
+                col += item.len();
+            }
+            lit.push('}');
+            lit
+        };
+        let vi_str = vi.to_string();
+        if is_empty {
+            body.push_str(&format!(
+                "static void check_{n}() {{\n  Reader r(0, 0);\n  try {{\n    {tname} v = {decode}(r);\n    if (r.pos() != 0 || r.remaining() != 0) {{\n      std::printf(\"strict {name} {vi_str}\\n\");\n      ++fails;\n    }} else {{\n      Writer w;\n      {encode}(w, v);\n      if (!w.buf.empty()) {{\n        std::printf(\"bytes {name} {vi_str}\\n\");\n        ++fails;\n      }}\n    }}\n  }} catch (const std::exception &e) {{\n    std::printf(\"error {name} {vi_str}: %s\\n\", e.what());\n    ++fails;\n  }}\n}}\n",
+            ));
+        } else {
+            body.push_str(&format!(
+                "static void check_{n}() {{\n  const std::uint8_t raw_{n}[] = {lit};\n  Reader r(raw_{n}, sizeof(raw_{n}) / sizeof(raw_{n}[0]));\n  try {{\n    {tname} v = {decode}(r);\n    if (r.pos() != sizeof(raw_{n}) / sizeof(raw_{n}[0]) || r.remaining() != 0) {{\n      std::printf(\"strict {name} {vi_str}\\n\");\n      ++fails;\n    }} else {{\n      Writer w;\n      {encode}(w, v);\n      std::vector<std::uint8_t> want(raw_{n}, raw_{n} + sizeof(raw_{n}) / sizeof(raw_{n}[0]));\n      if (w.buf != want) {{\n        std::printf(\"bytes {name} {vi_str}\\n\");\n        ++fails;\n      }}\n    }}\n  }} catch (const std::exception &e) {{\n    std::printf(\"error {name} {vi_str}: %s\\n\", e.what());\n    ++fails;\n  }}\n}}\n",
+            ));
+        }
+        calls.push_str(&format!("check_{n}(); "));
+        n += 1;
+        vcount += 1;
+    }
+    body.push_str(&format!(
+        "int main() {{ {calls}return fails != 0 ? 1 : 0; }}\n"
+    ));
+    Ok((body, vcount))
 }
 
 fn check_top_level(program: &Program, layout: &Layout) -> BmlResult<()> {
@@ -845,6 +954,29 @@ public:
     std::memcpy(&d, &u, 8);
     return d;
   }
+  float f32le(const char *codec) {
+    std::uint32_t u = 0;
+    std::size_t i = 0;
+    for (std::uint8_t b : bytes(4, codec)) {
+      u |= (static_cast<std::uint32_t>(b) << (8 * i));
+      ++i;
+    }
+    float f = 0;
+    std::memcpy(&f, &u, 4);
+    return f;
+  }
+  double f64le(const char *codec) {
+    std::uint64_t u = 0;
+    std::size_t i = 0;
+    for (std::uint8_t b : bytes(8, codec)) {
+      u |= (static_cast<std::uint64_t>(b) << (8 * i));
+      ++i;
+    }
+    double d = 0;
+    std::memcpy(&d, &u, 8);
+    return d;
+  }
+
 
   std::string utf8(std::vector<std::uint8_t> raw, const char *codec) {
     if (!is_utf8(raw.data(), raw.size())) {
@@ -885,6 +1017,21 @@ public:
     std::uint64_t u = 0;
     std::memcpy(&u, &v, 8);
     for (int i = 7; i >= 0; --i) {
+      buf.push_back(static_cast<std::uint8_t>(u >> (8 * i)));
+    }
+  }
+  void f32le(float v) {
+    std::uint32_t u = 0;
+    std::memcpy(&u, &v, 4);
+    buf.push_back(static_cast<std::uint8_t>(u));
+    buf.push_back(static_cast<std::uint8_t>(u >> 8));
+    buf.push_back(static_cast<std::uint8_t>(u >> 16));
+    buf.push_back(static_cast<std::uint8_t>(u >> 24));
+  }
+  void f64le(double v) {
+    std::uint64_t u = 0;
+    std::memcpy(&u, &v, 8);
+    for (int i = 0; i < 8; ++i) {
       buf.push_back(static_cast<std::uint8_t>(u >> (8 * i)));
     }
   }
@@ -1203,7 +1350,7 @@ using ::uint64_t;
 /// under `-std=c++98` through `-std=c++14`.
 const COMPAT_BODY: &str = r#"namespace bml {
 struct Nullopt_t {};
-static Nullopt_t nullopt;
+static Nullopt_t nullopt __attribute__((unused));
 template <typename T> class Optional {
 public:
   Optional() : has_(false), value_() {}
@@ -1419,6 +1566,27 @@ public:
     std::memcpy(&d, &u, 8);
     return d;
   }
+  float f32le(const char *codec) {
+    std::vector<std::uint8_t> raw = bytes(4, codec);
+    std::uint32_t u = 0;
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+      u |= (static_cast<std::uint32_t>(raw[i]) << (8 * i));
+    }
+    float f = 0;
+    std::memcpy(&f, &u, 4);
+    return f;
+  }
+  double f64le(const char *codec) {
+    std::vector<std::uint8_t> raw = bytes(8, codec);
+    std::uint64_t u = 0;
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+      u |= (static_cast<std::uint64_t>(raw[i]) << (8 * i));
+    }
+    double d = 0;
+    std::memcpy(&d, &u, 8);
+    return d;
+  }
+
   std::string utf8(std::vector<std::uint8_t> raw, const char *codec) {
     if (!is_utf8(raw.empty() ? 0 : &raw[0], raw.size())) {
       throw DecodeError(codec, pos_, "invalid UTF-8");
@@ -1458,6 +1626,21 @@ public:
     std::uint64_t u = 0;
     std::memcpy(&u, &v, 8);
     for (int i = 7; i >= 0; --i) {
+      buf.push_back(static_cast<std::uint8_t>(u >> (8 * i)));
+    }
+  }
+  void f32le(float v) {
+    std::uint32_t u = 0;
+    std::memcpy(&u, &v, 4);
+    buf.push_back(static_cast<std::uint8_t>(u));
+    buf.push_back(static_cast<std::uint8_t>(u >> 8));
+    buf.push_back(static_cast<std::uint8_t>(u >> 16));
+    buf.push_back(static_cast<std::uint8_t>(u >> 24));
+  }
+  void f64le(double v) {
+    std::uint64_t u = 0;
+    std::memcpy(&u, &v, 8);
+    for (int i = 0; i < 8; ++i) {
       buf.push_back(static_cast<std::uint8_t>(u >> (8 * i)));
     }
   }
@@ -3232,6 +3415,8 @@ impl<'a> Emitter<'a> {
                     ReadOp::U8 => self.assign_call(&d, &format!("{r}.u8"), &[q]),
                     ReadOp::F32 => self.assign_call(&d, &format!("{r}.f32"), &[q]),
                     ReadOp::F64 => self.assign_call(&d, &format!("{r}.f64"), &[q]),
+                    ReadOp::F32Le => self.assign_call(&d, &format!("{r}.f32le"), &[q]),
+                    ReadOp::F64Le => self.assign_call(&d, &format!("{r}.f64le"), &[q]),
                     ReadOp::Bytes(n) => {
                         let n = n.clone();
                         let nv = self.val(&n);
@@ -3281,6 +3466,12 @@ impl<'a> Emitter<'a> {
                     }
                     crate::ir::typed::WriteOp::F32 => self.stmt_call(&format!("{w}.f32"), &[vv]),
                     crate::ir::typed::WriteOp::F64 => self.stmt_call(&format!("{w}.f64"), &[vv]),
+                    crate::ir::typed::WriteOp::F32Le => {
+                        self.stmt_call(&format!("{w}.f32le"), &[vv])
+                    }
+                    crate::ir::typed::WriteOp::F64Le => {
+                        self.stmt_call(&format!("{w}.f64le"), &[vv])
+                    }
                     crate::ir::typed::WriteOp::Bytes(n) => {
                         let n = n.clone();
                         let nv = self.val(&n);
@@ -3578,31 +3769,36 @@ impl<'a> Emitter<'a> {
             RepeatMode::Count(n) => {
                 let n = n.clone();
                 let nv = self.paren_child(&n, BinOp::Lt, true);
-                self.src.open(&format!("if ({nv} < 0)"));
-                let nn = n.clone();
-                let msg = format!("negative length \" + {}", self.stringify_operand(&nn));
-                if self.is_encode {
-                    pack_call(
-                        &mut self.src,
-                        "throw EncodeError",
-                        &[format!("\"{}\"", self.snake), format!("\"{msg}")],
-                        ");",
-                        false,
-                    );
-                } else {
-                    pack_call(
-                        &mut self.src,
-                        "throw DecodeError",
-                        &[
-                            format!("\"{}\"", self.snake),
-                            format!("{}.pos()", self.rname),
-                            format!("\"{msg}"),
-                        ],
-                        ");",
-                        false,
-                    );
+                // A count whose type cannot be negative (`varuint32`, `u16be`, ...) needs no
+                // check, and `-Wtype-limits` (part of `-Wextra`) rejects `unsigned < 0`.
+                let may_be_negative =
+                    !matches!(self.program.int_range(self.body, &n), Some((lo, _)) if lo >= 0);
+                if may_be_negative {
+                    self.src.open(&format!("if ({nv} < 0)"));
+                    let msg = format!("negative length \" + {}", self.stringify_operand(&n));
+                    if self.is_encode {
+                        pack_call(
+                            &mut self.src,
+                            "throw EncodeError",
+                            &[format!("\"{}\"", self.snake), format!("\"{msg}")],
+                            ");",
+                            false,
+                        );
+                    } else {
+                        pack_call(
+                            &mut self.src,
+                            "throw DecodeError",
+                            &[
+                                format!("\"{}\"", self.snake),
+                                format!("{}.pos()", self.rname),
+                                format!("\"{msg}"),
+                            ],
+                            ");",
+                            false,
+                        );
+                    }
+                    self.src.close("}");
                 }
-                self.src.close("}");
                 let d = self.loop_depth;
                 let init = format!("std::int64_t _i{d} = 0");
                 let cond = format!("_i{d} < {nv}");
@@ -4164,8 +4360,38 @@ impl<'a> Emitter<'a> {
                 Expr::Binary { op, .. }
                     if matches!(op, BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd) && *op != parent
             );
+        // `-Wparentheses` also rejects arithmetic or a comparison directly inside `&`, `|`, `^`,
+        // and a sum directly inside a shift, though precedence settles them.
+        let bits_over_arith = matches!(parent, BinOp::BitOr | BinOp::BitXor | BinOp::BitAnd)
+            && matches!(
+                e,
+                Expr::Binary { op, ty, wraps, .. }
+                    if !helper_printed(*op, ty, *wraps)
+                        && matches!(
+                            op,
+                            BinOp::Add
+                                | BinOp::Sub
+                                | BinOp::Mul
+                                | BinOp::Div
+                                | BinOp::Mod
+                                | BinOp::Eq
+                                | BinOp::Ne
+                                | BinOp::Lt
+                                | BinOp::Le
+                                | BinOp::Gt
+                                | BinOp::Ge
+                        )
+            );
+        let shift_over_sum = matches!(parent, BinOp::Shl | BinOp::Shr)
+            && matches!(
+                e,
+                Expr::Binary { op, ty, wraps, .. }
+                    if !helper_printed(*op, ty, *wraps) && matches!(op, BinOp::Add | BinOp::Sub)
+            );
         if cp < pp
             || mixed_bits
+            || bits_over_arith
+            || shift_over_sum
             || (cp == pp
                 && !is_left
                 && matches!(

@@ -13,7 +13,10 @@ use crate::emit_rstom::emit_rstom;
 use crate::emit_rust::emit_rust;
 use crate::emit_tree::emit_tree;
 use crate::errors::{BmlError, BmlResult, emit};
-use crate::interp::{decode_frame_payload, decode_packet, encode_packet};
+use crate::interp::{
+    decode_frame_payload, decode_frame_payload_spans, decode_packet, decode_packet_spans,
+    encode_packet, hexdump, spans_json,
+};
 use crate::json::{Value, dumps_sorted, loads};
 use crate::load::load_schema;
 use crate::minestom::{ClassTable, build_units};
@@ -21,6 +24,9 @@ use crate::shapes::{
     bml_field_pairs, extract_shape, hand_packet_path, mismatch, module_path, packet_report,
     shape_to_json,
 };
+use crate::trace::{self, TraceOptions};
+use crate::vectors::{self, VectorSpec, to_jsonl};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Where `packets_gen`'s schema is in an rstom workspace, relative to it.
@@ -51,6 +57,66 @@ fn default_shapes() -> PathBuf {
 fn load_and_analyze(paths: &[String]) -> BmlResult<crate::ast::ResolvedSchema> {
     let schema = load_schema(&paths.iter().map(PathBuf::from).collect::<Vec<_>>())?;
     analyze(&schema)
+}
+
+fn load_or_report(paths: &[String]) -> Result<crate::ast::ResolvedSchema, i32> {
+    match load_and_analyze(paths) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            if !paths.is_empty() {
+                let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+                let diags = crate::diag::diagnose_files(&path_bufs);
+                if !diags.is_empty() {
+                    let sources = crate::diag::SourceSet::from_diagnostics(&diags);
+                    eprintln!("{}", crate::diag::render(&diags, &sources));
+                    return Err(3);
+                }
+            }
+            eprintln!("{e}");
+            Err(3)
+        }
+    }
+}
+
+fn print_vector_stderr(set: &vectors::VectorSet) {
+    for sk in &set.skipped {
+        eprintln!("skipped {}: {}", sk.packet, sk.reason);
+    }
+    let n = set.vectors.len();
+    let p = set
+        .vectors
+        .iter()
+        .map(|v| &v.packet)
+        .collect::<HashSet<_>>()
+        .len();
+    let s = set.skipped.len();
+    eprintln!("{} vectors for {} packets, {} packets skipped", n, p, s);
+}
+
+fn parse_trace_secret(hex: &str) -> Result<[u8; 16], String> {
+    let digits: String = hex.chars().filter(|c| !c.is_whitespace()).collect();
+    if digits.len() != 32 || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("trace: --secret must be 32 hex digits".to_string());
+    }
+    let mut out = [0u8; 16];
+    for (i, chunk) in digits.as_bytes().chunks(2).enumerate() {
+        let pair = std::str::from_utf8(chunk).unwrap();
+        out[i] = u8::from_str_radix(pair, 16).unwrap();
+    }
+    Ok(out)
+}
+
+fn frame_fields_for_hexdump(out: &crate::value::Env, packet_id: i128) -> crate::value::Env {
+    let mut env = crate::value::Env::new();
+    env.insert("id", Value::Int(packet_id));
+    for key in ["frame", "fields"] {
+        if let Some(Value::Map(fields)) = out.get(key) {
+            for (k, v) in fields.iter() {
+                env.insert(k, v.clone());
+            }
+        }
+    }
+    env
 }
 
 fn default_packets_json_hint(target: &str, anchor: &Path) -> String {
@@ -116,6 +182,17 @@ struct Args {
     json_value: Option<String>,
     std: Option<String>,
     compression: Option<String>,
+    format: Option<String>,
+    count: Option<String>,
+    seed: Option<String>,
+    gen_packets: Vec<String>,
+    vectors: bool,
+    vectors_count: Option<String>,
+    vectors_seed: Option<String>,
+    spans: bool,
+    hexdump: bool,
+    file: Option<String>,
+    secret: Option<String>,
 }
 
 /// Pull a flag's value out of `argv`, leaving the positionals.
@@ -279,12 +356,9 @@ fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
             buf
         }
     };
-    let resolved = match load_and_analyze(&argv) {
+    let resolved = match load_or_report(&argv) {
         Ok(r) => r,
-        Err(e) => {
-            eprintln!("{e}");
-            return Ok(3);
-        }
+        Err(c) => return Ok(c),
     };
     let report = crate::wire::check_vectors(&resolved, &text, dump.is_some())?;
     if let Some(path) = dump {
@@ -336,6 +410,17 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
 
     match cmd.as_str() {
         "check" | "dump-json" | "routes" | "stages" => {
+            if cmd == "check" {
+                a.format = take_flag(&mut argv, &["--format"])?;
+                if let Some(f) = a.format.as_deref()
+                    && f != "human"
+                    && f != "json"
+                {
+                    return Err(format!(
+                        "check: argument --format: invalid choice: {f:?} (choose from 'human', 'json')"
+                    ));
+                }
+            }
             a.schemas = argv;
         }
         "targets" => {
@@ -349,6 +434,11 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
             a.direction = take_flag(&mut argv, &["--direction"])?;
             a.compression = take_flag(&mut argv, &["--compression"])?;
             a.hex = take_switch(&mut argv, "--hex");
+            a.spans = take_switch(&mut argv, "--spans");
+            a.hexdump = take_switch(&mut argv, "--hexdump");
+            if a.spans && a.hexdump {
+                return Err("decode: --spans and --hexdump are mutually exclusive".to_string());
+            }
             a.schemas = argv;
         }
         "encode" => {
@@ -391,6 +481,30 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
             a.shapes = take_flag(&mut argv, &["--shapes"])?;
             a.packets_json = take_flag(&mut argv, &["--packets-json"])?;
             a.check = take_switch(&mut argv, "--check");
+            a.vectors = take_switch(&mut argv, "--vectors");
+            a.vectors_count = take_flag(&mut argv, &["--vectors-count", "--vectors_count"])?;
+            a.vectors_seed = take_flag(&mut argv, &["--vectors-seed", "--vectors_seed"])?;
+            if !a.vectors && (a.vectors_count.is_some() || a.vectors_seed.is_some()) {
+                return Err(
+                    "emit: argument --vectors-count: not allowed without --vectors".to_string(),
+                );
+            }
+            if let Some(c) = &a.vectors_count
+                && c.parse::<usize>().is_err()
+            {
+                return Err(format!(
+                    "emit: argument --vectors-count: invalid int value: {:?}",
+                    c
+                ));
+            }
+            if let Some(s) = &a.vectors_seed
+                && s.parse::<u64>().is_err()
+            {
+                return Err(format!(
+                    "emit: argument --vectors-seed: invalid int value: {:?}",
+                    s
+                ));
+            }
             a.schemas = argv;
         }
         "shapes" => {
@@ -440,6 +554,35 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                 }
             }
         }
+        "gen" => {
+            a.count = take_flag(&mut argv, &["--count"])?;
+            a.seed = take_flag(&mut argv, &["--seed"])?;
+            while let Some(p) = take_flag(&mut argv, &["--packet"])? {
+                a.gen_packets.push(p);
+            }
+            if let Some(c) = &a.count
+                && c.parse::<usize>().is_err()
+            {
+                return Err(format!("gen: argument --count: invalid int value: {:?}", c));
+            }
+            if let Some(s) = &a.seed
+                && s.parse::<u64>().is_err()
+            {
+                return Err(format!("gen: argument --seed: invalid int value: {:?}", s));
+            }
+            a.schemas = argv;
+        }
+        "trace" => {
+            a.file = take_flag(&mut argv, &["--file"])?;
+            a.secret = take_flag(&mut argv, &["--secret"])?;
+            a.state = take_flag(&mut argv, &["--state"])?;
+            if let Some(s) = &a.secret
+                && parse_trace_secret(s).is_err()
+            {
+                return Err("trace: --secret must be 32 hex digits".to_string());
+            }
+            a.schemas = argv;
+        }
         // Listed in COMMANDS but not handled here: tests/test_cli_help.rs fails on this.
         _ => return Err(help::unknown_command(&cmd)),
     }
@@ -453,21 +596,57 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
         }
     }
 }
-
 fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
     match cmd {
         "check" => {
-            load_and_analyze(&a.schemas)?;
-            println!("ok");
-            Ok(0)
+            let format = a.format.as_deref().unwrap_or("human");
+            // A valid schema takes the single load every other command takes. The diagnostics
+            // pass re-reads the files to locate each problem, so only a schema that failed
+            // pays for it.
+            let diags = match load_and_analyze(&a.schemas) {
+                Ok(_) => Vec::new(),
+                Err(e) => {
+                    let paths: Vec<PathBuf> = a.schemas.iter().map(PathBuf::from).collect();
+                    let mut found = crate::diag::diagnose_files(&paths);
+                    if found.is_empty() {
+                        found.push(crate::diag::Diagnostic {
+                            severity: crate::diag::Severity::Error,
+                            message: e.to_string(),
+                            file: None,
+                            span: None,
+                            line: 0,
+                            column: 0,
+                            end_line: 0,
+                            end_column: 0,
+                            help: None,
+                        });
+                    }
+                    found
+                }
+            };
+            if format == "json" {
+                println!("{}", crate::diag::to_json(&diags));
+            } else if diags.is_empty() {
+                println!("ok");
+            } else {
+                let sources = crate::diag::SourceSet::from_diagnostics(&diags);
+                eprintln!("{}", crate::diag::render(&diags, &sources));
+            }
+            Ok(if diags.is_empty() { 0 } else { 3 })
         }
         "dump-json" => {
-            let resolved = load_and_analyze(&a.schemas)?;
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
             println!("{}", schema_to_json(&resolved.schema));
             Ok(0)
         }
         "routes" => {
-            let resolved = load_and_analyze(&a.schemas)?;
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
             for (route, pkt) in &resolved.routes {
                 println!(
                     "{}.{} 0x{:02x} -> {}",
@@ -487,8 +666,12 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             Ok(0)
         }
         "decode" => {
-            let resolved = load_and_analyze(&a.schemas)?;
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
             let raw = read_stdin()?;
+
             let mut data = hex_bytes(&raw)?;
             if let Some(spec) = &a.compression {
                 if a.packet.is_some() {
@@ -508,26 +691,55 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
                 crate::compress::ensure_minecraft_frame(&resolved, state, direction)?;
                 data = crate::compress::unwrap_minecraft_frame(&data)?;
             }
-            let out = if let Some(packet) = &a.packet {
-                decode_packet(&resolved, packet, &data, false)?
-            } else if let (Some(state), Some(direction)) = (&a.state, &a.direction) {
-                let (pid, out) = decode_frame_payload(&resolved, state, direction, &data)?;
-                let mut with_id = crate::value::Env::new();
-                with_id.insert("id", Value::Int(pid));
-                for (k, v) in out.iter() {
-                    with_id.insert(k, v.clone());
+            if let Some(packet) = &a.packet {
+                if a.hexdump {
+                    let (fields, spans) = decode_packet_spans(&resolved, packet, &data, false)?;
+                    println!("{}", hexdump(&data, &spans, &fields));
+                } else if a.spans {
+                    let (fields, spans) = decode_packet_spans(&resolved, packet, &data, false)?;
+                    let mut obj = crate::ordmap::OrderedMap::new();
+                    obj.insert("fields", Value::map(fields));
+                    obj.insert("spans", spans_json(&spans));
+                    println!("{}", dumps_sorted(&Value::map(obj)));
+                } else {
+                    let out = decode_packet(&resolved, packet, &data, false)?;
+                    println!("{}", dumps_sorted(&Value::map(out)));
                 }
-                with_id
+            } else if let (Some(state), Some(direction)) = (&a.state, &a.direction) {
+                if a.hexdump {
+                    let (pid, out, spans) =
+                        decode_frame_payload_spans(&resolved, state, direction, &data)?;
+                    let fields = frame_fields_for_hexdump(&out, pid);
+                    println!("{}", hexdump(&data, &spans, &fields));
+                } else if a.spans {
+                    let (pid, out, spans) =
+                        decode_frame_payload_spans(&resolved, state, direction, &data)?;
+                    let mut top = out;
+                    top.insert("id", Value::Int(pid));
+                    top.insert("spans", spans_json(&spans));
+                    println!("{}", dumps_sorted(&Value::map(top)));
+                } else {
+                    let (pid, out) = decode_frame_payload(&resolved, state, direction, &data)?;
+                    let mut with_id = crate::value::Env::new();
+                    with_id.insert("id", Value::Int(pid));
+                    for (k, v) in out.iter() {
+                        with_id.insert(k, v.clone());
+                    }
+                    println!("{}", dumps_sorted(&Value::map(with_id)));
+                }
             } else {
                 eprintln!("need --packet or --state and --direction");
                 return Ok(1);
-            };
-            println!("{}", dumps_sorted(&Value::map(out)));
+            }
             Ok(0)
         }
         "encode" => {
-            let resolved = load_and_analyze(&a.schemas)?;
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
             let val = loads(a.json_value.as_deref().unwrap_or(""))?;
+
             let Value::Map(m) = val else {
                 return Err(BmlError::new(
                     crate::errors::ErrorKind::Encode,
@@ -572,8 +784,18 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             Ok(0)
         }
         "emit" => {
-            let resolved = load_and_analyze(&a.schemas)?;
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
             let target = a.target.as_deref().unwrap_or("");
+
+            if a.vectors && matches!(target, "rust" | "rstom" | "rstom-tree") {
+                return Err(emit(format!(
+                    "emit {target} does not support --vectors (only the typed printers do)"
+                )));
+            }
+
             if target == "rstom-tree" {
                 let Some(rstom) = &a.rstom else {
                     return Err(emit("emit rstom-tree needs --rstom <workspace>"));
@@ -606,6 +828,97 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             };
             let out_dir = PathBuf::from(out);
             let opts = crate::target_version::EmitOptions::for_target(target, a.std.as_deref())?;
+            if a.vectors {
+                let count: usize = a
+                    .vectors_count
+                    .as_deref()
+                    .map(|s| s.parse().unwrap())
+                    .unwrap_or(3);
+                let seed: u64 = a
+                    .vectors_seed
+                    .as_deref()
+                    .map(|s| s.parse().unwrap())
+                    .unwrap_or(1);
+                let spec = VectorSpec {
+                    per_packet: count,
+                    seed,
+                };
+                let set = vectors::generate(&resolved, &spec)?;
+                print_vector_stderr(&set);
+                let run = match target {
+                    "rust-typed" => crate::emit_rust_typed::emit_rust_typed_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.rust_edition,
+                        &set.vectors,
+                    )?,
+                    "go" => crate::emit_go::emit_go_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.go_ver,
+                        &set.vectors,
+                    )?,
+                    "python" => crate::emit_python::emit_python_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.py_ver,
+                        &set.vectors,
+                    )?,
+                    "c" => crate::emit_c::emit_c_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.c_std,
+                        &set.vectors,
+                    )?,
+                    "cpp" => crate::emit_cpp::emit_cpp_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.cpp_std,
+                        &set.vectors,
+                    )?,
+                    "typescript" => crate::emit_ts::emit_typescript_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.ts_target,
+                        &set.vectors,
+                    )?,
+                    "zig" => crate::emit_zig::emit_zig_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.zig_ver,
+                        &set.vectors,
+                    )?,
+                    "java" => crate::emit_java::emit_java_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.java_ver,
+                        &set.vectors,
+                    )?,
+                    "csharp" | "cs" => crate::emit_csharp::emit_csharp_with_vectors(
+                        &resolved,
+                        &out_dir,
+                        opts.csharp_ver,
+                        &set.vectors,
+                    )?,
+                    _ => {
+                        return Err(emit(format!(
+                            "emit {target} does not support --vectors (only the typed printers do)"
+                        )));
+                    }
+                };
+                println!("emitted {target} crate to {out}");
+                if let Some(run) = run {
+                    println!(
+                        "wrote {} ({} vectors); run: cd {} && {}",
+                        run.file, run.vectors, out, run.command
+                    );
+                } else {
+                    println!(
+                        "no test written: no generated vector has a typed codec in this target"
+                    );
+                }
+                return Ok(0);
+            }
             if target == "rust" {
                 emit_rust(&resolved, &out_dir)?;
             } else if target == "rust-typed" {
@@ -638,7 +951,10 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             Ok(0)
         }
         "shapes" => {
-            let resolved = load_and_analyze(&a.schemas)?;
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
             let workspace = PathBuf::from(a.rstom.as_deref().unwrap_or(""));
             let classes = class_table(a.packets_json.as_deref(), &workspace, "rstom-tree")?;
             let units = build_units(&resolved, &classes)?;
@@ -697,10 +1013,67 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
                 _ => Ok(0),
             }
         }
+        "gen" => {
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
+            let count: usize = a.count.as_deref().map_or(3, |s| s.parse().unwrap());
+            let seed: u64 = a.seed.as_deref().map_or(1, |s| s.parse().unwrap());
+            let spec = VectorSpec {
+                per_packet: count,
+                seed,
+            };
+            let vset = if a.gen_packets.is_empty() {
+                vectors::generate(&resolved, &spec)?
+            } else {
+                vectors::generate_for(&resolved, &a.gen_packets, &spec)?
+            };
+            print!("{}", to_jsonl(&vset.vectors));
+            print_vector_stderr(&vset);
+            Ok(0)
+        }
+        "trace" => {
+            let resolved = match load_or_report(&a.schemas) {
+                Ok(r) => r,
+                Err(c) => return Ok(c),
+            };
+            let input = if let Some(f) = &a.file {
+                std::fs::read_to_string(f)
+                    .map_err(|e| BmlError::new(crate::errors::ErrorKind::Parse, format!("{e}")))?
+            } else {
+                read_stdin()?
+            };
+            let chunks = trace::parse_capture(&input)
+                .map_err(|msg| BmlError::new(crate::errors::ErrorKind::Parse, msg))?;
+            let secret = a
+                .secret
+                .as_deref()
+                .map(parse_trace_secret)
+                .transpose()
+                .map_err(|msg| BmlError::new(crate::errors::ErrorKind::Parse, msg))?;
+            let opts = TraceOptions {
+                secret,
+                initial_state: a.state.clone().unwrap_or_else(|| "handshaking".to_string()),
+            };
+            let events = trace::trace(&resolved, opts, &chunks)?;
+            let mut failed = false;
+            for ev in &events {
+                println!("{}", trace::event_json(ev));
+                // A frame that fails to decode, or a capture that ends inside a frame, means the
+                // capture or the schema is wrong: a script must not see success.
+                if matches!(
+                    ev,
+                    trace::Event::Error { .. } | trace::Event::Incomplete { .. }
+                ) {
+                    failed = true;
+                }
+            }
+            Ok(if failed { 3 } else { 0 })
+        }
         _ => Ok(0),
     }
 }
-
 fn read_stdin() -> BmlResult<String> {
     use std::io::Read;
     let mut buf = String::new();

@@ -11,6 +11,8 @@ use crate::ast::*;
 use crate::errors::{BmlResult, decode, decode_at, encode, py_repr_str};
 use crate::interp::cursor::{Cursor, WriteCursor};
 use crate::interp::expr::{eval_expr, int_of};
+use crate::ordmap::OrderedMap;
+use crate::spans::{FieldSpans, Recorder, Span, SpanNode};
 use crate::value::{Env, Value};
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,60 @@ pub fn decode_packet(
         ));
     }
     Ok(env)
+}
+
+pub fn decode_packet_eof_skips(
+    resolved: &ResolvedSchema,
+    packet_name: &str,
+    data: &[u8],
+) -> BmlResult<(Env, usize)> {
+    let pkt = resolved
+        .packets
+        .get(packet_name)
+        .ok_or_else(|| decode(format!("unknown packet {}", py_repr_str(packet_name))))?;
+    let mut cur = Cursor::new(data);
+    let env = decode_block_items(&pkt.items, &mut cur, resolved, &Env::new(), None)?;
+    if cur.remaining() != 0 {
+        return Err(decode_at(
+            format!(
+                "{} of {} bytes left unread after packet {}",
+                cur.remaining(),
+                data.len(),
+                py_repr_str(packet_name)
+            ),
+            cur.pos,
+        ));
+    }
+    Ok((env, cur.eof_group_skips))
+}
+
+pub fn decode_packet_spans(
+    resolved: &ResolvedSchema,
+    packet_name: &str,
+    data: &[u8],
+    strict: bool,
+) -> BmlResult<(Env, FieldSpans)> {
+    let pkt = resolved
+        .packets
+        .get(packet_name)
+        .ok_or_else(|| decode(format!("unknown packet {}", py_repr_str(packet_name))))?;
+    let mut cur = Cursor::new(data);
+    cur.recorder = Some(Recorder::new());
+    let env = decode_block_items(&pkt.items, &mut cur, resolved, &Env::new(), None)?;
+    if strict && cur.remaining() != 0 {
+        return Err(decode_at(
+            format!(
+                "{} of {} bytes left unread after packet {}",
+                cur.remaining(),
+                data.len(),
+                py_repr_str(packet_name)
+            ),
+            cur.pos,
+        ));
+    }
+    let mut rec = cur.recorder.take().unwrap();
+    let spans = rec.take_fields();
+    Ok((env, spans))
 }
 
 pub fn encode_packet(
@@ -89,6 +145,31 @@ pub fn decode_frame_payload(
     direction: &str,
     data: &[u8],
 ) -> BmlResult<(i128, Env)> {
+    let frame_decl = find_frame_decl(resolved, state, direction)?;
+    let mut cur = Cursor::new(data);
+    let (packet_id, out, _) = decode_frame_body(&mut cur, resolved, frame_decl, state, direction)?;
+    Ok((packet_id, out))
+}
+
+pub fn decode_frame_payload_spans(
+    resolved: &ResolvedSchema,
+    state: &str,
+    direction: &str,
+    data: &[u8],
+) -> BmlResult<(i128, Env, FieldSpans)> {
+    let frame_decl = find_frame_decl(resolved, state, direction)?;
+    let mut cur = Cursor::new(data);
+    cur.recorder = Some(Recorder::new());
+    let (packet_id, out, spans) =
+        decode_frame_body(&mut cur, resolved, frame_decl, state, direction)?;
+    Ok((packet_id, out, spans.expect("recorder present")))
+}
+
+fn find_frame_decl<'a>(
+    resolved: &'a ResolvedSchema,
+    state: &str,
+    direction: &str,
+) -> BmlResult<&'a FrameDecl> {
     let mut frame_names: Vec<String> = Vec::new();
     for (route, _) in &resolved.routes {
         if route.state == state && route.direction == direction {
@@ -126,12 +207,22 @@ pub fn decode_frame_payload(
         .flat_map(|p| p.frames.iter())
         .find(|f| &f.name == frame_name)
         .ok_or_else(|| decode(format!("no frame {frame_name}")))?;
-    let mut cur = Cursor::new(data);
+    Ok(frame_decl)
+}
+
+fn decode_frame_body(
+    cur: &mut Cursor<'_>,
+    resolved: &ResolvedSchema,
+    frame_decl: &FrameDecl,
+    state: &str,
+    direction: &str,
+) -> BmlResult<(i128, Env, Option<FieldSpans>)> {
     let mut env = Env::new();
     let mut length_val: Option<i128> = None;
     let mut pos_after_length: Option<usize> = None;
     let mut id_val: Option<i128> = None;
     let mut payload_bytes: Option<Vec<u8>> = None;
+    let mut payload_start: Option<usize> = None;
     for item in &frame_decl.items {
         if let BlockItem::Field(wf) = item
             && wf.name == "payload"
@@ -159,9 +250,11 @@ pub fn decode_frame_payload(
                         }
                         _ => cur.remaining(),
                     };
+                    let pstart = cur.pos;
                     let bytes = cur.read(n)?.to_vec();
                     payload_bytes = Some(bytes.clone());
                     env.insert("payload", Value::bytes(bytes));
+                    payload_start = Some(pstart);
                 }
                 FieldType::Ref(tr)
                     if tr.name == "bytes" && tr.args.len() == 1 && tr.transforms.is_empty() =>
@@ -169,9 +262,11 @@ pub fn decode_frame_payload(
                     let n_val = eval_expr(&tr.args[0], &env)?;
                     let n = usize::try_from(int_of(&n_val)?)
                         .map_err(|_| decode("negative payload length"))?;
+                    let pstart = cur.pos;
                     let bytes = cur.read(n)?.to_vec();
                     payload_bytes = Some(bytes.clone());
                     env.insert("payload", Value::bytes(bytes));
+                    payload_start = Some(pstart);
                 }
                 _ => return Err(decode("frame payload must be rest or bytes(n)")),
             }
@@ -179,7 +274,7 @@ pub fn decode_frame_payload(
         }
         let is_length = matches!(item, BlockItem::Field(wf) if wf.name == "length");
         let is_id = matches!(item, BlockItem::Field(wf) if wf.name == "id");
-        let got = decode_block_items(std::slice::from_ref(item), &mut cur, resolved, &env, None)?;
+        let got = decode_block_items(std::slice::from_ref(item), cur, resolved, &env, None)?;
         for (k, v) in got.iter() {
             env.insert(k, v.clone());
         }
@@ -199,16 +294,69 @@ pub fn decode_frame_payload(
     let payload = payload_bytes.ok_or_else(|| decode("frame has no payload"))?;
     for (route, pkt) in &resolved.routes {
         if route.state == state && route.direction == direction && route.packet_id == packet_id {
-            let fields = decode_packet(resolved, &pkt.name, &payload, false)?;
+            let (inner_fields, inner_spans) = if cur.recorder.is_some() {
+                let (e, s) = decode_packet_spans(resolved, &pkt.name, &payload, false)?;
+                (e, Some(s))
+            } else {
+                let e = decode_packet(resolved, &pkt.name, &payload, false)?;
+                (e, None)
+            };
             let mut out = Env::new();
             out.insert("packet", Value::str(pkt.name.clone()));
-            out.insert("fields", Value::map(fields));
-            return Ok((packet_id, out));
+            out.insert("fields", Value::map(inner_fields));
+            if cur.recorder.is_some() {
+                // Span mode also reports the frame's own header values (`length`, `id`), so a
+                // hexdump can print them beside their bytes. Plain frame decode is unchanged.
+                let mut header = Env::new();
+                for (k, v) in env.iter() {
+                    if k != "payload" {
+                        header.insert(k, v.clone());
+                    }
+                }
+                out.insert("frame", Value::map(header));
+            }
+            if let Some(rec) = &mut cur.recorder {
+                let mut top = rec.take_fields();
+                if let Some(is) = inner_spans {
+                    let pbase = payload_start.unwrap_or(0);
+                    for (k, n) in is {
+                        let n = shift_span_node(n, pbase);
+                        top.insert(&k, n);
+                    }
+                }
+                return Ok((packet_id, out, Some(top)));
+            }
+            return Ok((packet_id, out, None));
         }
     }
     Err(decode(format!(
         "no route for id 0x{packet_id:x} in {state}.{direction}"
     )))
+}
+
+fn shift_span_node(node: SpanNode, delta: usize) -> SpanNode {
+    match node {
+        SpanNode::Leaf(mut s) => {
+            s.offset += delta;
+            SpanNode::Leaf(s)
+        }
+        SpanNode::Record { mut span, fields } => {
+            span.offset += delta;
+            let newf: OrderedMap<SpanNode> = fields
+                .into_iter()
+                .map(|(k, v)| (k, shift_span_node(v, delta)))
+                .collect();
+            SpanNode::Record { span, fields: newf }
+        }
+        SpanNode::List { mut span, items } => {
+            span.offset += delta;
+            let newi = items
+                .into_iter()
+                .map(|v| shift_span_node(v, delta))
+                .collect();
+            SpanNode::List { span, items: newi }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +583,9 @@ fn decode_expanded(
                 }
                 if cur.remaining() == 0 {
                     // Optional trailing group absent on the wire.
+                    // Only count when the condition held (present); this is the
+                    // case that produces shapes typed codecs cannot re-encode.
+                    cur.eof_group_skips += 1;
                     continue;
                 }
                 let decoded = decode_expanded(items, cur, resolved, &group_env, prebind)?;
@@ -469,10 +620,44 @@ fn decode_expanded(
                 {
                     continue;
                 }
+                let start = cur.pos;
                 let v = match &wf.repeat {
-                    Some(rep) => decode_repeat(wf, rep, cur, resolved, &env)?,
+                    Some(rep) => {
+                        if let Some(r) = &mut cur.recorder {
+                            r.push_list(start);
+                        }
+                        decode_repeat(wf, rep, cur, resolved, &env)?
+                    }
                     None => decode_type(&wf.type_ref, cur, resolved, &env)?,
                 };
+                let end = cur.pos;
+                let span = Span {
+                    offset: start,
+                    len: end - start,
+                };
+                if let Some(rec) = &mut cur.recorder {
+                    if wf.name == "_spread" {
+                        if matches!(&v, Value::Map(_)) {
+                            let (subf, _) = rec.pop_record();
+                            for (k, n) in subf {
+                                rec.record_named(&k, n);
+                            }
+                        } else if matches!(&v, Value::List(_)) {
+                            let (its, _) = rec.pop_list();
+                            for n in its {
+                                rec.record_named("", n);
+                            }
+                        }
+                    } else if matches!(&v, Value::List(_)) {
+                        let (items, _) = rec.pop_list();
+                        rec.record_named(&wf.name, SpanNode::List { span, items });
+                    } else if matches!(&v, Value::Map(_)) {
+                        let (f, _) = rec.pop_record();
+                        rec.record_named(&wf.name, SpanNode::Record { span, fields: f });
+                    } else {
+                        rec.record_named(&wf.name, SpanNode::Leaf(span));
+                    }
+                }
                 bind_into(&mut env, &mut out, &wf.name, v);
             }
         }
@@ -523,12 +708,62 @@ fn decode_repeat(
                 return Err(decode("count too large for the check"));
             }
             for _ in 0..n {
-                out.push(decode_type(&wf.type_ref, cur, resolved, env)?);
+                let item_start = cur.pos;
+                let item_v = decode_type(&wf.type_ref, cur, resolved, env)?;
+                let item_end = cur.pos;
+                let item_span = Span {
+                    offset: item_start,
+                    len: item_end - item_start,
+                };
+                if let Some(rec) = &mut cur.recorder {
+                    let node = if matches!(&item_v, Value::Map(_)) {
+                        let (f, _) = rec.pop_record();
+                        SpanNode::Record {
+                            span: item_span,
+                            fields: f,
+                        }
+                    } else if matches!(&item_v, Value::List(_)) {
+                        let (its, _) = rec.pop_list();
+                        SpanNode::List {
+                            span: item_span,
+                            items: its,
+                        }
+                    } else {
+                        SpanNode::Leaf(item_span)
+                    };
+                    rec.record_named("", node);
+                }
+                out.push(item_v);
             }
         }
         RepeatMode::UntilEnd => {
             while cur.remaining() > 0 {
-                out.push(decode_type(&wf.type_ref, cur, resolved, env)?);
+                let item_start = cur.pos;
+                let item_v = decode_type(&wf.type_ref, cur, resolved, env)?;
+                let item_end = cur.pos;
+                let item_span = Span {
+                    offset: item_start,
+                    len: item_end - item_start,
+                };
+                if let Some(rec) = &mut cur.recorder {
+                    let node = if matches!(&item_v, Value::Map(_)) {
+                        let (f, _) = rec.pop_record();
+                        SpanNode::Record {
+                            span: item_span,
+                            fields: f,
+                        }
+                    } else if matches!(&item_v, Value::List(_)) {
+                        let (its, _) = rec.pop_list();
+                        SpanNode::List {
+                            span: item_span,
+                            items: its,
+                        }
+                    } else {
+                        SpanNode::Leaf(item_span)
+                    };
+                    rec.record_named("", node);
+                }
+                out.push(item_v);
             }
         }
         RepeatMode::Until => {
@@ -541,7 +776,32 @@ fn decode_repeat(
                     cur.read(1)?;
                     break;
                 }
-                out.push(decode_type(&wf.type_ref, cur, resolved, env)?);
+                let item_start = cur.pos;
+                let item_v = decode_type(&wf.type_ref, cur, resolved, env)?;
+                let item_end = cur.pos;
+                let item_span = Span {
+                    offset: item_start,
+                    len: item_end - item_start,
+                };
+                if let Some(rec) = &mut cur.recorder {
+                    let node = if matches!(&item_v, Value::Map(_)) {
+                        let (f, _) = rec.pop_record();
+                        SpanNode::Record {
+                            span: item_span,
+                            fields: f,
+                        }
+                    } else if matches!(&item_v, Value::List(_)) {
+                        let (its, _) = rec.pop_list();
+                        SpanNode::List {
+                            span: item_span,
+                            items: its,
+                        }
+                    } else {
+                        SpanNode::Leaf(item_span)
+                    };
+                    rec.record_named("", node);
+                }
+                out.push(item_v);
             }
         }
     }
@@ -556,6 +816,10 @@ fn decode_type(
 ) -> BmlResult<Value> {
     match t {
         FieldType::Block(b) => {
+            let start = cur.pos;
+            if let Some(r) = &mut cur.recorder {
+                r.push_record(start);
+            }
             let decoded = decode_block_items(&b.items, cur, resolved, env, None)?;
             Ok(Value::map(decoded))
         }
@@ -566,6 +830,10 @@ fn decode_type(
             match &arm.type_ref {
                 None => Ok(Value::Null),
                 Some(FieldType::Block(b)) => {
+                    let start = cur.pos;
+                    if let Some(r) = &mut cur.recorder {
+                        r.push_record(start);
+                    }
                     let decoded = decode_block_items(&b.items, cur, resolved, env, None)?;
                     Ok(Value::map(decoded))
                 }
@@ -599,11 +867,21 @@ pub fn decode_type_ref(
             }
             // Parameters of the encoding stay in scope for its own fields and
             // for any `...spread` inside it.
+            let start = cur.pos;
+            if let Some(r) = &mut cur.recorder {
+                r.push_record(start);
+            }
             let decoded = decode_block_items(&body.items, cur, resolved, &bind, None)?;
-            if matches!(enc.name.as_str(), "string" | "identifier" | "nbt_string")
-                && decoded.contains_key("value")
+            // A string-shaped block is the string, whatever the encoding is
+            // named. A spread of one (`identifier` is `{ ...string(32767) }`)
+            // counts: expansion has already inlined the length and value fields.
+            if let Some(wire) = string_wire(resolved, &enc.name)
+                && let Some(v) = decoded.get(wire.value_name).cloned()
             {
-                return Ok(decoded.get("value").cloned().unwrap());
+                if let Some(r) = &mut cur.recorder {
+                    let _ = r.pop_record();
+                }
+                return Ok(v);
             }
             return Ok(Value::map(decoded));
         }
@@ -654,6 +932,18 @@ pub fn decode_type_ref(
             b.copy_from_slice(raw);
             Ok(Value::Float(f64::from_be_bytes(b)))
         }
+        "f32le" => {
+            let raw = cur.read(4)?;
+            Ok(Value::Float(
+                f32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as f64,
+            ))
+        }
+        "f64le" => {
+            let raw = cur.read(8)?;
+            let mut b = [0u8; 8];
+            b.copy_from_slice(raw);
+            Ok(Value::Float(f64::from_le_bytes(b)))
+        }
         _ => Err(decode(format!(
             "cannot decode type {}",
             py_repr_str(&ref_.name)
@@ -696,7 +986,14 @@ fn decode_scalar(
     for name in collect_wire_names(&body.items) {
         zeros.insert(&name, Value::Int(0));
     }
+    let start = cur.pos;
+    if let Some(r) = &mut cur.recorder {
+        r.push_record(start);
+    }
     let decoded = decode_block_items(&body.items, cur, resolved, bind, Some(&zeros))?;
+    if let Some(r) = &mut cur.recorder {
+        let _ = r.pop_record();
+    }
     let mut env = zeros;
     for (k, v) in bind.iter() {
         env.insert(k, v.clone());
@@ -706,7 +1003,6 @@ fn decode_scalar(
     }
     eval_expr(yield_expr, &env)
 }
-
 // ---------------------------------------------------------------------------
 // Encode
 // ---------------------------------------------------------------------------
@@ -893,41 +1189,20 @@ fn encode_type_ref(
         if let Some(yield_expr) = &enc.yield_expr {
             return encode_scalar(body, w, resolved, &bind, val, yield_expr);
         }
+        // Write a string through the length field's own type. Matching the
+        // names `string` / `identifier` / `nbt_string` forced `varint` or
+        // `u16be` and rejected a schema whose length is `varuint32`.
         if let Value::Str(s) = val
-            && matches!(enc.name.as_str(), "string" | "identifier" | "nbt_string")
+            && let Some(wire) = string_wire(resolved, &enc.name)
         {
             let raw = s.as_bytes();
-            let len_name = if enc.name == "nbt_string" {
-                "u16be"
-            } else {
-                "varint"
-            };
-            let len = TypeRef {
-                name: len_name.to_string(),
-                args: Vec::new(),
-                transforms: Vec::new(),
-            };
-            encode_type_ref(
-                &len,
-                w,
-                resolved,
-                &Env::new(),
-                &Value::Int(raw.len() as i128),
-            )?;
+            encode_type_ref(wire.len, w, resolved, &bind, &Value::Int(raw.len() as i128))?;
             w.emit(raw);
             return Ok(());
         }
-        if enc.name == "uuid"
-            && let Value::Map(m) = val
-        {
-            let msb = m.get("msb").ok_or_else(|| encode("uuid needs msb"))?;
-            let lsb = m.get("lsb").ok_or_else(|| encode("uuid needs lsb"))?;
-            let msb = u64::try_from(int_of(msb)?).map_err(|_| encode("uuid msb out of range"))?;
-            let lsb = u64::try_from(int_of(lsb)?).map_err(|_| encode("uuid lsb out of range"))?;
-            w.emit(&msb.to_be_bytes());
-            w.emit(&lsb.to_be_bytes());
-            return Ok(());
-        }
+        // Raw bytes, not the `{ data: bytes(n) }` record the field declares.
+        // Sizing through `bytes(n)` would pad or reject a short payload, so
+        // this name stays: callers pass the bytes (or a dict of them) as-is.
         if enc.name == "fixed_bitset" {
             let raw =
                 raw_bytes(val).ok_or_else(|| encode(format!("expected dict for {}", enc.name)))?;
@@ -1009,6 +1284,16 @@ fn encode_type_ref(
         "f64be" => {
             let f = as_f64(val)?;
             w.emit(&f.to_be_bytes());
+            Ok(())
+        }
+        "f32le" => {
+            let f = as_f64(val)?;
+            w.emit(&(f as f32).to_le_bytes());
+            Ok(())
+        }
+        "f64le" => {
+            let f = as_f64(val)?;
+            w.emit(&f.to_le_bytes());
             Ok(())
         }
         "u8" => {
@@ -1140,4 +1425,133 @@ fn raw_bytes(val: &Value) -> Option<Vec<u8>> {
         }
         _ => None,
     }
+}
+
+/// A length-prefixed UTF-8 block: the length field's type, and the name of the
+/// string field. Borrowed from the schema so encode writes that type as declared.
+struct StringWire<'a> {
+    len: &'a TypeRef,
+    value_name: &'a str,
+}
+
+/// `string`, `identifier` (`{ ...string(32767) }`), `nbt_string`, and any other
+/// encoding of the same shape. A yield, an extra field, or a non-integer length
+/// is not a string. Depth stops a spread cycle.
+fn string_wire<'a>(resolved: &'a ResolvedSchema, name: &str) -> Option<StringWire<'a>> {
+    string_wire_at(resolved, name, 0)
+}
+
+fn string_wire_at<'a>(
+    resolved: &'a ResolvedSchema,
+    name: &str,
+    depth: u32,
+) -> Option<StringWire<'a>> {
+    if depth > 32 {
+        return None;
+    }
+    let enc = resolved.encodings.get(name)?;
+    if enc.yield_expr.is_some() {
+        return None;
+    }
+    match &enc.body {
+        EncBody::Ref(inner) => {
+            if !inner.transforms.is_empty() {
+                return None;
+            }
+            string_wire_at(resolved, &inner.name, depth + 1)
+        }
+        EncBody::Block(body) => {
+            if let Some(wire) = direct_string(resolved, &body.items) {
+                return Some(wire);
+            }
+            if body.items.len() == 1
+                && let BlockItem::Spread { name, .. } = &body.items[0]
+            {
+                return string_wire_at(resolved, name, depth + 1);
+            }
+            None
+        }
+    }
+}
+
+/// One integer length field `L` and one `bytes(L) as utf8`, plus `require`s.
+/// Field order does not matter; anything else (a match, a repeat, a second
+/// integer) is a record.
+fn direct_string<'a>(resolved: &ResolvedSchema, items: &'a [BlockItem]) -> Option<StringWire<'a>> {
+    let mut len: Option<(&str, &TypeRef)> = None;
+    let mut value_name: Option<&str> = None;
+    let mut bytes_of: Option<&str> = None;
+    for item in items {
+        match item {
+            BlockItem::Require(_) => {}
+            BlockItem::Field(wf) if wf.if_expr.is_none() && wf.repeat.is_none() => {
+                let FieldType::Ref(r) = &wf.type_ref else {
+                    return None;
+                };
+                let int_len = r.transforms.is_empty()
+                    && r.args.is_empty()
+                    && is_int_scalar(resolved, &r.name, 0);
+                let utf8_bytes = r.name == "bytes"
+                    && r.args.len() == 1
+                    && r.transforms.len() == 1
+                    && r.transforms[0] == "utf8";
+                if int_len {
+                    if len.is_some() {
+                        return None;
+                    }
+                    len = Some((wf.name.as_str(), r));
+                } else if utf8_bytes {
+                    if value_name.is_some() {
+                        return None;
+                    }
+                    let Expr::Ident(arg) = &r.args[0] else {
+                        return None;
+                    };
+                    value_name = Some(wf.name.as_str());
+                    bytes_of = Some(arg.as_str());
+                } else {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+    }
+    let (len_name, len_ty) = len?;
+    if bytes_of != Some(len_name) {
+        return None;
+    }
+    Some(StringWire {
+        len: len_ty,
+        value_name: value_name?,
+    })
+}
+
+/// `u8`, or a scalar encoding whose yield is not a comparison (`boolean`).
+/// Aliases (`angle = u8`) follow the reference. Floats and `bytes` are not lengths.
+fn is_int_scalar(resolved: &ResolvedSchema, name: &str, depth: u32) -> bool {
+    if depth > 32 {
+        return false;
+    }
+    if name == "u8" {
+        return true;
+    }
+    if matches!(name, "f32be" | "f64be" | "bytes" | "rest") {
+        return false;
+    }
+    let Some(enc) = resolved.encodings.get(name) else {
+        return false;
+    };
+    match &enc.body {
+        EncBody::Ref(inner) => {
+            inner.transforms.is_empty() && is_int_scalar(resolved, &inner.name, depth + 1)
+        }
+        EncBody::Block(_) => enc.yield_expr.as_ref().is_some_and(|y| !is_comparison(y)),
+    }
+}
+
+fn is_comparison(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::Binop(op, _, _) if matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=")
+    )
 }

@@ -56,6 +56,8 @@ pub enum WireOp {
     U8,
     F32be,
     F64be,
+    F32le,
+    F64le,
     Bytes { len: Expr },
     Rest,
 }

@@ -43,6 +43,7 @@ use crate::ir::typed::{
     BinOp, Bind, Body, CodecIdx, Expr, Func, IntTy, LocalId, Origin, Program, ReadOp, RepeatMode,
     Stmt, Ty, TypeIdx, WriteOp, byte_literal, hex_literal,
 };
+use crate::vectors::{TestRun, Vector};
 
 /// Emit `bmlgen.zig` and its modules for `resolved` into `out_dir`.
 pub fn emit_zig(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
@@ -54,6 +55,19 @@ pub fn emit_zig_with_version(
     out_dir: &Path,
     ver: crate::ZigVersion,
 ) -> BmlResult<()> {
+    let _ = emit_zig_with_vectors(resolved, out_dir, ver, &[])?;
+    Ok(())
+}
+
+/// Like `emit_zig_with_version` but when `vectors` non-empty also writes
+/// vectors_test.zig (roundtrips using only packets with codecs). Empty yields
+/// byte-identical files and None.
+pub fn emit_zig_with_vectors(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    ver: crate::ZigVersion,
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = crate::ir::typed(resolved)?;
     let mut printer = Printer::build(&program, ver)?;
     let files = printer.files()?;
@@ -61,7 +75,65 @@ pub fn emit_zig_with_version(
     for (stem, src) in &files {
         fs::write(out_dir.join(format!("{stem}.zig")), src).map_err(|e| emit(e.to_string()))?;
     }
-    Ok(())
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+    let mut src =
+        String::from("const std = @import(\"std\");\nconst bml = @import(\"bmlgen.zig\");\n");
+    let mut n: usize = 0;
+    for v in vectors {
+        let Some(codec) = program.packet_codec(&v.packet) else {
+            continue;
+        };
+        let bytes = v.bytes()?;
+        // `zig fmt` writes `{}` and `{5}` with no padding, and `{ 1, 2 }` for longer lists.
+        let list = match bytes.as_slice() {
+            [] => "{}".to_string(),
+            [only] => format!("{{{only}}}"),
+            many => format!(
+                "{{ {} }}",
+                many.iter()
+                    .map(u8::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+        let decode = zig_decode_call(&program, codec, "reader");
+        let tail = zig_encode_tail(&program, codec);
+        let deinit = if has_deinit(&program, codec) {
+            "\n    defer packet.deinit(a);"
+        } else {
+            ""
+        };
+        src.push_str(&format!(
+            r#"
+test "packet {} {}" {{
+    const a = std.testing.allocator;
+    const raw = [_]u8{};
+    var reader = bml.Reader{{ .data = &raw }};
+    var packet = try bml.{};{}
+    try std.testing.expectEqual(raw.len, reader.pos);
+    var w = bml.Writer.init(a);
+    defer w.deinit();
+    try packet.{}(&w);
+    try std.testing.expectEqualSlices(u8, &raw, w.buf.items);
+}}
+"#,
+            n, v.packet, list, decode, deinit, tail
+        ));
+        n += 1;
+    }
+    if n == 0 {
+        // No vector has a codec here: write no test rather than one that checks nothing.
+        return Ok(None);
+    }
+    let test_file = "vectors_test.zig";
+    fs::write(out_dir.join(test_file), &src).map_err(|e| emit(e.to_string()))?;
+    Ok(Some(TestRun {
+        file: test_file.to_string(),
+        command: "zig test vectors_test.zig".to_string(),
+        vectors: n,
+    }))
 }
 
 /// The emitted identifier of a codec's decode function: `decodeVarint` for a
@@ -89,6 +161,22 @@ pub fn has_deinit(program: &Program, codec: CodecIdx) -> bool {
     let (boxed_field, boxed_variant) = boxed_edges(program);
     let owns = owns_fixpoint(program, &boxed_field, &boxed_variant);
     owns_ty(&owns, &program.codecs[codec].value)
+}
+fn zig_decode_call(program: &Program, codec: CodecIdx, reader: &str) -> String {
+    let path = decode_fn(program, codec);
+    if has_deinit(program, codec) {
+        format!("{}(a, &{})", path, reader)
+    } else {
+        format!("{}(&{})", path, reader)
+    }
+}
+
+fn zig_encode_tail(program: &Program, codec: CodecIdx) -> String {
+    encode_fn(program, codec)
+        .rsplit('.')
+        .next()
+        .unwrap()
+        .to_string()
 }
 
 /// The type whose methods implement `codec`: aliases delegate to their target.
@@ -390,7 +478,7 @@ fn hoist_imports(body: &str, self_stem: &str, aliases: &mut BTreeSet<String>) ->
 const RUNTIME: &str = r#"const std = @import("std");
 /// Decode/encode failures. Offset of a decode failure is left in `reader.pos`.
 pub const Error = error{ Short, RequireFailed, InvalidUtf8, NoMatchArm, MissingField, WrongVariant, NegativeLength, BytesTooLong, UntilEnd, OutOfMemory };
-/// Big-endian cursor over a borrowed buffer.
+/// Cursor over a borrowed buffer (big- and little-endian read/write helpers).
 pub const Reader = struct {
     data: []const u8,
     pos: usize = 0,
@@ -434,6 +522,18 @@ pub const Reader = struct {
     pub fn readF64Be(self: *Reader) Error!f64 {
         if (self.remaining() < 8) return error.Short;
         const u = std.mem.readInt(u64, self.data[self.pos..][0..8], .big);
+        self.pos += 8;
+        return @bitCast(u);
+    }
+    pub fn readF32Le(self: *Reader) Error!f32 {
+        if (self.remaining() < 4) return error.Short;
+        const u = std.mem.readInt(u32, self.data[self.pos..][0..4], .little);
+        self.pos += 4;
+        return @bitCast(u);
+    }
+    pub fn readF64Le(self: *Reader) Error!f64 {
+        if (self.remaining() < 8) return error.Short;
+        const u = std.mem.readInt(u64, self.data[self.pos..][0..8], .little);
         self.pos += 8;
         return @bitCast(u);
     }
@@ -481,6 +581,16 @@ pub const Writer = struct {
     pub fn writeF64Be(self: *Writer, v: f64) Error!void {
         var tmp: [8]u8 = undefined;
         std.mem.writeInt(u64, &tmp, @bitCast(v), .big);
+        try self.writeBytes(&tmp);
+    }
+    pub fn writeF32Le(self: *Writer, v: f32) Error!void {
+        var tmp: [4]u8 = undefined;
+        std.mem.writeInt(u32, &tmp, @bitCast(v), .little);
+        try self.writeBytes(&tmp);
+    }
+    pub fn writeF64Le(self: *Writer, v: f64) Error!void {
+        var tmp: [8]u8 = undefined;
+        std.mem.writeInt(u64, &tmp, @bitCast(v), .little);
         try self.writeBytes(&tmp);
     }
 };
@@ -1751,7 +1861,9 @@ impl<'a, 'p> FnGen<'a, 'p> {
                         self.ln(&format!("try writer.writeU8({byte});"));
                     }
                     WriteOp::F32 => self.ln(&format!("try writer.writeF32Be({v});")),
+                    WriteOp::F32Le => self.ln(&format!("try writer.writeF32Le({v});")),
                     WriteOp::F64 => self.ln(&format!("try writer.writeF64Be({v});")),
+                    WriteOp::F64Le => self.ln(&format!("try writer.writeF64Le({v});")),
                     WriteOp::Bytes(n) => {
                         let n = self.usize_arg(n)?;
                         self.ln(&format!("try writer.writeSized({v}, {n});"));
@@ -1875,7 +1987,9 @@ impl<'a, 'p> FnGen<'a, 'p> {
         match op {
             ReadOp::U8 => Ok("try reader.readU8()".into()),
             ReadOp::F32 => Ok("try reader.readF32Be()".into()),
+            ReadOp::F32Le => Ok("try reader.readF32Le()".into()),
             ReadOp::F64 => Ok("try reader.readF64Be()".into()),
+            ReadOp::F64Le => Ok("try reader.readF64Le()".into()),
             ReadOp::Bytes(n) => {
                 self.uses_alloc = true;
                 let n = self.expr(n)?;

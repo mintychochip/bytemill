@@ -104,16 +104,32 @@ pub fn f64_be(cur: &mut Cursor) -> Result<f64, BmlError> {
     Ok(f64::from_bits(u64_be(cur)?))
 }
 
+pub fn f32_le(cur: &mut Cursor) -> Result<f64, BmlError> {
+    let b = cur.read(4)?;
+    Ok(f32::from_le_bytes([b[0], b[1], b[2], b[3]]) as f64)
+}
+
+pub fn f64_le(cur: &mut Cursor) -> Result<f64, BmlError> {
+    let b = cur.read(8)?;
+    Ok(f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
+}
+
+
 pub fn boolean(cur: &mut Cursor) -> Result<bool, BmlError> {
     Ok(u8_at(cur)? != 0)
 }
 
 pub fn sign_extend(v: i64, bits: u32) -> i64 {
-    let mask = 1i64 << (bits - 1);
-    if (v & mask) != 0 {
-        v - (1i64 << bits)
+    if bits == 0 || bits >= 64 {
+        return v;
+    }
+    let mask = (1u64 << bits) - 1;
+    let low = (v as u64) & mask;
+    let sign = 1u64 << (bits - 1);
+    if low & sign != 0 {
+        (low | !mask) as i64
     } else {
-        v
+        low as i64
     }
 }
 
@@ -279,7 +295,7 @@ pub fn hashed_slot_at(cur: &mut Cursor) -> Result<Value, BmlError> {
 }
 "#;
 
-/// Names lowered to runtime helpers. `u8`/`f32be`/`f64be` are real primitives.
+/// Names lowered to runtime helpers. `u8`/`f32be`/`f64be`/`f32le`/`f64le` are real primitives.
 /// The integer and varint names are schemas in `schemas/std/`; the helpers must
 /// agree with those schemas, which the differential tests check.
 const PRIMITIVES: &[(&str, &str)] = &[
@@ -293,6 +309,8 @@ const PRIMITIVES: &[(&str, &str)] = &[
     ("i64be", "i64_be(cur)?"),
     ("f32be", "f32_be(cur)?"),
     ("f64be", "f64_be(cur)?"),
+    ("f32le", "f32_le(cur)?"),
+    ("f64le", "f64_le(cur)?"),
     ("varint", "varint(cur)?"),
     ("varlong", "varlong(cur)?"),
     ("boolean", "boolean(cur)?"),

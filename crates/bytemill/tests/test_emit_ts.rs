@@ -338,6 +338,16 @@ fn ts_target_option() {
             tsconfig.contains("\"strict\": true"),
             "tsconfig.json must enable strict mode:\n{tsconfig}"
         );
+        // Packages import `./x.ts`; tsc accepts that only with `allowImportingTsExtensions`,
+        // and accepts that option only together with `noEmit` (TS5097 / TS5096 otherwise).
+        assert!(
+            tsconfig.contains("\"allowImportingTsExtensions\": true"),
+            "tsconfig.json must allow `.ts` import specifiers:\n{tsconfig}"
+        );
+        assert!(
+            tsconfig.contains("\"noEmit\": true"),
+            "tsconfig.json must set noEmit (required by allowImportingTsExtensions):\n{tsconfig}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

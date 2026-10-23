@@ -8,6 +8,8 @@ use crate::ast::{
 use crate::errors::{BmlError, BmlResult, emit, py_repr_str};
 use crate::minestom::{ClassTable, Unit};
 use crate::ordmap::OrderedMap;
+use crate::primitives::is_bare_primitive;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -252,17 +254,27 @@ fn opaque_len(
 }
 
 /// (wire constant, Rust type) for a wire field's declared type (`_field_rust`).
-fn field_rust(r: &TypeRef) -> (String, String) {
+fn field_rust(r: &TypeRef) -> BmlResult<(String, String)> {
+    if is_bare_primitive(&r.name)
+        && wire_entry(&r.name).is_none()
+        && r.name != "bytes"
+        && r.name != "rest"
+    {
+        return Err(emit(format!(
+            "emit rstom: type '{}' has no rstom binary type",
+            r.name
+        )));
+    }
     if let Some((w, rt)) = wire_entry(&r.name) {
         if r.transforms.iter().any(|t| t == "utf8") {
-            return (w.to_string(), "String".to_string());
+            return Ok((w.to_string(), "String".to_string()));
         }
-        return (w.to_string(), rt.to_string());
+        return Ok((w.to_string(), rt.to_string()));
     }
     if r.name == "bytes" {
-        return ("FIXED_BYTES".to_string(), "Vec<u8>".to_string());
+        return Ok(("FIXED_BYTES".to_string(), "Vec<u8>".to_string()));
     }
-    ("RAW_BYTES".to_string(), "Vec<u8>".to_string())
+    Ok(("RAW_BYTES".to_string(), "Vec<u8>".to_string()))
 }
 
 use crate::analyze::reject_unlowered_scalars;
@@ -1466,7 +1478,7 @@ fn repeat_shape(
             // An opaque, registry-keyed element (a repeated Slot, say) has no plain
             // wire type; carry its bytes so the element is written at all. Dropping
             // it here silently erased the field from the wire (`Vec<()>`).
-            let (wire, rtype) = field_rust(r);
+            let (wire, rtype) = field_rust(r)?;
             let opaque = wire == "RAW_BYTES";
             element.push(PacketShape::new(
                 "_item",
@@ -1609,7 +1621,7 @@ fn append_field(
         return Ok(());
     }
     let existing = out.iter().position(|f| f.ident == ident(&wf.name));
-    let (wire, rtype) = field_rust(type_ref);
+    let (wire, rtype) = field_rust(type_ref)?;
     if let Some(idx) = existing {
         return merge_declared(out, idx, guard.cloned(), parent);
     }

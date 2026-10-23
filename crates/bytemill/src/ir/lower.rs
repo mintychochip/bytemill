@@ -17,7 +17,7 @@ use crate::primitives::is_bare_primitive;
 
 use super::width::{Storage, storage_of};
 
-const BUILTINS: &[&str] = &["u8", "f32be", "f64be", "bytes", "rest"];
+const BUILTINS: &[&str] = &["u8", "f32be", "f64be", "f32le", "f64le", "bytes", "rest"];
 
 pub fn lower(resolved: &ResolvedSchema) -> BmlResult<IrSchema> {
     let mut ir = IrSchema {
@@ -60,6 +60,8 @@ fn install_builtins(ir: &mut IrSchema) {
     ir.types.insert("u8", scalar(Storage::U8));
     ir.types.insert("f32be", scalar(Storage::F32));
     ir.types.insert("f64be", scalar(Storage::F64));
+    ir.types.insert("f32le", scalar(Storage::F32));
+    ir.types.insert("f64le", scalar(Storage::F64));
     ir.types.insert("bytes", TypeDef::Scalar(Storage::Bytes));
     ir.types.insert("rest", TypeDef::Scalar(Storage::Bytes));
 
@@ -76,6 +78,16 @@ fn install_builtins(ir: &mut IrSchema) {
     ir.encode.insert(
         "f64be",
         write_builtin(WireOp::F64be, Expr::Ident("value".into()), &[]),
+    );
+    ir.decode.insert("f32le", read_builtin(WireOp::F32le, &[]));
+    ir.encode.insert(
+        "f32le",
+        write_builtin(WireOp::F32le, Expr::Ident("value".into()), &[]),
+    );
+    ir.decode.insert("f64le", read_builtin(WireOp::F64le, &[]));
+    ir.encode.insert(
+        "f64le",
+        write_builtin(WireOp::F64le, Expr::Ident("value".into()), &[]),
     );
 
     let n = Expr::Ident("n".into());

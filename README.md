@@ -10,7 +10,7 @@ Bytemill compiles schemas to idiomatic, zero-allocation decoders and encoders ac
 
 A `.bml` schema has three core layers:
 
-1. **`encoding`** — byte-level layouts (`varint`, `string`, `position`, `nbt`)
+1. **`encoding`** — byte-level layouts (`varint`, `string`, `position`, `nbt`, `f32le`, …)
 2. **`packet` / `enum`** — logical message payloads
 3. **`protocol`** — packet framing and stateful routing (`route state.direction id => packet`)
 
@@ -52,7 +52,7 @@ packet player_chat {
 }
 ```
 
-The compiler implements five built-in primitives: `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`. Every other type is declared in `.bml` schemas and imported via non-transitive imports:
+The compiler implements seven built-in primitives: `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`, `f32le`, and `f64le`. Every other type is declared in `.bml` schemas and imported via non-transitive imports (a schema may declare its own `encoding f32le`, which shadows the primitive, same as for `f32be`):
 
 ```bml
 import "std/integers.bml"      // i8, u16be, i32be, boolean, ...
@@ -118,6 +118,18 @@ bml targets         # Compatibility matrix: typed printers and accepted standard
 bml dump-json $ROOT # Output the parsed AST as JSON
 ```
 
+Invalid schemas print rustc-style diagnostics (`error: …`, ` --> file:line:col`, source line, caret, and sometimes `help:`). Several errors appear in source order. Machine-readable output uses `bml check --format json` (one JSON object with sorted keys; `help` omitted when absent). A valid root still prints `ok` and exits 0:
+
+```bash
+bml check schemas/std/varint.bml
+# ok
+
+bml check --format json /path/to/bad.bml
+# {"diagnostics": [{"column": 18, "end_column": 30, "end_line": 1, "file": "/path/to/bad.bml", "help": "'unknown_type' (used in packet test) is declared in no loaded or nearby .bml file", "line": 1, "message": "'unknown_type' is not declared here or in an imported file", "severity": "error"}], "ok": false}
+```
+
+The `bytemill::diag` module exposes the same information (`diagnose_source`, `diagnose_files`, `render`, `to_json`). Known limits: a missing import file is reported without a caret; a missing `}` at end of file points at the last field; the parser reports a missing expression operand as `expected a name`.
+
 ### CLI Decode / Encode
 
 Decode a raw hex handshake frame:
@@ -134,6 +146,25 @@ echo 'ac0202' | bml decode schemas/minecraft_26_3_play.bml --packet animate --he
 
 bml encode --packet animate schemas/minecraft_26_3_play.bml '{"entity_id": 300, "animation": 2}'
 # ac0202
+```
+
+Field byte ranges and annotated dumps (`--spans` and `--hexdump` are mutually exclusive; exit 2 if both are set):
+
+```bash
+echo 'ac0202' | bml decode schemas/minecraft_26_3_play.bml --packet animate --hex --spans
+# {"fields": {"animation": 2, "entity_id": 300}, "spans": {"animation": {"len": 1, "offset": 2}, "entity_id": {"len": 2, "offset": 0}}}
+
+echo 'ac0202' | bml decode schemas/minecraft_26_3_play.bml --packet animate --hex --hexdump
+# 0000    ac 02                  entity_id = 300
+# 0002    02                     animation = 2
+```
+
+Frame mode adds `frame` (`length`, `id`) and span offsets for the header; offsets are absolute within the frame (after `--compression` unwraps the envelope). Plain `decode` JSON without these flags is unchanged.
+
+```bash
+echo '10008906096c6f63616c686f737463dd01' | bml decode $ROOT \
+  --state handshaking --direction serverbound --hex --spans
+# {"fields": {...}, "frame": {"id": 0, "length": 16}, "id": 0, "packet": "handshake", "spans": {...}}
 ```
 
 Minecraft's compression layer is a frame envelope, not a schema construct. `--compression zlib`
@@ -157,6 +188,20 @@ are accepted (`length: varint`, `id: varint`, `payload: rest`); other families s
 `i32le` frame error out rather than silently reusing the varint envelope. Decode ignores the
 threshold; the `data_length` field says whether a frame is raw or zlib. Hytale's zstd envelope is
 not implemented.
+
+### Trace a captured session
+
+`bml trace` replays a JSONL capture (one object per line with `direction` and `hex`; `toServer` / `toClient` also work). Each line is one framed chunk on the wire (for Minecraft: `packet_length` varint, `id` varint, then payload). The tracer steps the protocol state machine (handshaking → status or login → configuration → play), learns the compression threshold, and optionally decrypts with `--secret <32 hex digits>` (AES-128-CFB8, key = IV). It prints one JSON event per line: packet lines carry `packet` (no `event` key); other events use `event` (`state`, `compression`, `encryption`, `error`, `incomplete`). Exit 3 if any `error` event was printed or the capture ends inside a frame (an `incomplete` event); the events are printed either way. Minecraft-style routed frames only — Hytale and other families error out; there is no pcap/pcapng reader (convert captures to JSONL first). Transitions key on packet **names** from the loaded schema; the hand-written 26.3 root requires protocol 777.
+
+Build a minimal capture from `bml encode` plus a framed handshake:
+
+```bash
+# Body from encode; frame from README quick start (length 0x10, id 0x00, payload).
+echo '{"direction":"serverbound","hex":"10008906096c6f63616c686f737463dd01"}' \
+  | bml trace schemas/minecraft_26_3_wiki.bml
+# {"direction": "serverbound", "fields": {"intent": 1, "protocol_version": 777, "server_address": "localhost", "server_port": 25565}, "id": 0, "packet": "handshake", "seq": 1, "state": "handshaking"}
+# {"cause": "handshake", "event": "state", "from": "handshaking", "seq": 2, "to": "status"}
+```
 
 ---
 
@@ -191,6 +236,38 @@ bml emit csharp:10 schemas/std/varint.bml --out ./bml_cs
 source it reads, and `tests/test_compat.rs` pins every version against `EmitOptions::for_target`.
 Every printer lowers schemas to a shared typed intermediate representation (`ir::typed::Program`) and outputs native types without dynamic reflection or string-keyed dictionaries. Generated codecs are verified byte-for-byte against Bytemill's reference interpreter (`ir::exec`).
 
+### Wire vectors
+
+`bml gen` draws JSONL wire vectors `{"direction","hex","id","packet","state"}` that round-trip in the reference interpreter (`skipped <packet>: <reason>` and a summary on stderr). Pipe them into `bml wire-check` to close the loop:
+
+```bash
+bml gen schemas/minecraft_26_3_wiki.bml 2>/dev/null | bml wire-check schemas/minecraft_26_3_wiki.bml
+# checked 664, failed 0
+
+bml gen schemas/minecraft_26_3_wiki.bml 2>&1 | tail -1
+# 664 vectors for 232 packets, 0 packets skipped
+```
+
+`--count` sets vectors per packet (default 3); `require` fields pin values (e.g. `protocol_version == 777` fixes `handshake`). Vectors where the interpreter skips a conditional group at EOF although its condition holds are dropped (typed codecs disagree on that wire form; see `PROJECT.md` B8).
+
+Typed printers accept `bml emit <target> <schema> --out <dir> --vectors` to embed the same vectors as native literals plus a round-trip test. Example for `schemas/hytale/2026_02_17.bml` (12 vectors, 4 packets, 0 skipped):
+
+| Target | Run command printed by `bml emit … --vectors` |
+| --- | --- |
+| `rust-typed` | `cd <out> && cargo test --test vectors` |
+| `go` | `cd <out> && go test -count=1 ./...` |
+| `python` | `cd <out> && python3 -m unittest -q test_vectors` |
+| `java` | `cd <out>/bmlgen && java Vectors.java` |
+| `csharp` | `cd <out> && dotnet run -v q` |
+| `c` | `cd <out> && cc -std=c11 -Wall -Wextra -Wpedantic -Werror -o vectors_test *.c && ./vectors_test` |
+| `cpp` | `cd <out> && g++ -std=c++20 -Wall -Wextra -Werror -o vectors_test *.cpp && ./vectors_test` |
+| `typescript` | `cd <out> && node --experimental-strip-types vectors.test.ts` |
+| `zig` | `cd <out> && zig test vectors_test.zig` |
+
+`--vectors` is for the nine typed targets only (not `rust`, `rstom`, or `rstom-tree`; `rstom` and `rstom-tree` also reject `f32le`/`f64le` schemas with an error, `rust` emits them). The TypeScript package sets `allowImportingTsExtensions` and `noEmit` in `tsconfig.json` and is meant to run under `node --experimental-strip-types`, not `tsc` compile (baseline emit without those flags fails `tsc` with TS5097). Python printers emit `True`/`False`, not JavaScript `true`/`false`.
+
+The repository tests run these vectors for `schemas/hytale/2026_02_17.bml` and `schemas/minecraft_26_3_wiki.bml` in all nine printers. The generated packages for the version roots in `schemas/versions/` do not yet pass their own vectors in every printer (`PROJECT.md` B7), so treat `--vectors` on those roots as a conformance probe.
+
 ---
 
 ## Shipped Schemas
@@ -198,7 +275,7 @@ Every printer lowers schemas to a shared typed intermediate representation (`ir:
 - **Minecraft Java 26.3 (Protocol 777)**: Full reference target in `schemas/`. 232 packets, 261 routes, zero `body: rest` stubs. All vanilla registries (particles, slot displays, recipes, command argument types) fully modeled.
 - **Protocol Versions (1.13 → 26.3)**: 39 protocols across 51 releases in `schemas/versions/`. Shared declarations deduplicated in `schemas/versions/common/`. Validated against an independent ProtoDef oracle; the oracle input (`data/minecraft-data/`) is fetched from pinned commits, not committed.
 - **Hytale**: Connection and handshake packets in `schemas/hytale/`.
-- **Standard Library**: Reusable fixed-width integers and variable-length integer layouts in `schemas/std/`.
+- **Standard Library**: Reusable fixed-width integers and variable-length integer layouts in `schemas/std/`, including `schemas/std/leb128.bml` (`varuint32`, `varuint64`, zigzag `varint32`, `varint64`; canonical encode, non-canonical padded decode rejected at the sixth/eleventh continuation byte).
 
 ---
 
