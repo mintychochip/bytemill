@@ -118,6 +118,8 @@ fn every_command_bml_runs_is_in_the_table() {
         "shapes",
         "import-versions",
         "import-protodef",
+        "gen",
+        "trace",
     ] {
         assert!(
             find(name).is_some(),

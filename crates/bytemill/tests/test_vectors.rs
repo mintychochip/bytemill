@@ -67,6 +67,7 @@ fn hytale_vectors_round_trip() {
     for skipped in &set.skipped {
         assert!(!skipped.reason.is_empty(), "{}", skipped.packet);
     }
+    assert!(set.vectors.len() >= 12);
     let report = check_vectors(&resolved, &vectors::to_jsonl(&set.vectors), false).unwrap();
     assert!(
         report.failures.is_empty(),
@@ -98,6 +99,7 @@ fn minecraft_packets_are_covered_and_round_trip() {
     for item in &set.skipped {
         assert!(!item.reason.is_empty(), "{}", item.packet);
     }
+    assert!(set.vectors.len() >= 231);
 
     for packet in &resolved.schema.packets {
         let name = packet.name.as_str();
@@ -275,4 +277,105 @@ fn packet_keyed_lines_round_trip_and_a_mismatched_name_is_rejected() {
 
     let malformed = check_vectors(&resolved, "{\"hex\": \"00\"}\n", false).unwrap_err();
     assert_eq!(malformed, "line 1: vector has no \"state\"");
+}
+#[test]
+fn eof_group_skips_counter_and_vectors_avoid_ambiguous() {
+    let src = r#"
+encoding boolean = {
+    raw: u8 = value ? 1 : 0
+} = raw != 0
+
+packet p {
+    tag: u8
+    has: boolean
+    if has {
+        v: match tag {
+            1 => { x: u8 }
+            2 => { }
+        }
+    }
+}
+"#;
+    let resolved = schema(src);
+
+    // tag=2 has=true : group skipped
+    let data_amb = [2, 1];
+    let (_, skips) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &data_amb).unwrap();
+    assert_eq!(skips, 1);
+
+    // tag=1 has=true + x present
+    let data_good = [1, 1, 99];
+    let (_, skips) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &data_good).unwrap();
+    assert_eq!(skips, 0);
+
+    // has=false
+    let data_no = [5, 0];
+    let (_, skips) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &data_no).unwrap();
+    assert_eq!(skips, 0);
+
+    // vectors::generate never emits ambig (all vectors have 0 skips)
+    let set = vectors::generate(&resolved, &spec(5, 42)).unwrap();
+    assert!(
+        !set.vectors.is_empty(),
+        "the unambiguous payloads are still generated"
+    );
+    for v in &set.vectors {
+        let b = v.bytes().unwrap();
+        let (_, s) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &b).unwrap();
+        assert_eq!(s, 0, "ambiguous vector emitted");
+    }
+
+    // schema whose only possible payload is ambig -> skipped with reason
+    let only_src = r#"
+packet onlyamb {
+    if 1 {
+        v: { }
+    }
+}
+"#;
+    let only_res = schema(only_src);
+    let set2 = vectors::generate(&only_res, &spec(1, 1)).unwrap();
+    assert!(set2.vectors.is_empty());
+    assert_eq!(set2.skipped.len(), 1);
+    assert!(
+        set2.skipped[0]
+            .reason
+            .contains("group whose condition holds was skipped at end of input"),
+        "reason: {}",
+        set2.skipped[0].reason
+    );
+}
+
+#[test]
+fn a_require_equality_pins_the_field_in_either_operand_order() {
+    let resolved =
+        schema("packet a { v: u8 require v == 177 }\npacket b { w: u8 require 5 == w }\n");
+    let set = vectors::generate(&resolved, &VectorSpec::default()).unwrap();
+    assert!(set.skipped.is_empty(), "{:?}", set.skipped);
+    let by_packet = |name: &str| -> Vec<&str> {
+        set.vectors
+            .iter()
+            .filter(|vector| vector.packet == name)
+            .map(|vector| vector.hex.as_str())
+            .collect()
+    };
+    assert_eq!(by_packet("a"), ["b1"]);
+    assert_eq!(by_packet("b"), ["05"]);
+}
+
+#[test]
+fn the_minecraft_handshake_is_generated_because_its_require_pins_the_protocol_version() {
+    let resolved = common::load_minecraft().unwrap();
+    let set = vectors::generate_for(&resolved, &["handshake".to_string()], &spec(3, 1)).unwrap();
+    assert!(set.skipped.is_empty(), "{:?}", set.skipped);
+    assert!(!set.vectors.is_empty());
+    for vector in &set.vectors {
+        let decoded =
+            bytemill::interp::decode_packet(&resolved, "handshake", &vector.bytes().unwrap(), true)
+                .unwrap();
+        assert_eq!(
+            decoded.get("protocol_version"),
+            Some(&bytemill::Value::Int(777))
+        );
+    }
 }

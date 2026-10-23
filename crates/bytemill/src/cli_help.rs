@@ -41,11 +41,14 @@ pub const COMMANDS: &[Command] = &[
         group: INSPECT,
         synopsis: "<schema>...",
         summary: "Parse, resolve and type-check; prints ok",
-        usage: &["check <schema>..."],
+        usage: &["check <schema>... [--format human|json]"],
         about: "Loads each schema and every file it imports, resolves names and type-checks the \
                 result. Prints `ok` and exits 0 when it is valid; otherwise prints the problem \
                 and exits 3.",
-        options: &[],
+        options: &[(
+            "--format <human|json>",
+            "How to print diagnostics: `human` (default) or one JSON document.",
+        )],
         examples: &["bml check schemas/minecraft_26_3_wiki.bml"],
     },
     Command {
@@ -88,9 +91,9 @@ pub const COMMANDS: &[Command] = &[
         synopsis: "<schema>... [options]",
         summary: "Decode hex bytes from stdin to JSON",
         usage: &[
-            "decode <schema>... --packet <name> [--hex]",
+            "decode <schema>... --packet <name> [--hex] [--spans | --hexdump]",
             "decode <schema>... --state <state> --direction <direction> [--compression <spec>]\n\
-             [--hex]",
+             [--hex] [--spans | --hexdump]",
         ],
         about: "Reads hex bytes from stdin (whitespace anywhere is ignored) and prints the \
                 decoded packet as JSON with its keys sorted. Say what the bytes are with \
@@ -100,7 +103,11 @@ pub const COMMANDS: &[Command] = &[
                 Minecraft: length, id, payload), and pick the packet by its id from that \
                 state's routes, so the schema needs routes. The output is then `{\"fields\": \
                 {...}, \"id\": N, \"packet\": \"name\"}`, and bytes after the frame are \
-                ignored.",
+                ignored.\n\n\
+                With --spans, the JSON also includes a `spans` tree (`offset` and `len` per \
+                field). With --hexdump, a human-readable annotated dump is printed instead. \
+                The two flags are mutually exclusive. With --compression, span offsets refer \
+                to the unwrapped frame bytes (after the compression envelope is removed).",
         options: &[
             (
                 "--packet <name>",
@@ -122,6 +129,14 @@ pub const COMMANDS: &[Command] = &[
             (
                 "--hex",
                 "Accepted for compatibility; the input is always hex.",
+            ),
+            (
+                "--spans",
+                "Include a `spans` tree in the JSON output (or add it to the frame object).",
+            ),
+            (
+                "--hexdump",
+                "Print an annotated hexdump instead of JSON (mutually exclusive with --spans).",
             ),
         ],
         examples: &[
@@ -191,6 +206,38 @@ pub const COMMANDS: &[Command] = &[
         examples: &["bml wire-check schemas/minecraft_26_3_wiki.bml --file vectors.jsonl"],
     },
     Command {
+        name: "trace",
+        group: BYTES,
+        synopsis: "<schema>... [options]",
+        summary: "Replay a JSONL capture through the protocol",
+        usage: &["trace <schema>... [--file <path>] [--secret <hex>] [--state <state>]"],
+        about: "Reads a JSONL capture (one object per line with `direction` and `hex` fields) \
+                from --file or stdin and feeds each chunk through the tracer in order. Prints \
+                one JSON event per line as they are produced (packets, state changes, errors). \
+                Exits 3 if any error event was emitted.\n\n\
+                --secret is the 32-hex-digit shared secret for encrypted streams. --state is the \
+                initial connection state (default `handshaking`). The schema must use a \
+                Minecraft-style routed frame.",
+        options: &[
+            (
+                "--file <path>",
+                "Read the capture from a file instead of stdin.",
+            ),
+            (
+                "--secret <hex>",
+                "32 hex digits: the 16-byte shared secret for encrypted traffic.",
+            ),
+            (
+                "--state <state>",
+                "Initial protocol state (default: handshaking).",
+            ),
+        ],
+        examples: &[
+            "bml trace schemas/minecraft_26_3_wiki.bml --file capture.jsonl",
+            "cat capture.jsonl | bml trace schemas/minecraft_26_3_wiki.bml",
+        ],
+    },
+    Command {
         name: "emit",
         group: GENERATE,
         synopsis: "<target> <schema>... [options]",
@@ -235,6 +282,19 @@ pub const COMMANDS: &[Command] = &[
                 "--check",
                 "rstom-tree only: write nothing; print what has drifted and exit 3, or print \
                  `ok`.",
+            ),
+            (
+                "--vectors",
+                "Typed printers only: embed generated wire vectors and write a native \
+                 round-trip test in the emitted package.",
+            ),
+            (
+                "--vectors-count <N>",
+                "With --vectors: how many vectors per packet (default 3).",
+            ),
+            (
+                "--vectors-seed <S>",
+                "With --vectors: RNG seed (default 1).",
             ),
         ],
         examples: &[
@@ -294,6 +354,33 @@ pub const COMMANDS: &[Command] = &[
             "bml shapes extract schemas/minecraft_26_3_wiki.bml --rstom ../rstom --eligible \\\n\
              --out targets/rstom/shapes",
             "bml shapes report schemas/minecraft_26_3_wiki.bml --rstom ../rstom",
+        ],
+    },
+    Command {
+        name: "gen",
+        group: GENERATE,
+        synopsis: "<schema>... [options]",
+        summary: "Generate wire vectors that round-trip",
+        usage: &["gen <schema>... [--packet <name>]... [--count <N>] [--seed <S>]"],
+        about: "Draws valid packet payloads from the schema, keeps only those that decode \
+                strictly and re-encode to the same bytes, and prints them as JSONL on stdout \
+                (one object per line with sorted keys). Skipped packets are listed on stderr \
+                and are not an error.\n\n\
+                --packet limits generation to named packets (repeatable). --count is vectors \
+                per packet (default 3; 0 prints nothing). --seed seeds the generator (default \
+                1). Pipe the output to `bml wire-check` to verify round-trips.",
+        options: &[
+            (
+                "--packet <name>",
+                "Only generate for this packet; repeat for several.",
+            ),
+            ("--count <N>", "Vectors per packet (default 3)."),
+            ("--seed <S>", "Generator seed (default 1)."),
+        ],
+        examples: &[
+            "bml gen schemas/hytale/2026_02_17.bml",
+            "bml gen schemas/minecraft_26_3_wiki.bml --count 1 | \\\n\
+             bml wire-check schemas/minecraft_26_3_wiki.bml",
         ],
     },
     Command {

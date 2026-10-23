@@ -5,8 +5,11 @@ BML separates **how bytes are laid out** from **what messages exist** and **how 
 ## 1. `encoding` — wire layouts
 
 Reusable, parameterizable byte grammars. The compiler's primitives are `u8`,
-`bytes(n)`, `rest`, `f32be`, and `f64be`. Wider integers and LEB128 live in
-`schemas/std/` and are pulled in with `import`.
+`bytes(n)`, `rest`, `f32be`, `f64be`, `f32le`, and `f64le`. Wider integers,
+Minecraft-style VarInt/VarLong, and unsigned/zigzag LEB128 (`varuint32`,
+`varuint64`, `varint32`, `varint64` in `schemas/std/leb128.bml`) live in
+`schemas/std/` and are pulled in with `import`. Declaring your own `encoding
+f32le` shadows the primitive (same as for `f32be`).
 
 ```bml
 import "std/integers.bml"
@@ -43,7 +46,7 @@ encoding meta_entry = {
 
 | Construct | Example | Meaning |
 | --- | --- | --- |
-| primitive | `u8`, `bytes(n)`, `rest`, `f32be`, `f64be` | the only built-in types |
+| primitive | `u8`, `bytes(n)`, `rest`, `f32be`, `f64be`, `f32le`, `f64le` | the only built-in types |
 | scalar encoding | `encoding u16be = { ... } = expr` | block whose value is `expr`; `name: type = expr` is the encode side |
 | import | `import "std/varint.bml"` | makes that file's names visible here; path relative to the importing file; not transitive |
 | bytes | `bytes(n)`, `bytes(n) as utf8` | exactly `n` bytes, optional transform |
@@ -128,7 +131,7 @@ encoding nbt_payload = {
 
 ## Example in this repo
 
-- `schemas/std/` — integers, boolean, VarInt, and VarLong; a file imports them to use them
+- `schemas/std/` — integers, boolean, VarInt/VarLong, and LEB128 (`leb128.bml`); a file imports them to use them
 - `schemas/minecraft_core.bml` — String, UUID, Position, NBT (recursive),
   Slot, entity metadata (all 44 kinds), 22-particle data table, Light Data, ID Set, LpVec3
 - `schemas/minecraft_26_3*.bml` — protocol **777**: 232 packets across 261 routes, all

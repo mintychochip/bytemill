@@ -465,6 +465,17 @@ fn read_op(op: &WireOp, env: &Env, cur: &mut Cursor<'_>) -> BmlResult<Value> {
             a.copy_from_slice(b);
             Ok(Value::Float(f64::from_be_bytes(a)))
         }
+        WireOp::F32le => {
+            let b = cur.read(4)?;
+            let f = f32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+            Ok(Value::Float(f64::from(f)))
+        }
+        WireOp::F64le => {
+            let b = cur.read(8)?;
+            let mut a = [0u8; 8];
+            a.copy_from_slice(b);
+            Ok(Value::Float(f64::from_le_bytes(a)))
+        }
         WireOp::Bytes { len } => {
             let n = usize_len(&eval_expr(len, env)?)?;
             Ok(Value::bytes(cur.read(n)?.to_vec()))
@@ -486,6 +497,15 @@ fn write_op(op: &WireOp, value: &Value, env: &Env, w: &mut WriteCursor) -> BmlRe
         }
         WireOp::F64be => {
             w.emit(&as_f64(value)?.to_be_bytes());
+            Ok(())
+        }
+        WireOp::F32le => {
+            let f = as_f64(value)?;
+            w.emit(&(f as f32).to_le_bytes());
+            Ok(())
+        }
+        WireOp::F64le => {
+            w.emit(&as_f64(value)?.to_le_bytes());
             Ok(())
         }
         WireOp::Bytes { len } => {

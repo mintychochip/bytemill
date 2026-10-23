@@ -24,6 +24,8 @@ const RESERVED: &[&str] = &[
     "bytes",
     "f32be",
     "f64be",
+    "f32le",
+    "f64le",
     "_",
 ];
 

@@ -44,6 +44,32 @@ pub fn decode_packet(
     }
     Ok(env)
 }
+
+pub fn decode_packet_eof_skips(
+    resolved: &ResolvedSchema,
+    packet_name: &str,
+    data: &[u8],
+) -> BmlResult<(Env, usize)> {
+    let pkt = resolved
+        .packets
+        .get(packet_name)
+        .ok_or_else(|| decode(format!("unknown packet {}", py_repr_str(packet_name))))?;
+    let mut cur = Cursor::new(data);
+    let env = decode_block_items(&pkt.items, &mut cur, resolved, &Env::new(), None)?;
+    if cur.remaining() != 0 {
+        return Err(decode_at(
+            format!(
+                "{} of {} bytes left unread after packet {}",
+                cur.remaining(),
+                data.len(),
+                py_repr_str(packet_name)
+            ),
+            cur.pos,
+        ));
+    }
+    Ok((env, cur.eof_group_skips))
+}
+
 pub fn decode_packet_spans(
     resolved: &ResolvedSchema,
     packet_name: &str,
@@ -278,6 +304,17 @@ fn decode_frame_body(
             let mut out = Env::new();
             out.insert("packet", Value::str(pkt.name.clone()));
             out.insert("fields", Value::map(inner_fields));
+            if cur.recorder.is_some() {
+                // Span mode also reports the frame's own header values (`length`, `id`), so a
+                // hexdump can print them beside their bytes. Plain frame decode is unchanged.
+                let mut header = Env::new();
+                for (k, v) in env.iter() {
+                    if k != "payload" {
+                        header.insert(k, v.clone());
+                    }
+                }
+                out.insert("frame", Value::map(header));
+            }
             if let Some(rec) = &mut cur.recorder {
                 let mut top = rec.take_fields();
                 if let Some(is) = inner_spans {
@@ -546,6 +583,9 @@ fn decode_expanded(
                 }
                 if cur.remaining() == 0 {
                     // Optional trailing group absent on the wire.
+                    // Only count when the condition held (present); this is the
+                    // case that produces shapes typed codecs cannot re-encode.
+                    cur.eof_group_skips += 1;
                     continue;
                 }
                 let decoded = decode_expanded(items, cur, resolved, &group_env, prebind)?;
@@ -892,6 +932,18 @@ pub fn decode_type_ref(
             b.copy_from_slice(raw);
             Ok(Value::Float(f64::from_be_bytes(b)))
         }
+        "f32le" => {
+            let raw = cur.read(4)?;
+            Ok(Value::Float(
+                f32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]) as f64,
+            ))
+        }
+        "f64le" => {
+            let raw = cur.read(8)?;
+            let mut b = [0u8; 8];
+            b.copy_from_slice(raw);
+            Ok(Value::Float(f64::from_le_bytes(b)))
+        }
         _ => Err(decode(format!(
             "cannot decode type {}",
             py_repr_str(&ref_.name)
@@ -1232,6 +1284,16 @@ fn encode_type_ref(
         "f64be" => {
             let f = as_f64(val)?;
             w.emit(&f.to_be_bytes());
+            Ok(())
+        }
+        "f32le" => {
+            let f = as_f64(val)?;
+            w.emit(&(f as f32).to_le_bytes());
+            Ok(())
+        }
+        "f64le" => {
+            let f = as_f64(val)?;
+            w.emit(&f.to_le_bytes());
             Ok(())
         }
         "u8" => {

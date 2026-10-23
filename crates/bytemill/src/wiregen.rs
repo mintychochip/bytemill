@@ -206,7 +206,17 @@ fn scan_items(cx: &mut ScanCx<'_>, items: &[BlockItem], h: &mut Hints) {
                     scan_items(cx, &b.items, h);
                 }
             }
-            BlockItem::Require(_) => {}
+            BlockItem::Require(e) => {
+                // `require x == 777` leaves exactly one valid value for `x`.
+                if let Expr::Binop(op, l, r) = e
+                    && op.as_str() == "=="
+                    && let (Expr::Ident(n), Expr::Int(c)) | (Expr::Int(c), Expr::Ident(n)) =
+                        (&**l, &**r)
+                {
+                    h.exact.entry(n.clone()).or_default().push(*c);
+                }
+                scan_expr(e, h);
+            }
         }
     }
 }
@@ -525,6 +535,16 @@ impl Gen<'_> {
             "f64be" => {
                 let f = self.float();
                 self.buf.extend_from_slice(&f.to_be_bytes());
+                return Ok(Value::Float(f));
+            }
+            "f32le" => {
+                let f = self.float();
+                self.buf.extend_from_slice(&(f as f32).to_le_bytes());
+                return Ok(Value::Float(f64::from(f as f32)));
+            }
+            "f64le" => {
+                let f = self.float();
+                self.buf.extend_from_slice(&f.to_le_bytes());
                 return Ok(Value::Float(f));
             }
             "rest" => {

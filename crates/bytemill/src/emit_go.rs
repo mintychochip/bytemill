@@ -55,6 +55,7 @@ use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Failure, Func, IntTy, Local, Name, Origin, Program, ReadOp,
     RepeatMode, Stmt, Ty, TypeIdx, WriteOp, byte_literal, diverges, escape, hex_literal,
 };
+use crate::vectors::{TestRun, Vector};
 
 /// `emit go`: write `go.mod`, `runtime.go`, and one file per [`Program::output_stem`].
 pub fn emit_go(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
@@ -66,8 +67,27 @@ pub fn emit_go_with_version(
     out_dir: &Path,
     ver: crate::GoVersion,
 ) -> BmlResult<()> {
+    let _ = emit_go_with_vectors(resolved, out_dir, ver, &[])?;
+    Ok(())
+}
+
+pub fn emit_go_with_vectors(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    ver: crate::GoVersion,
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = crate::ir::typed(resolved)?;
-    let mut printer = Printer::new(&program, ver)?;
+    write_go_package(&program, out_dir, ver, vectors)
+}
+
+fn write_go_package(
+    program: &Program,
+    out_dir: &Path,
+    ver: crate::GoVersion,
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
+    let mut printer = Printer::new(program, ver)?;
     let mut files = printer.packets_files()?;
     let mut runtime = printer.runtime_go();
     if !ver.supports_any() {
@@ -86,7 +106,74 @@ pub fn emit_go_with_version(
     for (stem, body) in files {
         fs::write(out_dir.join(format!("{stem}.go")), body).map_err(|e| emit(e.to_string()))?;
     }
-    Ok(())
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+    let test_src = build_vectors_test_go(program, vectors)?;
+    let test_name = "vectors_test.go";
+    fs::write(out_dir.join(test_name), test_src).map_err(|e| emit(e.to_string()))?;
+    let embedded = vectors
+        .iter()
+        .filter(|v| packet_codec(program, &v.packet).is_some())
+        .count();
+    Ok(Some(TestRun {
+        file: test_name.to_string(),
+        command: "go test -count=1 ./...".to_string(),
+        vectors: embedded,
+    }))
+}
+
+fn packet_codec(program: &Program, name: &str) -> Option<CodecIdx> {
+    program
+        .packet_codec(name)
+        .or_else(|| program.codec_by_ir(name))
+        .or_else(|| program.codec_by_ir(&format!("packet:{name}")))
+}
+
+fn byte_list_go(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return "[]byte{}".to_string();
+    }
+    let mut out = "[]byte{\n".to_string();
+    for (i, &b) in bytes.iter().enumerate() {
+        if i != 0 {
+            if i % 16 == 0 {
+                out += ",\n\t\t\t";
+            } else {
+                out += ", ";
+            }
+        } else {
+            out += "\t\t\t";
+        }
+        out += &b.to_string();
+    }
+    out += ",\n\t\t}";
+    out
+}
+
+fn build_vectors_test_go(program: &Program, vectors: &[Vector]) -> BmlResult<String> {
+    let mut body = String::from(
+        "package bmlgen\n\nimport (\n\t\"bytes\"\n\t\"testing\"\n)\n\nfunc TestVectors(t *testing.T) {\n",
+    );
+    for v in vectors {
+        if packet_codec(program, &v.packet).is_none() {
+            continue;
+        }
+        let raw_bytes = v.bytes()?;
+        let raw = byte_list_go(&raw_bytes);
+        let codec = packet_codec(program, &v.packet).unwrap();
+        let decode = decode_fn(program, codec);
+        let encode = encode_fn(program, codec);
+        let dec = format!("{} decode %v", v.packet);
+        let enc = format!("{} encode %v", v.packet);
+        let msg = format!("{} bytes differ", v.packet);
+        let trail = format!("trailing bytes in {}: %d", v.packet);
+        body.push_str(&format!(
+            "\tfunc() {{\n\t\traw := {raw}\n\t\tr := NewReader(raw)\n\t\tv, err := {decode}(r)\n\t\tif err != nil {{\n\t\t\tt.Errorf({dec:?}, err)\n\t\t\treturn\n\t\t}}\n\t\tif r.Remaining() != 0 {{\n\t\t\tt.Errorf({trail:?}, r.Remaining())\n\t\t\treturn\n\t\t}}\n\t\tw := &Writer{{}}\n\t\tif err = {encode}(w, v); err != nil {{\n\t\t\tt.Errorf({enc:?}, err)\n\t\t\treturn\n\t\t}}\n\t\tif !bytes.Equal(w.Bytes(), raw) {{\n\t\t\tt.Errorf({msg:?})\n\t\t}}\n\t}}()\n"
+        ));
+    }
+    body.push_str("}\n");
+    Ok(body)
 }
 
 /// Rewrite the `any` predeclared identifier as `interface{}` for Go < 1.18.
@@ -682,7 +769,8 @@ func requireFailed(codec string, r *Reader, detail string) *Error {
 	return decodeError(codec, r, ErrRequire, "require failed: "+detail)
 }
 
-// Reader reads big-endian wire primitives over a byte slice.
+// Reader reads wire primitives over a byte slice. Methods without Le suffix
+// are big-endian; Le methods are little-endian (IEEE 754).
 type Reader struct {
 	data []byte
 	off  int
@@ -722,6 +810,15 @@ func (r *Reader) ReadF32() (float32, error) {
 	return math.Float32frombits(binary.BigEndian.Uint32(b)), nil
 }
 
+// ReadF32Le reads a little-endian float32.
+func (r *Reader) ReadF32Le() (float32, error) {
+	b, err := r.ReadBytes(4)
+	if err != nil {
+		return 0, err
+	}
+	return math.Float32frombits(binary.LittleEndian.Uint32(b)), nil
+}
+
 // ReadF64 reads a big-endian float64.
 func (r *Reader) ReadF64() (float64, error) {
 	b, err := r.ReadBytes(8)
@@ -729,6 +826,15 @@ func (r *Reader) ReadF64() (float64, error) {
 		return 0, err
 	}
 	return math.Float64frombits(binary.BigEndian.Uint64(b)), nil
+}
+
+// ReadF64Le reads a little-endian float64.
+func (r *Reader) ReadF64Le() (float64, error) {
+	b, err := r.ReadBytes(8)
+	if err != nil {
+		return 0, err
+	}
+	return math.Float64frombits(binary.LittleEndian.Uint64(b)), nil
 }
 
 // ReadBytes reads and copies exactly n bytes.
@@ -767,7 +873,8 @@ func (r *Reader) skip(n int) {
 	}
 }
 
-// Writer appends big-endian wire primitives to a byte slice.
+// Writer appends wire primitives to a byte slice. Methods without Le suffix
+// are big-endian; Le methods are little-endian.
 type Writer struct {
 	buf []byte
 }
@@ -789,10 +896,24 @@ func (w *Writer) WriteF32(v float32) {
 	w.buf = append(w.buf, b[:]...)
 }
 
+// WriteF32Le writes a little-endian float32.
+func (w *Writer) WriteF32Le(v float32) {
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], math.Float32bits(v))
+	w.buf = append(w.buf, b[:]...)
+}
+
 // WriteF64 writes a big-endian float64.
 func (w *Writer) WriteF64(v float64) {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], math.Float64bits(v))
+	w.buf = append(w.buf, b[:]...)
+}
+
+// WriteF64Le writes a little-endian float64.
+func (w *Writer) WriteF64Le(v float64) {
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], math.Float64bits(v))
 	w.buf = append(w.buf, b[:]...)
 }
 
@@ -1969,6 +2090,8 @@ impl<'a> BodyGen<'a> {
                     ReadOp::U8 => format!("{cur}.ReadU8()"),
                     ReadOp::F32 => format!("{cur}.ReadF32()"),
                     ReadOp::F64 => format!("{cur}.ReadF64()"),
+                    ReadOp::F32Le => format!("{cur}.ReadF32Le()"),
+                    ReadOp::F64Le => format!("{cur}.ReadF64Le()"),
                     ReadOp::Bytes(n) => format!("{cur}.ReadBytes({})", self.as_i64(n, 1)?),
                     ReadOp::Rest => unreachable!(),
                 };
@@ -2077,6 +2200,14 @@ impl<'a> BodyGen<'a> {
                     WriteOp::F64 => {
                         let text = self.as_ty(value, "float64", 1)?;
                         self.line(&format!("{cur}.WriteF64({text})"));
+                    }
+                    WriteOp::F32Le => {
+                        let text = self.as_ty(value, "float32", 1)?;
+                        self.line(&format!("{cur}.WriteF32Le({text})"));
+                    }
+                    WriteOp::F64Le => {
+                        let text = self.as_ty(value, "float64", 1)?;
+                        self.line(&format!("{cur}.WriteF64Le({text})"));
                     }
                     WriteOp::Bytes(n) => {
                         let bytes = self.as_ty(value, "[]byte", 2)?;

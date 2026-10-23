@@ -148,6 +148,20 @@ fn two_undeclared_names_give_two_diagnostics() {
 }
 
 #[test]
+fn diagnostics_come_in_source_order_whatever_their_cause() {
+    let dir = common::temp_tree("diag_order");
+    common::write_file(&dir, "lib.bml", "encoding e = u8\n");
+    // `typo` is declared nowhere (line 2); `e` only needs an import (line 3).
+    let main = common::write_file(&dir, "main.bml", "packet p {\n  a: typo\n  b: e\n}\n");
+    let ds = diagnose_files(&[&main]);
+    assert_eq!(ds.len(), 2, "{ds:?}");
+    assert_eq!((ds[0].line, ds[1].line), (2, 3), "{ds:?}");
+    assert!(ds[0].message.contains("typo"), "{ds:?}");
+    assert!(ds[1].message.contains("'e'"), "{ds:?}");
+    common::cleanup(&dir);
+}
+
+#[test]
 fn nearby_file_import_hint_is_kept() {
     let dir = common::temp_tree("diag_near");
     common::write_file(&dir, "lib.bml", "encoding e = u8\n");

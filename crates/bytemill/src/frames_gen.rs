@@ -23,9 +23,11 @@ const FIXED: &[(&str, usize)] = &[
     ("u32be", 4),
     ("i32be", 4),
     ("f32be", 4),
+    ("f32le", 4),
     ("u64be", 8),
     ("i64be", 8),
     ("f64be", 8),
+    ("f64le", 8),
     ("position", 8),
     ("uuid", 16),
 ];

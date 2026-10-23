@@ -43,7 +43,7 @@ use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Func, IntTy, Origin, ParamRole, Program, ReadOp, RepeatMode, Stmt,
     Ty, TypeIdx, WriteOp, byte_literal, escape, hex_literal,
 };
-
+use crate::vectors::{TestRun, Vector};
 const RUNTIME: &str = r#"export type BmlErrorKind =
   | "shortBuffer"
   | "requireFailed"
@@ -174,6 +174,14 @@ export class Reader {
     const b = this.readBytes(codec, 8);
     return new DataView(b.buffer, b.byteOffset, 8).getFloat64(0, false);
   }
+  readF32Le(codec: string): number {
+    const b = this.readBytes(codec, 4);
+    return new DataView(b.buffer, b.byteOffset, 4).getFloat32(0, true);
+  }
+  readF64Le(codec: string): number {
+    const b = this.readBytes(codec, 8);
+    return new DataView(b.buffer, b.byteOffset, 8).getFloat64(0, true);
+  }
 }
 export class Writer {
   private bytes: number[] = [];
@@ -208,6 +216,16 @@ export class Writer {
     new DataView(buf).setFloat64(0, v, false);
     this.writeBytes(new Uint8Array(buf));
   }
+  writeF32Le(v: number): void {
+    const buf = new ArrayBuffer(4);
+    new DataView(buf).setFloat32(0, v, true);
+    this.writeBytes(new Uint8Array(buf));
+  }
+  writeF64Le(v: number): void {
+    const buf = new ArrayBuffer(8);
+    new DataView(buf).setFloat64(0, v, true);
+    this.writeBytes(new Uint8Array(buf));
+  }
   toBytes(): Uint8Array {
     return Uint8Array.from(this.bytes);
   }
@@ -226,8 +244,8 @@ export function toI16(v: number): number {
   const u = v & 0xffff;
   return u >= 0x8000 ? u - 0x10000 : u;
 }
-export function toI32(v: number): number {
-  return v | 0;
+export function toI32(v: number | bigint): number {
+  return typeof v === "bigint" ? Number(BigInt.asIntN(32, v)) : v | 0;
 }
 export function toU32(v: number): number {
   return v >>> 0;
@@ -385,7 +403,7 @@ pub fn type_name(program: &Program, ty: TypeIdx) -> String {
 }
 
 pub fn emit_typescript(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
-    emit_typescript_with_target(resolved, out_dir, crate::TsTarget::default())
+    emit_typescript_with_vectors(resolved, out_dir, crate::TsTarget::default(), &[]).map(|_| ())
 }
 
 pub fn emit_typescript_with_target(
@@ -393,6 +411,15 @@ pub fn emit_typescript_with_target(
     out_dir: &Path,
     target: crate::TsTarget,
 ) -> BmlResult<()> {
+    emit_typescript_with_vectors(resolved, out_dir, target, &[]).map(|_| ())
+}
+
+pub fn emit_typescript_with_vectors(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    target: crate::TsTarget,
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = crate::ir::typed(resolved)?;
     let printer = Printer { program: &program };
     let mut parts: BTreeMap<String, String> = BTreeMap::new();
@@ -440,18 +467,178 @@ pub fn emit_typescript_with_target(
         .collect();
     fs::write(out_dir.join("bmlgen.ts"), index).map_err(|e| emit(e.to_string()))?;
     fs::write(out_dir.join("tsconfig.json"), tsconfig(target)).map_err(|e| emit(e.to_string()))?;
-    Ok(())
+
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+
+    let mut embedded: Vec<&Vector> = Vec::new();
+    for v in vectors {
+        if program.packet_codec(&v.packet).is_some() {
+            embedded.push(v);
+        }
+    }
+    let test = vectors_test(&program, &embedded);
+    fs::write(out_dir.join("vectors.test.ts"), test).map_err(|e| emit(e.to_string()))?;
+    Ok(Some(TestRun {
+        file: "vectors.test.ts".to_string(),
+        command: "node --experimental-strip-types vectors.test.ts".to_string(),
+        vectors: embedded.len(),
+    }))
 }
 
 /// The emitted `tsconfig.json`: the requested `target`, `ESNext` modules, and
 /// strict type checking.
 fn tsconfig(target: crate::TsTarget) -> String {
     format!(
-        "{{\n  \"compilerOptions\": {{\n    \"target\": \"{}\",\n    \"module\": \"ESNext\",\n    \"strict\": true\n  }}\n}}\n",
+        "{{\n  \"compilerOptions\": {{\n    \"target\": \"{}\",\n    \"module\": \"ESNext\",\n    \"strict\": true,\n    \"allowImportingTsExtensions\": true,\n    \"noEmit\": true\n  }}\n}}\n",
         target.as_str(),
     )
 }
 
+/// Emit the vectors.test.ts source: embeds chosen vectors as literals, runs
+/// decode (strict full-consume), re-encode, byte-compare for each. Matches
+/// the check shape from tests/test_emit_ts.rs roundtrip_schema.
+fn vectors_test(program: &Program, embedded: &[&Vector]) -> String {
+    let mut body = String::from(concat!(
+        "const fails: string[] = [];\n",
+        "function check(\n",
+        "  name: string,\n",
+        "  raw: number[],\n",
+        "  dec: (r: bml.Reader) => unknown,\n",
+        "  enc: (w: bml.Writer, v: never) => void,\n",
+        ") {\n",
+        "  try {\n",
+        "    const reader = new bml.Reader(Uint8Array.from(raw));\n",
+        "    const v = dec(reader);\n",
+        "    if (reader.remaining !== 0) {\n",
+        "      fails.push(name + \" trailing \" + reader.remaining);\n",
+        "      return;\n",
+        "    }\n",
+        "    const w = new bml.Writer();\n",
+        "    enc(w, v as never);\n",
+        "    const back = w.toBytes();\n",
+        "    if (back.length !== raw.length || back.some((b, i) => b !== raw[i])) {\n",
+        "      fails.push(name + \" bytes \" + back.length + \" \" + raw.length);\n",
+        "    }\n",
+        "  } catch (e) {\n",
+        "    fails.push(name + \" \" + e);\n",
+        "  }\n",
+        "}\n",
+    ));
+    for v in embedded {
+        let c = program.packet_codec(&v.packet).unwrap();
+        let dec = decode_fn(program, c);
+        let enc = encode_fn(program, c);
+        body.push_str(&format_check_call(&v.packet, &v.hex, &dec, &enc));
+    }
+    body.push_str(concat!(
+        "if (fails.length) {\n",
+        "  console.log(fails.slice(0, 30).join(\"\\n\"));\n",
+        "  throw new Error(\"fail \" + fails.length);\n",
+        "}\n",
+    ));
+    body.push_str(&format!("console.log(\"vectors\", {});\n", embedded.len()));
+    format!("import * as bml from \"./bmlgen.ts\";\n{body}")
+}
+
+/// Whether a full source line fits prettier's 80-column width.
+fn ts_line_fits(text: &str) -> bool {
+    text.len() <= 80
+}
+
+/// Whether a line at indent `ind` (two spaces each) fits with trailing text
+/// appended to the last fragment on that line.
+fn ts_fits_at(ind: usize, content_len: usize, trail: usize) -> bool {
+    ind * 2 + content_len + trail <= 80
+}
+
+/// Text printed after a wrapped operand, before the wrapper's closing `)`.
+fn wrap_mid_tail(mid: &str) -> (&str, &str) {
+    if mid == ")" {
+        return ("", ")");
+    }
+    if let Some(rest) = mid.strip_suffix(')') {
+        return (rest, ")");
+    }
+    (mid, "")
+}
+
+fn hex_bytes(hex: &str) -> Vec<String> {
+    if hex.is_empty() {
+        return Vec::new();
+    }
+    let chars: Vec<char> = hex.chars().collect();
+    chars
+        .chunks(2)
+        .map(|chunk| {
+            let h = chunk.first().and_then(|c| c.to_digit(16)).unwrap_or(0) as u8;
+            let l = chunk.get(1).and_then(|c| c.to_digit(16)).unwrap_or(0) as u8;
+            ((h << 4) | l).to_string()
+        })
+        .collect()
+}
+
+/// Greedy-wrap comma-separated tokens into lines that fit at `line_indent`.
+fn wrap_csv(nums: &[String], line_indent: usize) -> Vec<String> {
+    let mut rows: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for n in nums {
+        let trial = if cur.is_empty() {
+            n.clone()
+        } else {
+            format!("{cur}, {n}")
+        };
+        let line = format!("{}{},", "  ".repeat(line_indent), trial);
+        if cur.is_empty() || ts_line_fits(&line) {
+            cur = trial;
+        } else {
+            rows.push(cur);
+            cur = n.clone();
+        }
+    }
+    if !cur.is_empty() {
+        rows.push(cur);
+    }
+    rows
+}
+
+/// The second argument to `check` (a byte array), including indent and trailing comma.
+fn format_check_array_arg(nums: &[String], arg_indent: usize) -> String {
+    let pad = "  ".repeat(arg_indent);
+    if nums.is_empty() {
+        return format!("{pad}[],");
+    }
+    let inner = nums.join(", ");
+    let single = format!("{pad}[{inner}],");
+    if ts_line_fits(&single) {
+        return single;
+    }
+    let rows = wrap_csv(nums, arg_indent + 1);
+    let pad_c = "  ".repeat(arg_indent + 1);
+    let mut out = format!("{pad}[\n");
+    for row in &rows {
+        out.push_str(&format!("{pad_c}{row},\n"));
+    }
+    out.push_str(&format!("{pad}],"));
+    out
+}
+
+/// One `check(...);` statement in prettier's one-line or broken-call shape.
+fn format_check_call(packet: &str, hex: &str, dec: &str, enc: &str) -> String {
+    let nums = hex_bytes(hex);
+    let array = if nums.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[{}]", nums.join(", "))
+    };
+    let single = format!("check({packet:?}, {array}, bml.{dec}, bml.{enc});");
+    if ts_line_fits(&single) {
+        return format!("{single}\n");
+    }
+    let array = format_check_array_arg(&nums, 1);
+    format!("check(\n  {packet:?},\n{array}\n  bml.{dec},\n  bml.{enc},\n);\n")
+}
 /// A generated export and the module that defines it, plus whether it is a
 /// value (a `const`/`class`/`function`) or a type only.
 struct Symbol {
@@ -2336,6 +2523,8 @@ impl<'a> FnGen<'a> {
                     ReadOp::U8 => format!("r.readU8(\"{}\")", self.codec),
                     ReadOp::F32 => format!("r.readF32(\"{}\")", self.codec),
                     ReadOp::F64 => format!("r.readF64(\"{}\")", self.codec),
+                    ReadOp::F32Le => format!("r.readF32Le(\"{}\")", self.codec),
+                    ReadOp::F64Le => format!("r.readF64Le(\"{}\")", self.codec),
                     ReadOp::Bytes(n) => {
                         let bind = self.bind_head(body, dst);
                         let single = format!(
@@ -2411,6 +2600,8 @@ impl<'a> FnGen<'a> {
                     WriteOp::U8 => ("w.writeU8(", ");"),
                     WriteOp::F32 => ("w.writeF32(", ");"),
                     WriteOp::F64 => ("w.writeF64(", ");"),
+                    WriteOp::F32Le => ("w.writeF32Le(", ");"),
+                    WriteOp::F64Le => ("w.writeF64Le(", ");"),
                     WriteOp::Bytes(_) => unreachable!("handled above"),
                     WriteOp::Rest => ("w.writeBytes(", ");"),
                 };
@@ -2478,7 +2669,7 @@ impl<'a> FnGen<'a> {
                     // operand per line, `) {`.
                     self.line(ind, "if (", out);
                     let mut parts: Vec<(usize, String)> = Vec::new();
-                    self.lay_parts(body, "", cond, ind + 1, &mut parts);
+                    self.lay_parts(body, "", cond, ind + 1, 0, &mut parts);
                     for (li, l) in parts {
                         self.line(li, &l, out);
                     }
@@ -2649,7 +2840,12 @@ impl<'a> FnGen<'a> {
         }
         // Break the condition, keeping the `requireFailed` on the last line.
         let mut lines: Vec<(usize, String)> = Vec::new();
-        self.lay_parts(body, "if (", &neg, ind, &mut lines);
+        let trail = format!(
+            ") requireFailed(\"{}\", {}, {detail});",
+            self.codec,
+            self.offset(),
+        );
+        self.lay_parts(body, "if (", &neg, ind, trail.len(), &mut lines);
         let (li, last) = lines.pop().unwrap_or((ind, String::new()));
         for (li, l) in lines {
             self.line(li, &l, out);
@@ -2772,6 +2968,83 @@ fn split_assoc<'b>(e: &'b Expr, op: BinOp, out: &mut Vec<&'b Expr>) {
 }
 
 impl<'a> FnGen<'a> {
+    fn chain_operand<'x>(&self, body: &'x Body, p: &'x Expr, chain_big: bool) -> &'x Expr {
+        match p {
+            Expr::Cast { expr: inner, to }
+                if !chain_big && self.widening_elide(body, inner, to) =>
+            {
+                inner
+            }
+            _ => p,
+        }
+    }
+
+    /// One associative chain part, matching the per-part loop's `plain` /
+    /// `Number(` / `BigInt(` rendering.
+    fn chain_part_text(
+        &self,
+        body: &Body,
+        q: &Expr,
+        op: BinOp,
+        chain_big: bool,
+        nowrap: bool,
+        right: bool,
+    ) -> String {
+        let part_big = self.prints_big(body, q);
+        let (open, close, plain) = match (chain_big, part_big) {
+            (true, false) => ("BigInt(", ")", false),
+            (false, true) if fits53(self.program.int_range(body, q)) => ("Number(", ")", false),
+            _ => ("", "", true),
+        };
+        let t = if nowrap {
+            self.expr_nowrap(body, q)
+        } else {
+            self.expr(body, q)
+        };
+        if plain {
+            let (po, pc) = if self.chain_paren(body, q, op, right) {
+                ("(", ")")
+            } else {
+                ("", "")
+            };
+            format!("{po}{}{pc}", t)
+        } else {
+            format!("{open}{}{close}", t)
+        }
+    }
+
+    /// Elided associative chain text when every part prints like the per-part
+    /// loop (parentheses and wrappers). Returns `None` for mask-literal chains.
+    fn assoc_flatten(
+        &self,
+        body: &Body,
+        parts: &[&Expr],
+        op: BinOp,
+        chain_big: bool,
+        nowrap: bool,
+    ) -> Option<String> {
+        if matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor) {
+            for p in parts {
+                let q = self.chain_operand(body, p, chain_big);
+                if matches!(q, Expr::Int { .. }) {
+                    return None;
+                }
+            }
+        }
+        let sym = op.symbol();
+        let mut flat = String::new();
+        for (i, p) in parts.iter().enumerate() {
+            let q = self.chain_operand(body, p, chain_big);
+            if i > 0 {
+                flat.push(' ');
+                flat.push_str(sym);
+                flat.push(' ');
+            }
+            flat.push_str(&self.chain_part_text(body, q, op, chain_big, nowrap, i > 0));
+        }
+        Some(flat)
+    }
+
     /// Whether a chain part needs parentheses inside a chain of `op`: a
     /// call-shaped part (`toI64(…)`, `floorDiv(…)`) never does, matching
     /// prettier, which strips such parens.
@@ -2798,7 +3071,7 @@ impl<'a> FnGen<'a> {
     /// associative chains and call arguments across lines.
     fn lay(&self, body: &Body, prefix: &str, e: &Expr, suffix: &str, ind: usize, out: &mut String) {
         let mut lines: Vec<(usize, String)> = Vec::new();
-        self.lay_parts(body, prefix, e, ind, &mut lines);
+        self.lay_parts(body, prefix, e, ind, suffix.len(), &mut lines);
         let last = lines.len() - 1;
         for (i, (li, l)) in lines.iter().enumerate() {
             if i == last {
@@ -2816,9 +3089,10 @@ impl<'a> FnGen<'a> {
         prefix: &str,
         e: &Expr,
         ind: usize,
+        last_trail: usize,
         lines: &mut Vec<(usize, String)>,
     ) {
-        self.lay_inner(body, prefix, e, ind, lines, false);
+        self.lay_inner(body, prefix, e, ind, last_trail, lines, false);
     }
 
     /// `lay_parts` for an operand whose parent already coerces: this node's
@@ -2829,19 +3103,22 @@ impl<'a> FnGen<'a> {
         prefix: &str,
         e: &Expr,
         ind: usize,
+        last_trail: usize,
         lines: &mut Vec<(usize, String)>,
     ) {
-        self.lay_inner(body, prefix, e, ind, lines, true);
+        self.lay_inner(body, prefix, e, ind, last_trail, lines, true);
     }
 
     /// The lines of `prefix + E` with optional `>>> 0` suppression (the
     /// caller appends any suffix to the last).
+    #[allow(clippy::too_many_arguments)]
     fn lay_inner(
         &self,
         body: &Body,
         prefix: &str,
         e: &Expr,
         ind: usize,
+        last_trail: usize,
         lines: &mut Vec<(usize, String)>,
         nowrap: bool,
     ) {
@@ -2850,7 +3127,7 @@ impl<'a> FnGen<'a> {
         } else {
             format!("{prefix}{}", self.expr(body, e))
         };
-        if ind * 2 + single.len() <= 80 {
+        if ts_fits_at(ind, single.len(), last_trail) {
             lines.push((ind, single));
             return;
         }
@@ -2867,17 +3144,14 @@ impl<'a> FnGen<'a> {
                 split_assoc(e, *op, &mut parts);
                 let sym = op.symbol();
                 let n = parts.len();
+                if let Some(flat) = self.assoc_flatten(body, &parts, *op, chain_big, nowrap)
+                    && ts_fits_at(ind, prefix.len() + flat.len(), last_trail)
+                {
+                    lines.push((ind, format!("{prefix}{flat}")));
+                    return;
+                }
                 for (i, p) in parts.into_iter().enumerate() {
-                    // Elide value-preserving widenings in `number` chains,
-                    // exactly like `num_text` does for operands.
-                    let q: &Expr = match p {
-                        Expr::Cast { expr: inner, to }
-                            if !chain_big && self.widening_elide(body, inner, to) =>
-                        {
-                            inner
-                        }
-                        _ => p,
-                    };
+                    let q = self.chain_operand(body, p, chain_big);
                     let pre = if i == 0 {
                         prefix.to_string()
                     } else {
@@ -2934,10 +3208,15 @@ impl<'a> FnGen<'a> {
                                             ..
                                         }
                                     );
-                            if suppress {
-                                self.lay_parts_nowrap(body, &(pre + &po), q, li, lines);
+                            let trail = if i + 1 == n {
+                                pc.len()
                             } else {
-                                self.lay_parts(body, &(pre + &po), q, li, lines);
+                                pc.len() + 1 + sym.len()
+                            };
+                            if suppress {
+                                self.lay_parts_nowrap(body, &(pre + &po), q, li, trail, lines);
+                            } else {
+                                self.lay_parts(body, &(pre + &po), q, li, trail, lines);
                             }
                             let end = lines.len() - 1;
                             if i + 1 == n {
@@ -2947,20 +3226,19 @@ impl<'a> FnGen<'a> {
                             }
                         }
                     } else {
-                        self.lay_parts(body, &(pre + &open), q, li, lines);
-                        let end = lines.len() - 1;
-                        if i + 1 == n {
-                            lines[end].1.push_str(&close);
+                        let after = if i + 1 == n {
+                            String::new()
                         } else {
-                            lines[end].1.push_str(&format!("{close} {sym}"));
-                        }
+                            format!(" {sym}")
+                        };
+                        self.lay_wrapped_chain(body, &pre, &open, q, &close, &after, li, lines);
                     }
                 }
             }
             Expr::Cast { expr, to } => {
                 let (from, _) = self.program.expr_ty(body, expr);
                 if Self::is_enum(self.program, &from) || Self::is_enum(self.program, to) {
-                    self.lay_parts(body, prefix, expr, ind, lines);
+                    self.lay_parts(body, prefix, expr, ind, 0, lines);
                     return;
                 }
                 match (&from, to) {
@@ -2977,6 +3255,7 @@ impl<'a> FnGen<'a> {
                             &args,
                             "",
                             ind,
+                            last_trail,
                             lines,
                             &single,
                         );
@@ -2984,15 +3263,23 @@ impl<'a> FnGen<'a> {
                     (Ty::Int(_), Ty::Bool) => {
                         let big = self.cast_big(body, expr, &Ty::Bool);
                         let zero = if big { "0n" } else { "0" };
-                        self.lay_parts(body, &(prefix.to_string() + "("), expr, ind, lines);
+                        let tail = format!(" !== {zero})");
+                        self.lay_parts(
+                            body,
+                            &(prefix.to_string() + "("),
+                            expr,
+                            ind,
+                            tail.len(),
+                            lines,
+                        );
                         let end = lines.len() - 1;
-                        lines[end].1.push_str(&format!(" !== {zero})"));
+                        lines[end].1.push_str(&tail);
                     }
                     _ => lines.push((ind, single)),
                 }
             }
             Expr::Call { func, args } => {
-                self.lay_call(body, prefix, *func, args, ind, lines, &single)
+                self.lay_call(body, prefix, *func, args, ind, last_trail, lines, &single)
             }
             _ => lines.push((ind, single)),
         }
@@ -3006,6 +3293,7 @@ impl<'a> FnGen<'a> {
         func: Func,
         args: &[Expr],
         ind: usize,
+        last_trail: usize,
         lines: &mut Vec<(usize, String)>,
         single: &str,
     ) {
@@ -3034,6 +3322,7 @@ impl<'a> FnGen<'a> {
                     ],
                     "",
                     ind,
+                    last_trail,
                     lines,
                     single,
                 );
@@ -3048,6 +3337,7 @@ impl<'a> FnGen<'a> {
                 }],
                 "",
                 ind,
+                last_trail,
                 lines,
                 single,
             ),
@@ -3061,6 +3351,7 @@ impl<'a> FnGen<'a> {
                 }],
                 "",
                 ind,
+                last_trail,
                 lines,
                 single,
             ),
@@ -3074,11 +3365,12 @@ impl<'a> FnGen<'a> {
                 }],
                 ".length",
                 ind,
+                last_trail,
                 lines,
                 single,
             ),
             Func::BytesLen | Func::ListLen => {
-                self.lay_parts(body, prefix, &args[0], ind, lines);
+                self.lay_parts(body, prefix, &args[0], ind, ".length".len(), lines);
                 let end = lines.len() - 1;
                 lines[end].1.push_str(".length");
             }
@@ -3105,6 +3397,7 @@ impl<'a> FnGen<'a> {
                     ],
                     "",
                     ind,
+                    last_trail,
                     lines,
                     single,
                 );
@@ -3119,7 +3412,7 @@ impl<'a> FnGen<'a> {
     /// prettier breaks `let x = decodeFoo(r);`).
     fn assign_break(&self, head: &str, rhs: &str, ind: usize, out: &mut String) {
         let single = format!("{head}{rhs};");
-        if ind * 2 + single.len() <= 80 {
+        if ts_fits_at(ind, single.len(), 0) {
             self.line(ind, &single, out);
             return;
         }
@@ -3146,15 +3439,85 @@ impl<'a> FnGen<'a> {
         out: &mut String,
         single: &str,
     ) {
-        if ind * 2 + single.len() <= 80 {
+        if ts_fits_at(ind, single.len(), 0) {
             self.line(ind, single, out);
             return;
         }
         let mut lines = Vec::new();
-        self.lay_call_open(body, head, args, closer, ind, &mut lines, single);
+        self.lay_call_open(body, head, args, closer, ind, 0, &mut lines, single);
         for (li, l) in lines {
             self.line(li, &l, out);
         }
+    }
+
+    /// `Number(` / `BigInt(` wrapper in an associative chain: one line when
+    /// it fits, else break like a one-argument call and append `close` and
+    /// any following operator on the last line.
+    #[allow(clippy::too_many_arguments)]
+    fn lay_wrapped_chain(
+        &self,
+        body: &Body,
+        prefix: &str,
+        open: &str,
+        e: &Expr,
+        close: &str,
+        after: &str,
+        ind: usize,
+        lines: &mut Vec<(usize, String)>,
+    ) {
+        let inline = format!("{prefix}{open}{}{close}{after}", self.expr(body, e));
+        if ts_fits_at(ind, inline.len(), 0) {
+            lines.push((ind, inline));
+            return;
+        }
+        if !open.ends_with('(') {
+            self.lay_parts(
+                body,
+                &(prefix.to_string() + open),
+                e,
+                ind,
+                close.len() + after.len(),
+                lines,
+            );
+            let end = lines.len() - 1;
+            lines[end].1.push_str(&(close.to_string() + after));
+            return;
+        }
+        let wrap_head = format!("{prefix}{}", open.trim_end_matches('('));
+        lines.push((ind, format!("{wrap_head}(")));
+        self.lay_parts(body, "", e, ind + 1, close.len() + after.len(), lines);
+        let end = lines.len() - 1;
+        lines[end].1.push_str(&(close.to_string() + after));
+    }
+
+    /// A call argument with optional `pre`/`mid` wrappers (`Number(…)`, etc.).
+    fn lay_wrapped_arg(
+        &self,
+        body: &Body,
+        pre: &str,
+        e: &Expr,
+        mid: &str,
+        ind: usize,
+        lines: &mut Vec<(usize, String)>,
+    ) {
+        let inline = format!("{pre}{}{mid}", self.expr(body, e));
+        if ts_fits_at(ind, inline.len(), 1) {
+            lines.push((ind, format!("{inline},")));
+            return;
+        }
+        if !pre.ends_with('(') {
+            self.lay_inner(body, pre, e, ind, 1 + mid.len(), lines, false);
+            let end = lines.len() - 1;
+            lines[end].1.push_str(&format!("{mid},"));
+            return;
+        }
+        let wrap_head = pre.trim_end_matches('(');
+        let (tail, _) = wrap_mid_tail(mid);
+        lines.push((ind, format!("{wrap_head}(")));
+        self.lay_parts(body, "", e, ind + 1, tail.len() + 1, lines);
+        let end = lines.len() - 1;
+        lines[end].1.push_str(&format!("{tail},"));
+        lines.push((ind, "),".to_string()));
     }
 
     #[allow(
@@ -3168,10 +3531,11 @@ impl<'a> FnGen<'a> {
         args: &[CallArg],
         closer: &str,
         ind: usize,
+        last_trail: usize,
         lines: &mut Vec<(usize, String)>,
         single: &str,
     ) {
-        if ind * 2 + single.len() <= 80 {
+        if ts_fits_at(ind, single.len(), last_trail) {
             lines.push((ind, single.to_string()));
             return;
         }
@@ -3179,9 +3543,7 @@ impl<'a> FnGen<'a> {
         for arg in args {
             match arg {
                 CallArg::E { pre, e, mid } => {
-                    self.lay_inner(body, pre, e, ind + 1, lines, false);
-                    let end = lines.len() - 1;
-                    lines[end].1.push_str(&format!("{mid},"));
+                    self.lay_wrapped_arg(body, pre, e, mid, ind + 1, lines);
                 }
                 CallArg::Raw(s) => lines.push((ind + 1, format!("{s},"))),
             }

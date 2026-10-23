@@ -9,13 +9,12 @@ use std::collections::HashSet;
 
 use crate::ast::ResolvedSchema;
 use crate::errors::{self, BmlResult};
+use crate::interp::decode_packet_eof_skips;
 use crate::json::dumps_sorted;
 use crate::ordmap::OrderedMap;
 use crate::value::Value;
 use crate::wire;
 use crate::wiregen;
-
-/// How many vectors to draw, and the seed the first attempt of every packet starts from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VectorSpec {
     pub per_packet: usize,
@@ -163,6 +162,21 @@ fn fill(resolved: &ResolvedSchema, name: &str, spec: &VectorSpec, set: &mut Vect
         };
         let hex = hex_of(&bytes);
         if seen.contains(&hex) {
+            continue;
+        }
+        let eof_skips = match decode_packet_eof_skips(resolved, name, &bytes) {
+            Ok((_, skips)) => skips,
+            Err(err) => {
+                seen.insert(hex.clone());
+                reason.get_or_insert(err.to_string());
+                continue;
+            }
+        };
+        if eof_skips > 0 {
+            seen.insert(hex.clone());
+            reason.get_or_insert(
+                "a group whose condition holds was skipped at end of input (typed codecs cannot re-encode that wire form)".to_string(),
+            );
             continue;
         }
         match wire::round_trip(resolved, name, &bytes) {

@@ -1,6 +1,6 @@
 # Bytemill — Project Status and Remaining Goals
 
-**Status date:** 2026-10-19
+**Status date:** 2026-10-23
 **Scope:** the Rust compiler (`crates/bytemill`, binary `bml`), the shipped schemas, the nine
 typed code generators, and the rstom/Minestom downstream.
 
@@ -22,6 +22,12 @@ current-tree evidence (code, test, workflow, or committed report). Design ration
 | Binaries | `.github/workflows/release.yml` publishes `bml` for Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), Windows x86_64, with `SHA256SUMS` |
 | Generated inputs | `data/minecraft-data/pc/` is fetched (`scripts/fetch_minecraft_data.py`); `targets/rstom/shapes/` is extracted (`scripts/extract_rstom_shapes.sh`); both are git-ignored, as are `build/` and `target/` |
 | Gates run locally | full `cargo test` suite green, `clippy -D warnings` clean, per-printer compile/roundtrip tests |
+| Diagnostics | `bml check` human + `--format json`; `bytemill::diag` (`diagnose_source`, `diagnose_files`, `render`, `to_json`) |
+| Byte spans / hexdump | `bml decode --spans` and `--hexdump` (frame-aware; compression unwraps first) |
+| Wire vectors | `bml gen`, `bml wire-check`, `bml emit … --vectors` (typed printers embed literals + native round-trip test) |
+| Session trace | `bml trace` on JSONL Minecraft captures (state machine, compression, optional AES-CFB8) |
+| Little-endian floats | Primitives `f32le` / `f64le` in interpreter, IR, nine typed printers, and `emit rust` |
+| std/leb128 | `schemas/std/leb128.bml` (`varuint32`/`varuint64`, zigzag `varint32`/`varint64`); C/C++ emit clean under `-Wall -Wextra -Werror` at every standard |
 
 **Not** in CI today: tests, formatters, oracle, protocol roundtrips, or any emitted-language
 gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
@@ -52,6 +58,15 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 | B5 | Support `emit <target> --check` | `cli.rs:505-509`: `--check` is an error except for `rstom-tree` | Every emit target can report drift (exit 3) without writing; generated-code CI can gate on it |
 | B6 | Remove the `rust-typed` panic | `emit_rust_typed.rs:197` panics when a method codec has no named type | The case returns a `BmlError`, with a regression test |
 
+### P1b — Typed-codec conformance found by generated vectors
+
+| ID | Goal | Evidence (current tree) | Done when |
+|---|---|---|---|
+| B7 | The typed printers do not pass their own vectors on the shipped version roots | `bml emit <t> schemas/versions/<root>.bml --out D --vectors`, then the printed run command, with the toolchains of this machine (Zig 0.14.1, Go, Python 3.14, JDK 25 source launcher, .NET, gcc, node 22). `v1_13` (426 vectors): Go, Python, Java, C, Zig, C#, rust-typed pass; C++ fails to compile (`play_clientbound.cpp`: `std::variant<…BackgroundTexture…>` cannot convert to `int64_t`); TypeScript fails 8 vectors (`login_plugin_response` trailing byte, `map` `TypeError … reading 'length'`, `open_window` / `declare_recipes` `Cannot convert … to a BigInt`). `v1_20_6` and `v26_3`: all nine fail: Go, Python, C, C#, rust-typed on `scoreboard_objective` / `scoreboard_score` (`missing number_format` although `has_number_format` is false), Zig does not compile (`play_clientbound.zig`: `cannot assign to constant`, from `has_number_format = false`), Java does not compile (`cannot find symbol: class GameProfile`), plus the C++ and TypeScript failures above. Every generated codec file is byte-identical to baseline 0.2.0, so these are baseline bugs that no test reached (the wiki and Hytale schemas pass in all nine) | `bml emit <t> schemas/versions/<root>.bml --vectors` and that target's run command pass for all 39 version roots in every printer whose toolchain is installed; a matrix test runs them |
+| B8 | EOF-skipped conditional groups vs typed `None` | `debug_subscription_update` with `subscription_id` 10 in `schemas/minecraft_26_3_remaining.bml:637`: interpreter skips the group when no bytes remain but the condition holds; typed codecs decode `value = None` then fail re-encode. `bml gen` drops these (`decode_packet_eof_skips`) | Interpreter and typed codecs agree on the wire form and the generator filter can be removed |
+| B9 | Oldest language standards on Hytale | `bml emit cpp:98 schemas/hytale/2026_02_17.bml` does not compile (`-Werror=unused-value`: comma operator in a constructor call); `bml emit python:3.8 …` raises `TypeError: non-default argument 'language' follows default argument 'identity_token'` on import; both in baseline 0.2.0. This machine: no `javac`, no Zig 0.11, no Python 3.8 | Hytale schema builds and its shipped `--vectors` test passes at the oldest and newest standard of every printer whose toolchain is available (record unavailable toolchains) |
+| B10 | Unsigned 64-bit masks and shifts disagree with the interpreter | `(raw & 0xFFFFFFFFFFFFFFFF) >> 60` over `raw: u64be` with wire `ffffffffffffffff`: `bml decode` gives 15; the typed lowering casts the `u64` to `i64` before the shift, so the shift is arithmetic (`sign_extend(raw & 0xFFFFFFFFFFFFFFFF, 64) >> 60 & 0xFF` in Python, `((raw as i64) >> 60) as u8` in rust-typed, `static_cast<std::int64_t>(raw) >> 60` in C++, `toI64(raw) >> 60n` in TypeScript) and the printers produce 255 (Java: -1). Separately, Java's `>>` sign-extended a `u64` operand held in a `long`, which broke zigzag `varint64` at `i64::MIN`/`i64::MAX`; the Java printer now prints `>>>` when the left operand is directly a `u64`, not for the cast form above | One probe covering `u64::MAX`, `i64::MIN`, `i64::MAX` through masks, shifts and `sign_extend` gives the interpreter's value in all nine printers |
+
 ### P2 — Schema and protocol fidelity
 
 | ID | Goal | Evidence (current tree) | Done when |
@@ -62,6 +77,8 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 | C4 | Audit pre-26.1 schemas against vanilla | `schemas/versions/README.md`: only 26.1–26.3 were compared with decompiled servers; 11 known 26.1 misdescriptions remain in older descriptions; 1.14.2 reuses 1.14.1 data as inference; 26.2/26.3 data are open-PR heads | Older descriptions patched where vanilla disagrees; the open-PR data dependencies are replaced when upstream merges; the inference note is removed or confirmed |
 | C5 | Exercise more than status/login against real servers | `game_probe` boots the dedicated server and speaks status + login only (`game_probe.rs:3-5`) | Configuration and at least one play flow are probed, or the README states the limit exactly |
 | C6 | Reconcile registry claims | `README.md` says all vanilla registries are fully modeled; `schemas/versions/README.md` says registry-keyed values are opaque integers; `minecraft_26_3_remaining.bml:3-5` stops at opaque byte arrays | One claim is true: either name tables/registries are modeled, or both docs say ids are opaque and the README claim is narrowed |
+
+*P2 note:* generated-vector branch coverage on the 26.3 wiki root (`wiregen::branch_sites`, default `--seed 1`) hits **56.9%** of sites at `--count 3` and **80.9%** at `--count 20` (`bml gen --count 20`); language corners still present in baseline 0.2.0 include duplicate field names accepted by `check`, unterminated `/*` and empty files accepted, wrong `sign_extend` when wire compositions shift by ≥64, opaque division-by-zero errors, user `encoding f32le` shadowing the primitive, and string-shaped encodings through a yield alias that cannot be encoded.
 
 ### P3 — rstom / Minestom downstream
 
@@ -82,6 +99,8 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 | E3 | Keep the nine-language claims exact | README language/registry claims must match C6/B3 outcomes | README statements are covered by a test or a named spec section |
 | E4 | Maintain this file | — | Every merged change that closes a goal updates its row in the same PR; new deferrals add a row instead of a comment |
 
+*P4 note:* keep README/PROJECT claims aligned with B7–B9 and the vector/trace/diagnostic surfaces above; Python emitted booleans are `True`/`False` (not JS `true`/`false`); TypeScript packages target `node --experimental-strip-types` with `allowImportingTsExtensions` + `noEmit`, not `tsc` emit.
+
 ---
 
 ## Explicit non-goals (current design)
@@ -96,6 +115,11 @@ decision changes it:
   C6 says otherwise).
 - Replacing `emit rust`/`emit rstom`/`emit rstom-tree` *as part of* the typed-printer work.
   B3 tracks whether to migrate or exempt them.
+- `bml trace` input: no pcap/pcapng reader; captures must be JSONL chunks. Non-Minecraft
+  frame families are rejected (Hytale zstd framing remains a schema question, C1).
+- `bml emit … --vectors`, `f32le`/`f64le` in generated tests, and canonical LEB128 vectors
+  for the AST-based emitters (`rust`, `rstom`, `rstom-tree`) — typed printers only unless B3
+  migrates the legacy emitters.
 
 ## Decision log / open questions
 
@@ -108,3 +132,12 @@ decision changes it:
   typed program, and all printers together.
 - **rstom cutover ownership (D3):** decide whether this repository owns the class table and
   bindings, or an external workspace does; `--check` and the release process depend on it.
+- **Interpreter encode/decode (shipped):** string-shaped encodings and `uuid` follow the
+  encoding definition, not the name; `sign_extend` truncates before sign extension. Decoded JSON
+  for string-shaped fields is a plain string.
+- **Embedded vectors:** `bml gen` / `emit --vectors` literals are verified by the reference
+  interpreter before emission; native tests re-check the same bytes (B7–B9 track disagreements).
+- **`bml trace`:** transitions are keyed on packet names in the loaded schema; Minecraft-style
+  frames only; protocol 777 required for the hand-written 26.3 root.
+- **`--vectors` scope:** typed printer targets only; legacy `rust`/`rstom`/`rstom-tree` do not
+  ship generated vector tests.

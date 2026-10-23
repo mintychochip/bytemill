@@ -16,7 +16,7 @@
 //! (`position.x`, `= expr` bindings) are stored fields; encode writes the
 //! stored value back. The runtime therefore holds exactly the cursor and
 //! integer operations the typed program's [`ReadOp`] and [`WriteOp`] need
-//! (`read_u8`, `read_bytes`, `read_f32_be`, `read_f64_be`, `read_rest`,
+//! (`read_u8`, `read_bytes`, `read_f32_be`, `read_f64_be`, `read_f32_le`, `read_f64_le`, `read_rest`,
 //! `peek_u8` for `until` loops, and the matching writer operations), plus the
 //! integer builtins every [`Func`] call maps to.
 //!
@@ -78,6 +78,8 @@ use crate::ir::typed::{
     RepeatMode, Stmt, Ty, TypeIdx, escape, hex_literal, typed,
 };
 
+use crate::vectors::{TestRun, Vector};
+
 /// Rust 2024 keywords (lowercase) plus `Self`: any identifier spelling one of
 /// these gets a trailing `_`, the one keyword escape every printer uses.
 const KEYWORDS: &[&str] = &[
@@ -93,11 +95,12 @@ pub fn emit_rust_typed(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<(
     emit_rust_typed_with_edition(resolved, out_dir, crate::RustEdition::default())
 }
 
-pub fn emit_rust_typed_with_edition(
+pub fn emit_rust_typed_with_vectors(
     resolved: &ResolvedSchema,
     out_dir: &Path,
     edition: crate::RustEdition,
-) -> BmlResult<()> {
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = typed(resolved)?;
     let printer = Gen::new(&program);
     let src = out_dir.join("src");
@@ -125,6 +128,89 @@ pub fn emit_rust_typed_with_edition(
         paths.push(path);
     }
     rustfmt_paths(&paths, edition);
+
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+
+    // An edition 2015 integration test names its crate with `extern crate`; later editions
+    // resolve it from the manifest.
+    let mut test_src = if edition == crate::RustEdition::Edition2015 {
+        String::from("extern crate bml_generated;\nuse bml_generated::*;\n")
+    } else {
+        String::from("use bml_generated::*;\n")
+    };
+    let mut n_embed = 0usize;
+    for (i, v) in vectors.iter().enumerate() {
+        let ci = match program
+            .codecs
+            .iter()
+            .position(|c| matches!(&c.origin, Origin::Packet { name: n, .. } if n == &v.packet))
+        {
+            Some(c) => c,
+            None => continue,
+        };
+        let dec = decode_fn(&program, ci);
+        let enc = encode_fn(&program, ci);
+        let bytes = v.bytes()?;
+        let list = bytes
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let one = format!("    let raw: &[u8] = &[{list}];");
+        let raw_stmt = if one.len() <= 100 {
+            one
+        } else {
+            let mut out = String::from("    let raw: &[u8] = &[\n");
+            let mut line = String::from("        ");
+            for e in bytes.iter().map(|b| b.to_string()) {
+                if line.len() + e.len() + 1 > 100 {
+                    out.push_str(line.trim_end());
+                    out.push('\n');
+                    line = String::from("        ");
+                }
+                line.push_str(&e);
+                line.push_str(", ");
+            }
+            out.push_str(line.trim_end());
+            out.push_str("\n    ];");
+            out
+        };
+        let id: String = v
+            .packet
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        test_src.push_str(&format!(
+            "#[test]\nfn vec_{i}_{id}() {{\n{raw_stmt}\n    let mut r = Reader::new(raw);\n    let v = {dec}(&mut r).unwrap();\n    assert_eq!(r.remaining(), 0);\n    let mut w = Writer::new();\n    v.{enc}(&mut w).unwrap();\n    assert_eq!(w.into_bytes(), raw);\n}}\n"
+        ));
+        n_embed += 1;
+    }
+    if n_embed == 0 {
+        return Ok(None);
+    }
+
+    let tests = out_dir.join("tests");
+    fs::create_dir_all(&tests).map_err(|e| emit(e.to_string()))?;
+    let test_file = tests.join("vectors.rs");
+    fs::write(&test_file, &test_src).map_err(|e| emit(e.to_string()))?;
+    // emit already-formatted text (array wrapping mirrors rustfmt) so the
+    // shipped test is clippy -D warnings and fmt clean without running
+    // rustfmt at emit time.
+    Ok(Some(TestRun {
+        file: "tests/vectors.rs".to_string(),
+        command: "cargo test --test vectors".to_string(),
+        vectors: n_embed,
+    }))
+}
+
+pub fn emit_rust_typed_with_edition(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    edition: crate::RustEdition,
+) -> BmlResult<()> {
+    let _ = emit_rust_typed_with_vectors(resolved, out_dir, edition, &[])?;
     Ok(())
 }
 
@@ -413,6 +499,22 @@ impl<'a> Reader<'a> {
         }
         Ok(f64::from_bits(u64::from_be_bytes(b)))
     }
+    /// Read a little-endian `f32`.
+    pub fn read_f32_le(&mut self) -> Result<f32, Error> {
+        let mut b = [0; 4];
+        for v in &mut b {
+            *v = self.read_u8()?;
+        }
+        Ok(f32::from_bits(u32::from_le_bytes(b)))
+    }
+    /// Read a little-endian `f64`.
+    pub fn read_f64_le(&mut self) -> Result<f64, Error> {
+        let mut b = [0; 8];
+        for v in &mut b {
+            *v = self.read_u8()?;
+        }
+        Ok(f64::from_bits(u64::from_le_bytes(b)))
+    }
     /// Take all remaining bytes (`rest` never fails).
     pub fn read_rest(&mut self) -> &'a [u8] {
         let s = &self.buf[self.offset..];
@@ -470,6 +572,14 @@ impl Writer {
     /// Write a big-endian `f64`.
     pub fn write_f64_be(&mut self, v: f64) {
         self.buf.extend_from_slice(&v.to_bits().to_be_bytes());
+    }
+    /// Write a little-endian `f32`.
+    pub fn write_f32_le(&mut self, v: f32) {
+        self.buf.extend_from_slice(&v.to_bits().to_le_bytes());
+    }
+    /// Write a little-endian `f64`.
+    pub fn write_f64_le(&mut self, v: f64) {
+        self.buf.extend_from_slice(&v.to_bits().to_le_bytes());
     }
 }
 
@@ -863,6 +973,9 @@ impl<'a> Gen<'a> {
             "super"
         };
         let mut w = W::new();
+        if !packets_side {
+            w.line("#![allow(clippy::identity_op, reason = \"encodings mask values to their declared width\")]");
+        }
         let mut imported = false;
         if uses.model && packets_side {
             w.line(&format!("use {up}::model::*;"));
@@ -2407,6 +2520,20 @@ impl<'a> Gen<'a> {
                 };
                 self.emit_store(cx, dst, &decl.ty.clone(), decl.optional, &name, &rhs);
             }
+            ReadOp::F32Le => {
+                let rhs = match &decl.ty {
+                    Ty::F32 => "r.read_f32_le()?".to_string(),
+                    _ => "r.read_f32_le()? as f64".to_string(),
+                };
+                self.emit_store(cx, dst, &decl.ty.clone(), decl.optional, &name, &rhs);
+            }
+            ReadOp::F64Le => {
+                let rhs = match &decl.ty {
+                    Ty::F64 => "r.read_f64_le()?".to_string(),
+                    _ => "r.read_f64_le()? as f32".to_string(),
+                };
+                self.emit_store(cx, dst, &decl.ty.clone(), decl.optional, &name, &rhs);
+            }
         }
     }
 
@@ -2622,6 +2749,36 @@ impl<'a> Gen<'a> {
                 self.stmt_call(
                     &mut *cx.w,
                     "w.write_f64_be(",
+                    std::slice::from_ref(&arg),
+                    ");",
+                );
+            }
+            crate::ir::typed::WriteOp::F32Le => {
+                let v = self.expr(cx, value);
+                let (ty, _) = self.prog.expr_ty(cx.ctx.body, value);
+                let arg = if matches!(ty, Ty::F32) {
+                    v
+                } else {
+                    format!("({v}) as f32")
+                };
+                self.stmt_call(
+                    &mut *cx.w,
+                    "w.write_f32_le(",
+                    std::slice::from_ref(&arg),
+                    ");",
+                );
+            }
+            crate::ir::typed::WriteOp::F64Le => {
+                let v = self.expr(cx, value);
+                let (ty, _) = self.prog.expr_ty(cx.ctx.body, value);
+                let arg = if matches!(ty, Ty::F64) {
+                    v
+                } else {
+                    format!("({v}) as f64")
+                };
+                self.stmt_call(
+                    &mut *cx.w,
+                    "w.write_f64_le(",
                     std::slice::from_ref(&arg),
                     ");",
                 );

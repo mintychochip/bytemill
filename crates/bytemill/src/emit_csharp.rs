@@ -50,6 +50,8 @@ use std::path::Path;
 use crate::CSharpVersion;
 use crate::ResolvedSchema;
 use crate::errors::{BmlResult, emit};
+use crate::vectors::{TestRun, Vector};
+
 use crate::ir::typed::{
     BinOp, Body, CodecIdx, Expr, Func, IntTy, LocalId, Name, Origin, Program, ReadOp, RepeatMode,
     Stmt, Ty, TypeIdx, VariantIdx, WriteOp, byte_literal, diverges, escape, hex_literal,
@@ -58,7 +60,7 @@ use crate::ir::typed::{
 /// `emit csharp`: write `BmlGen/Runtime.cs` and one file per
 /// [`Program::output_stem`].
 pub fn emit_csharp(resolved: &ResolvedSchema, out_dir: &Path) -> BmlResult<()> {
-    emit_csharp_with_version(resolved, out_dir, CSharpVersion::default())
+    emit_csharp_with_vectors(resolved, out_dir, CSharpVersion::default(), &[]).map(|_| ())
 }
 
 pub fn emit_csharp_with_version(
@@ -66,6 +68,15 @@ pub fn emit_csharp_with_version(
     out_dir: &Path,
     ver: CSharpVersion,
 ) -> BmlResult<()> {
+    emit_csharp_with_vectors(resolved, out_dir, ver, &[]).map(|_| ())
+}
+
+pub fn emit_csharp_with_vectors(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    ver: CSharpVersion,
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = crate::ir::typed(resolved)?;
     let mut printer = Printer::new(&program, ver)?;
     let files = printer.files()?;
@@ -75,7 +86,110 @@ pub fn emit_csharp_with_version(
     for (stem, body) in files {
         fs::write(root.join(format!("{stem}.cs")), body).map_err(|e| emit(e.to_string()))?;
     }
-    Ok(())
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+    // Emit native roundtrip test (Check.cs + csproj) embedding the vectors.
+    // Only include vectors for packets that have a codec.
+    let mut n = 0usize;
+    let mut checks = String::new();
+    for (i, v) in vectors.iter().enumerate() {
+        let Some(c) = program.packet_codec(&v.packet) else {
+            continue;
+        };
+        let dec = decode_fn(&program, c);
+        let enc = encode_fn(&program, c);
+        let is_record = codec_uses_record_method(&program, c);
+        let bytes = v.bytes()?;
+        let lit = bytes_literal(&bytes);
+        checks.push_str(&format!(
+            "        // vector {} for {}\n        byte[] raw{} = {};\n        Reader r{} = new Reader(raw{});\n        var val{} = {}(ref r{});\n        if (r{}.Remaining != 0) throw new Exception(\"{}: decode did not consume whole payload (at \" + r{}.Offset + \")\");\n        Writer w{} = new Writer();\n",
+            i, v.packet, i, lit, i, i, i, dec, i, i, v.packet, i, i
+        ));
+        if is_record {
+            checks.push_str(&format!("        val{}.{}(w{});\n", i, enc, i));
+        } else {
+            checks.push_str(&format!("        {}(w{}, val{});\n", enc, i, i));
+        }
+        checks.push_str(&format!(
+            "        byte[] back{} = w{}.ToByteArray();\n        if (back{}.Length != raw{}.Length) throw new Exception(\"{}: length mismatch\");\n        for (int j = 0; j < raw{}.Length; j++) if (back{}[j] != raw{}[j]) throw new Exception(\"{}: bytes differ at \" + j);\n",
+            i, i, i, i, v.packet, i, i, i, v.packet
+        ));
+        n += 1;
+    }
+    let lang = match ver {
+        CSharpVersion::CSharp8 => "8",
+        CSharpVersion::CSharp9 => "9",
+        CSharpVersion::CSharp10 => "10",
+        CSharpVersion::CSharp11 => "11",
+        CSharpVersion::CSharp12 => "12",
+    };
+    let csproj = format!(
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net8.0</TargetFramework>\n    <LangVersion>{}</LangVersion>\n    <OutputType>Exe</OutputType>\n    <Nullable>disable</Nullable>\n    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n    <StartupObject>Check</StartupObject>\n  </PropertyGroup>\n  <ItemGroup>\n    <Compile Include=\"BmlGen/**/*.cs\" />\n    <Compile Include=\"Check.cs\" />\n  </ItemGroup>\n</Project>\n",
+        lang
+    );
+    let check_src = format!(
+        "using System;\nusing BmlGen;\n\nstatic class Check\n{{\n    public static void Main()\n    {{\n{}    }}\n}}\n",
+        checks
+    );
+    fs::write(out_dir.join("bmlgen.csproj"), csproj).map_err(|e| emit(e.to_string()))?;
+    fs::write(out_dir.join("Check.cs"), check_src).map_err(|e| emit(e.to_string()))?;
+    Ok(Some(TestRun {
+        file: "Check.cs".to_string(),
+        command: "dotnet run -v q".to_string(),
+        vectors: n,
+    }))
+}
+
+fn bytes_literal(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return "new byte[0]".to_string();
+    }
+    let mut s = String::from("new byte[] {\n            ");
+    for (i, &b) in bytes.iter().enumerate() {
+        if i > 0 {
+            if i % 8 == 0 {
+                s.push_str(",\n            ");
+            } else {
+                s.push_str(", ");
+            }
+        }
+        s.push_str(&format!("0x{:02x}", b));
+    }
+    s.push_str("\n        }");
+    s
+}
+
+/// Whether the codec is emitted as methods directly on its record type (vs *Codec class).
+pub fn codec_uses_record_method(program: &Program, codec: CodecIdx) -> bool {
+    Data::record_method(program, codec)
+}
+
+/// Decode entrypoint name for the codec (e.g. "Probe.Decode" or "VarintCodec.Decode").
+pub fn decode_fn(program: &Program, codec: CodecIdx) -> String {
+    let data = Data::new(program).expect("typed program is valid for Data");
+    if Data::record_method(program, codec) {
+        let t = program.codecs[codec].ty.unwrap();
+        format!("{}.Decode", data.type_cs[t])
+    } else {
+        let cls = data.codec_class[codec]
+            .clone()
+            .unwrap_or_else(|| format!("{}Codec", pascal(&program.codecs[codec].name)));
+        format!("{}.Decode", cls)
+    }
+}
+
+/// Encode entrypoint: for record codecs returns "Encode" (called as val.Encode(w)), else "Name.Encode".
+pub fn encode_fn(program: &Program, codec: CodecIdx) -> String {
+    let data = Data::new(program).expect("typed program is valid for Data");
+    if Data::record_method(program, codec) {
+        "Encode".to_string()
+    } else {
+        let cls = data.codec_class[codec]
+            .clone()
+            .unwrap_or_else(|| format!("{}Codec", pascal(&program.codecs[codec].name)));
+        format!("{}.Encode", cls)
+    }
 }
 
 // ----------------------------------------------------------------------
@@ -699,6 +813,16 @@ namespace BmlGen
             return BitConverter.ToSingle(raw, 0);
         }
 
+        public float ReadF32Le()
+        {
+            byte[] raw = ReadBytes(4);
+            if (!BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(raw);
+            }
+            return BitConverter.ToSingle(raw, 0);
+        }
+
         public double ReadF64()
         {
             byte[] raw = ReadBytes(8);
@@ -708,6 +832,16 @@ namespace BmlGen
             }
             return BitConverter.ToDouble(raw, 0);
         }
+        public double ReadF64Le()
+        {
+            byte[] raw = ReadBytes(8);
+            if (!BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(raw);
+            }
+            return BitConverter.ToDouble(raw, 0);
+        }
+
     }
 
     /// <summary>Writes BML wire primitives into a buffer.</summary>
@@ -748,10 +882,30 @@ namespace BmlGen
             _buf.AddRange(raw);
         }
 
+        public void WriteF32Le(float value)
+        {
+            byte[] raw = BitConverter.GetBytes(value);
+            if (!BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(raw);
+            }
+            _buf.AddRange(raw);
+        }
+
         public void WriteF64(double value)
         {
             byte[] raw = BitConverter.GetBytes(value);
             if (BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(raw);
+            }
+            _buf.AddRange(raw);
+        }
+
+        public void WriteF64Le(double value)
+        {
+            byte[] raw = BitConverter.GetBytes(value);
+            if (!BitConverter.IsLittleEndian)
             {
                 Array.Reverse(raw);
             }
@@ -1522,6 +1676,9 @@ impl<'a> BodyGen<'a> {
                     ReadOp::U8 => self.line(&format!("{d} = {}.ReadU8();", self.cursor)),
                     ReadOp::F32 => self.line(&format!("{d} = {}.ReadF32();", self.cursor)),
                     ReadOp::F64 => self.line(&format!("{d} = {}.ReadF64();", self.cursor)),
+                    ReadOp::F32Le => self.line(&format!("{d} = {}.ReadF32Le();", self.cursor)),
+                    ReadOp::F64Le => self.line(&format!("{d} = {}.ReadF64Le();", self.cursor)),
+
                     ReadOp::Bytes(n) => {
                         let count = self.expr(n)?;
                         self.line(&format!("{d} = {}.ReadBytes((int)({count}));", self.cursor));
@@ -1559,6 +1716,13 @@ impl<'a> BodyGen<'a> {
                     WriteOp::F64 => {
                         self.line(&format!("{}.WriteF64((double)({text}));", self.cursor));
                     }
+                    WriteOp::F32Le => {
+                        self.line(&format!("{}.WriteF32Le((float)({text}));", self.cursor));
+                    }
+                    WriteOp::F64Le => {
+                        self.line(&format!("{}.WriteF64Le((double)({text}));", self.cursor));
+                    }
+
                     WriteOp::Bytes(n) => {
                         let count = self.expr(n)?;
                         self.line(&format!("{}.WriteBytes({text}, {count});", self.cursor));

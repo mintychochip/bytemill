@@ -171,7 +171,7 @@ fn loaded_diags(loaded: &Loaded) -> Vec<Diagnostic> {
 fn fault_diags(fault: LoadFault) -> Vec<Diagnostic> {
     if !fault.uses.is_empty() {
         let text = fault.text.unwrap_or_default();
-        return fault
+        let mut diags: Vec<Diagnostic> = fault
             .uses
             .iter()
             .map(|use_| {
@@ -184,6 +184,10 @@ fn fault_diags(fault: LoadFault) -> Vec<Diagnostic> {
                 )
             })
             .collect();
+        // `uses` lists the names that need an import before the names declared nowhere; the
+        // reader wants them in the order they appear in the file.
+        diags.sort_by_key(|d| (d.line, d.column));
+        return diags;
     }
     if let Some(text) = &fault.text
         && fault.error.offset.is_some()

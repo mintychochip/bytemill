@@ -153,9 +153,17 @@ impl Ctx<'_> {
                             let b = self.read(4)?;
                             V::F32(f32::from_be_bytes([b[0], b[1], b[2], b[3]]))
                         }
+                        ReadOp::F32Le => {
+                            let b = self.read(4)?;
+                            V::F32(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                        }
                         ReadOp::F64 => {
                             let b = self.read(8)?;
                             V::F64(f64::from_be_bytes(b.try_into().map_err(|_| "f64")?))
+                        }
+                        ReadOp::F64Le => {
+                            let b = self.read(8)?;
+                            V::F64(f64::from_le_bytes(b.try_into().map_err(|_| "f64")?))
                         }
                         ReadOp::Bytes(n) => {
                             let n = int(&self.expr(body, n, locals)?)?;
@@ -201,6 +209,8 @@ impl Ctx<'_> {
                         }
                         (WriteOp::F32, V::F32(f)) => self.out.extend(f.to_be_bytes()),
                         (WriteOp::F64, V::F64(f)) => self.out.extend(f.to_be_bytes()),
+                        (WriteOp::F32Le, V::F32(f)) => self.out.extend(f.to_le_bytes()),
+                        (WriteOp::F64Le, V::F64(f)) => self.out.extend(f.to_le_bytes()),
                         (WriteOp::Bytes(n), V::Bytes(mut b)) => {
                             let n = int(&self.expr(body, n, locals)?)?;
                             if n < 0 || b.len() as i128 > n {

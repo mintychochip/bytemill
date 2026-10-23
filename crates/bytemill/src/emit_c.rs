@@ -45,6 +45,7 @@ use crate::ir::typed::{
     BinOp, Bind, Body, CodecIdx, Expr, Failure, Func, IntTy, LocalId, Origin, Program, ReadOp,
     RepeatMode, Stmt, Ty, TypeIdx, TypeKind, WriteOp, byte_literal, diverges, escape, hex_literal,
 };
+use crate::vectors::{TestRun, Vector};
 
 /// C11 keywords: an identifier equal to one takes a trailing `_`.
 const C_KEYWORDS: &[&str] = &[
@@ -294,6 +295,16 @@ pub fn emit_c_with_standard(
     out_dir: &Path,
     std: crate::CStandard,
 ) -> BmlResult<()> {
+    let _ = emit_c_with_vectors(resolved, out_dir, std, &[])?;
+    Ok(())
+}
+
+pub fn emit_c_with_vectors(
+    resolved: &ResolvedSchema,
+    out_dir: &Path,
+    std: crate::CStandard,
+    vectors: &[Vector],
+) -> BmlResult<Option<TestRun>> {
     let program = crate::ir::typed(resolved)?;
     let printer = Gen::new(&program, std)?;
     fs::create_dir_all(out_dir).map_err(|e| emit(e.to_string()))?;
@@ -305,7 +316,32 @@ pub fn emit_c_with_standard(
         fs::write(&path, body).map_err(|e| emit(e.to_string()))?;
         clang_format(&path);
     }
-    Ok(())
+    if vectors.is_empty() {
+        return Ok(None);
+    }
+    let test_src = printer.vectors_test(vectors)?;
+    let test_path = out_dir.join("vectors_test.c");
+    fs::write(&test_path, test_src).map_err(|e| emit(e.to_string()))?;
+    clang_format(&test_path);
+    let flag = std.flag();
+    let pedantic = if std.supports_mixed_decls() {
+        " -Wpedantic"
+    } else {
+        ""
+    };
+    let command = format!(
+        "cc {} -Wall -Wextra{} -Werror -o vectors_test *.c && ./vectors_test",
+        flag, pedantic
+    );
+    let count = vectors
+        .iter()
+        .filter(|v| program.packet_codec(&v.packet).is_some())
+        .count();
+    Ok(Some(TestRun {
+        file: "vectors_test.c".to_string(),
+        command,
+        vectors: count,
+    }))
 }
 
 /// Format in place when `clang-format` is installed. The printer stays inside
@@ -607,6 +643,8 @@ bml_status bml_read_bytes(bml_reader *r, const bml_alloc *a, int64_t n, bml_byte
 bml_status bml_read_rest(bml_reader *r, const bml_alloc *a, bml_bytes *out);
 bml_status bml_read_f32(bml_reader *r, float *out);
 bml_status bml_read_f64(bml_reader *r, double *out);
+bml_status bml_read_f32_le(bml_reader *r, float *out);
+bml_status bml_read_f64_le(bml_reader *r, double *out);
 int64_t bml_remaining(const bml_reader *r);
 bml_status bml_grow(bml_writer *w, const bml_alloc *a, size_t need);
 bml_status bml_write_u8(bml_writer *w, const bml_alloc *a, uint8_t v);
@@ -614,6 +652,8 @@ bml_status bml_write_bytes(bml_writer *w, const bml_alloc *a, const uint8_t *p, 
 bml_status bml_write_bytes_pad(bml_writer *w, const bml_alloc *a, const uint8_t *p, size_t n, int64_t total);
 bml_status bml_write_f32(bml_writer *w, const bml_alloc *a, float v);
 bml_status bml_write_f64(bml_writer *w, const bml_alloc *a, double v);
+bml_status bml_write_f32_le(bml_writer *w, const bml_alloc *a, float v);
+bml_status bml_write_f64_le(bml_writer *w, const bml_alloc *a, double v);
 bool bml_utf8_ok(const uint8_t *s, size_t n);
 int64_t bml_utf16_units(const uint8_t *s, size_t n);
 int64_t bml_str_len(const uint8_t *s, size_t n);
@@ -752,6 +792,37 @@ bml_status bml_read_f64(bml_reader *r, double *out) {
     *out = d;
     return BML_OK;
 }
+bml_status bml_read_f32_le(bml_reader *r, float *out) {
+    uint8_t tmp[4];
+    uint32_t u;
+    float f;
+    if (r->pos + 4 > r->len) {
+        return BML_ERR_SHORT;
+    }
+    memcpy(tmp, r->data + r->pos, 4);
+    r->pos += 4;
+    u = tmp[0] | ((uint32_t)tmp[1] << 8) | ((uint32_t)tmp[2] << 16) | ((uint32_t)tmp[3] << 24);
+    memcpy(&f, &u, 4);
+    *out = f;
+    return BML_OK;
+}
+bml_status bml_read_f64_le(bml_reader *r, double *out) {
+    uint8_t tmp[8];
+    uint64_t u = 0;
+    size_t i;
+    double d;
+    if (r->pos + 8 > r->len) {
+        return BML_ERR_SHORT;
+    }
+    memcpy(tmp, r->data + r->pos, 8);
+    r->pos += 8;
+    for (i = 0; i < 8; i += 1) {
+        u |= ((uint64_t)tmp[i]) << (i * 8);
+    }
+    memcpy(&d, &u, 8);
+    *out = d;
+    return BML_OK;
+}
 int64_t bml_remaining(const bml_reader *r) {
     return (int64_t)(r->len - r->pos);
 }
@@ -844,6 +915,30 @@ bml_status bml_write_f64(bml_writer *w, const bml_alloc *a, double v) {
     memcpy(&u, &v, 8);
     for (i = 0; i < 8; i += 1) {
         tmp[i] = (uint8_t)(u >> (8 * (7 - i)));
+    }
+    s = bml_write_bytes(w, a, tmp, 8);
+    return s;
+}
+bml_status bml_write_f32_le(bml_writer *w, const bml_alloc *a, float v) {
+    uint32_t u;
+    uint8_t tmp[4];
+    bml_status s;
+    memcpy(&u, &v, 4);
+    tmp[0] = (uint8_t)u;
+    tmp[1] = (uint8_t)(u >> 8);
+    tmp[2] = (uint8_t)(u >> 16);
+    tmp[3] = (uint8_t)(u >> 24);
+    s = bml_write_bytes(w, a, tmp, 4);
+    return s;
+}
+bml_status bml_write_f64_le(bml_writer *w, const bml_alloc *a, double v) {
+    uint64_t u;
+    uint8_t tmp[8];
+    size_t i;
+    bml_status s;
+    memcpy(&u, &v, 8);
+    for (i = 0; i < 8; i += 1) {
+        tmp[i] = (uint8_t)(u >> (8 * i));
     }
     s = bml_write_bytes(w, a, tmp, 8);
     return s;
@@ -1320,6 +1415,56 @@ impl<'a> Gen<'a> {
             self.emit_encode(file, i)?;
         }
         Ok(files)
+    }
+    fn vectors_test(&self, vectors: &[Vector]) -> BmlResult<String> {
+        let p = self.program;
+        let mut s = String::from(
+            "#include \"bmlgen.h\"\n#include <stdio.h>\n#include <string.h>\n\nint main(void) {\n  bml_alloc al = {NULL, NULL, NULL};\n  int fails = 0;\n",
+        );
+        let mut emb = 0usize;
+        for (vi, v) in vectors.iter().enumerate() {
+            let ci = match p.packet_codec(&v.packet) {
+                Some(c) => c,
+                None => continue,
+            };
+            let Ty::Named(ti) = &p.codecs[ci].value else {
+                continue;
+            };
+            let tn = type_name(p, *ti);
+            let dec = decode_fn(p, ci);
+            let enc = encode_fn(p, ci);
+            let fr = free_fn(p, *ti);
+            let dcall = if decode_takes_alloc(p, ci) {
+                format!("{dec}(&r, &al, &v)")
+            } else {
+                format!("{dec}(&r, &v)")
+            };
+            let bs = v.bytes()?;
+            let len = bs.len();
+            let raw = if bs.is_empty() {
+                "0".to_string()
+            } else {
+                bs.chunks(12)
+                    .map(|c| {
+                        c.iter()
+                            .map(|b| b.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",\n      ")
+            };
+            s.push_str(&format!(
+                "  {{\n    static const uint8_t raw[] = {{\n      {raw}\n    }};\n    bml_reader r = {{raw, {len}, 0, NULL, NULL}};\n    bml_writer w = {{NULL, 0, 0, NULL, NULL}};\n    {tn} v;\n    memset(&v, 0, sizeof v);\n    if ({dcall} != BML_OK) {{\n      printf(\"decode {} #{}\\n\");\n      fails += 1;\n    }} else if (r.pos != (size_t){len} || bml_remaining(&r) != 0) {{\n      printf(\"strict {} #{}\\n\");\n      fails += 1;\n    }} else if ({enc}(&w, &al, &v) != BML_OK) {{\n      printf(\"encode {} #{}\\n\");\n      fails += 1;\n    }} else if (w.len != {len} || ({len} != 0 && memcmp(w.data, raw, {len}) != 0)) {{\n      printf(\"bytes {} #{}\\n\");\n      fails += 1;\n    }}\n    {fr}(&al, &v);\n    bml_free(&al, w.data);\n  }}\n",
+                v.packet, vi, v.packet, vi, v.packet, vi, v.packet, vi
+            ));
+            emb += 1;
+        }
+        s.push_str(&format!(
+            "  if (fails != 0) {{\n    printf(\"%d failures\\n\", fails);\n    return 1;\n  }}\n  printf(\"vectors ok {}\\n\");\n  return 0;\n}}\n",
+            emb
+        ));
+        Ok(s)
     }
 
     fn emit_free(&self, s: &mut String, ty: TypeIdx) -> BmlResult<()> {
@@ -2166,6 +2311,8 @@ impl<'p> FnEmit<'p> {
             ReadOp::U8 => format!("bml_read_u8(r, &{lhs})"),
             ReadOp::F32 => format!("bml_read_f32(r, &{lhs})"),
             ReadOp::F64 => format!("bml_read_f64(r, &{lhs})"),
+            ReadOp::F32Le => format!("bml_read_f32_le(r, &{lhs})"),
+            ReadOp::F64Le => format!("bml_read_f64_le(r, &{lhs})"),
             ReadOp::Bytes(n) => format!("bml_read_bytes(r, a, {}, &{lhs})", self.expr(n)?),
             ReadOp::Rest => format!("bml_read_rest(r, a, &{lhs})"),
         };
@@ -2704,6 +2851,14 @@ impl<'p> FnEmit<'p> {
                 let v = self.expr(value)?;
                 format!("bml_write_f64(w, a, {v})")
             }
+            WriteOp::F32Le => {
+                let v = self.expr(value)?;
+                format!("bml_write_f32_le(w, a, {v})")
+            }
+            WriteOp::F64Le => {
+                let v = self.expr(value)?;
+                format!("bml_write_f64_le(w, a, {v})")
+            }
             WriteOp::Bytes(n) => {
                 let total = self.expr(n)?;
                 let (d, ln) = self.bytes_parts(value)?;
@@ -2974,7 +3129,20 @@ impl<'p> FnEmit<'p> {
         };
         let mixed_bitwise = is_bitwise(*cop) && is_bitwise(parent) && *cop != parent;
         let and_in_or = parent == BinOp::Or && *cop == BinOp::And;
-        let need = if mixed_bitwise || and_in_or {
+        let arithmetic = matches!(
+            *cop,
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod
+        );
+        let comparison = matches!(
+            *cop,
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+        );
+        // `-Wparentheses` also rejects arithmetic or a comparison directly inside `&`, `|`, `^`,
+        // and a sum directly inside a shift, though precedence settles them.
+        let bits_over_arith = is_bitwise(parent) && (arithmetic || comparison);
+        let shift_over_sum =
+            matches!(parent, BinOp::Shl | BinOp::Shr) && matches!(*cop, BinOp::Add | BinOp::Sub);
+        let need = if mixed_bitwise || and_in_or || bits_over_arith || shift_over_sum {
             true
         } else if right {
             prec(*cop) <= prec(parent)
