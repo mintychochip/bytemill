@@ -1866,7 +1866,10 @@ impl<'a> Builder<'a> {
                 let cond = if *fallback {
                     let (c, refs) = self.guard(f, cond)?;
                     match all_present(&refs) {
-                        None => c,
+                        None => match self.any_present(f, then_body) {
+                            None => c,
+                            Some(any) => and(c, any),
+                        },
                         Some(all) => match self.any_present(f, then_body) {
                             None => or(not(all), c),
                             Some(any) => or(and(all.clone(), c), and(not(all), any)),

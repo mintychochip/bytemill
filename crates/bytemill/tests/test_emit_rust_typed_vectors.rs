@@ -158,8 +158,8 @@ fn rust_typed_vectors_minecraft() {
     )
     .unwrap()
     .expect("mc must embed vectors");
-    assert!(tr.vectors >= 660);
-    let test_out = gate_vectors(&dir, &target, "mc26 vectors", 660, tr.vectors);
+    assert!(tr.vectors >= 663);
+    let test_out = gate_vectors(&dir, &target, "mc26 vectors", 663, tr.vectors);
     assert_gate(&test_out, "mc26 vectors: cargo test");
     let out_str = format!(
         "{}{}",

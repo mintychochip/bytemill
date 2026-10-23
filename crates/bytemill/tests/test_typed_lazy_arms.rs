@@ -62,6 +62,25 @@ packet lazy_logical {
     )
 }
 
+fn eof_skip_schema() -> String {
+    format!(
+        "{}{}",
+        std_prefix(),
+        r#"
+packet eof_skip {
+    tag: u8
+    has: boolean
+    if has {
+        v: match tag {
+            1 => { x: u8 }
+            2 => { }
+        }
+    }
+}
+"#
+    )
+}
+
 fn interp_roundtrip(resolved: &bytemill::ResolvedSchema, packet: &str, bytes: &[u8]) {
     let dec = decode_packet(resolved, packet, bytes, true).expect("interp decode");
     let enc = encode_packet(resolved, packet, &dec).expect("interp encode");
@@ -143,4 +162,25 @@ fn lazy_ternary_go_native_roundtrip() {
         String::from_utf8_lossy(&out.stderr)
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn eof_skipped_group_typed_roundtrip() {
+    let resolved = analyze(&parse(&eof_skip_schema()).unwrap()).unwrap();
+    let prog = typed(&resolved).unwrap();
+    // tag=2, has=1, no bytes for inner group (interpreter EOF-skips).
+    let bytes = [2, 1];
+    harness::packet_roundtrip(&prog, "eof_skip", &bytes).expect("typed eof-skip encode");
+}
+
+#[test]
+fn debug_subscription_update_eof_wire_typed() {
+    let resolved =
+        analyze(&bytemill::load_schema(&[repo("schemas/minecraft_26_3_wiki.bml")]).unwrap())
+            .unwrap();
+    let prog = typed(&resolved).unwrap();
+    // entity_id=0, subscription_id=10, has_value=1, EOF before optional value (id 10 arm).
+    let bytes = [0x00, 0x0a, 0x01];
+    harness::packet_roundtrip(&prog, "debug_entity_value", &bytes)
+        .expect("debug_entity_value eof subscription update wire");
 }

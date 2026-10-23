@@ -279,7 +279,7 @@ fn packet_keyed_lines_round_trip_and_a_mismatched_name_is_rejected() {
     assert_eq!(malformed, "line 1: vector has no \"state\"");
 }
 #[test]
-fn eof_group_skips_counter_and_vectors_avoid_ambiguous() {
+fn eof_skipped_conditional_groups_generate_and_roundtrip() {
     let src = r#"
 encoding boolean = {
     raw: u8 = value ? 1 : 0
@@ -298,52 +298,19 @@ packet p {
 "#;
     let resolved = schema(src);
 
-    // tag=2 has=true : group skipped
-    let data_amb = [2, 1];
-    let (_, skips) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &data_amb).unwrap();
-    assert_eq!(skips, 1);
-
-    // tag=1 has=true + x present
-    let data_good = [1, 1, 99];
-    let (_, skips) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &data_good).unwrap();
-    assert_eq!(skips, 0);
-
-    // has=false
-    let data_no = [5, 0];
-    let (_, skips) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &data_no).unwrap();
-    assert_eq!(skips, 0);
-
-    // vectors::generate never emits ambig (all vectors have 0 skips)
-    let set = vectors::generate(&resolved, &spec(5, 42)).unwrap();
+    let set = vectors::generate(&resolved, &spec(8, 42)).unwrap();
     assert!(
-        !set.vectors.is_empty(),
-        "the unambiguous payloads are still generated"
+        set.vectors.len() >= 3,
+        "expected several vectors, got {}",
+        set.vectors.len()
     );
+    assert!(set.skipped.is_empty(), "{:?}", set.skipped);
     for v in &set.vectors {
         let b = v.bytes().unwrap();
-        let (_, s) = bytemill::interp::decode_packet_eof_skips(&resolved, "p", &b).unwrap();
-        assert_eq!(s, 0, "ambiguous vector emitted");
+        let d = bytemill::interp::decode_packet(&resolved, "p", &b, true).unwrap();
+        let e = bytemill::interp::encode_packet(&resolved, "p", &d).unwrap();
+        assert_eq!(e, b, "every generated vector round-trips");
     }
-
-    // schema whose only possible payload is ambig -> skipped with reason
-    let only_src = r#"
-packet onlyamb {
-    if 1 {
-        v: { }
-    }
-}
-"#;
-    let only_res = schema(only_src);
-    let set2 = vectors::generate(&only_res, &spec(1, 1)).unwrap();
-    assert!(set2.vectors.is_empty());
-    assert_eq!(set2.skipped.len(), 1);
-    assert!(
-        set2.skipped[0]
-            .reason
-            .contains("group whose condition holds was skipped at end of input"),
-        "reason: {}",
-        set2.skipped[0].reason
-    );
 }
 
 #[test]
