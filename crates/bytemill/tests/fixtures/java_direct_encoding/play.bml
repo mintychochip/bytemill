@@ -1,0 +1,12 @@
+packet direct_profile_probe {
+    tag: u8
+    body: match tag {
+        1 => game_profile
+        _ => { pad: u8 }
+    }
+}
+protocol minecraft @ v1 {
+    id = 1
+    frame default { length: varint id: varint payload: rest }
+    route play.clientbound 0x00 => direct_profile_probe
+}

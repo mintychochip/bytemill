@@ -1,0 +1,12 @@
+encoding game_profile = {
+    name: string
+    properties_count: varint
+    properties: {
+        name: string
+        value: string
+        has_signature: boolean
+        if has_signature {
+            signature: string
+        }
+    }[] count = properties_count
+}
