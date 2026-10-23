@@ -5,7 +5,7 @@
 //! imports *directly*; imports are not transitive (the `.proto` rule).
 
 use crate::ast::Schema;
-use crate::errors::{BmlResult, parse, py_repr_str, resolve};
+use crate::errors::{BmlError, BmlResult, parse, py_repr_str, resolve};
 use crate::parser::parse as parse_text;
 use crate::primitives::is_bare_primitive;
 use crate::refs::{Ref, RefKind, references};
@@ -14,17 +14,94 @@ use std::path::{Path, PathBuf};
 
 struct Module {
     path: PathBuf,
+    text: String,
     schema: Schema,
     imports: Vec<PathBuf>,
 }
 
+/// One undeclared name, with the declaration that uses it and any import to add.
+#[derive(Debug, Clone)]
+pub(crate) struct UnresolvedUse {
+    pub name: String,
+    pub where_: String,
+    pub kind: RefKind,
+    pub imports: Vec<String>,
+}
+
+/// A load failure. `error` is the byte-identical library error `load_schema` returns.
+#[derive(Debug)]
+pub(crate) struct LoadFault {
+    pub shown: String,
+    pub text: Option<String>,
+    pub error: BmlError,
+    pub uses: Vec<UnresolvedUse>,
+    pub visible_types: Vec<String>,
+    pub visible_packets: Vec<String>,
+}
+
+impl LoadFault {
+    fn bare(path: &Path, error: BmlError) -> Self {
+        LoadFault {
+            shown: show(path),
+            text: None,
+            error,
+            uses: Vec::new(),
+            visible_types: Vec::new(),
+            visible_packets: Vec::new(),
+        }
+    }
+
+    fn at(path: &Path, error: BmlError, text: String) -> Self {
+        LoadFault {
+            shown: show(path),
+            text: Some(text),
+            error,
+            uses: Vec::new(),
+            visible_types: Vec::new(),
+            visible_packets: Vec::new(),
+        }
+    }
+}
+
+/// One loaded file, in import-before-importer order.
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedFile {
+    pub shown: String,
+    pub text: String,
+}
+
+/// A schema that loaded, plus the files it was built from.
+#[derive(Debug)]
+pub(crate) struct Loaded {
+    pub schema: Schema,
+    pub files: Vec<LoadedFile>,
+}
+
 pub fn load_schema(paths: &[impl AsRef<Path>]) -> BmlResult<Schema> {
+    load_for_diag(paths)
+        .map(|loaded| loaded.schema)
+        .map_err(|fault| fault.error)
+}
+
+/// [`load_schema`], plus the per-file text and structured unresolved names the
+/// diagnostics layer renders. The `Err` payload's `error` is what [`load_schema`] returns.
+pub(crate) fn load_for_diag(paths: &[impl AsRef<Path>]) -> Result<Loaded, Box<LoadFault>> {
     let modules = load_modules(paths)?;
     let providers = Providers::new(modules.values());
     for module in modules.values() {
         check_imports(module, &modules, &providers)?;
     }
-    Ok(merge(modules.into_values()))
+    let files = modules
+        .values()
+        .map(|m| LoadedFile {
+            shown: show(&m.path),
+            text: m.text.clone(),
+        })
+        .collect();
+    Ok(Loaded {
+        schema: merge(modules.into_values()),
+        files,
+    })
 }
 
 /// Every file reachable from `paths`, each imported file before its importer.
@@ -54,7 +131,7 @@ impl ModuleTable {
     }
 }
 
-fn load_modules(paths: &[impl AsRef<Path>]) -> BmlResult<ModuleTable> {
+fn load_modules(paths: &[impl AsRef<Path>]) -> Result<ModuleTable, Box<LoadFault>> {
     let mut modules = ModuleTable::new();
     let mut loading: Vec<PathBuf> = Vec::new();
 
@@ -63,7 +140,7 @@ fn load_modules(paths: &[impl AsRef<Path>]) -> BmlResult<ModuleTable> {
         importer: Option<&Path>,
         modules: &mut ModuleTable,
         loading: &mut Vec<PathBuf>,
-    ) -> BmlResult<()> {
+    ) -> Result<(), Box<LoadFault>> {
         let path = resolve_path(raw);
         if modules.contains(&path) || loading.contains(&path) {
             return Ok(());
@@ -73,12 +150,25 @@ fn load_modules(paths: &[impl AsRef<Path>]) -> BmlResult<ModuleTable> {
                 Some(p) => format!(" (imported by {})", show(p)),
                 None => String::new(),
             };
-            return Err(parse(format!("schema not found: {}{by}", show(&path))));
+            return Err(Box::new(LoadFault::bare(
+                &path,
+                parse(format!("schema not found: {}{by}", show(&path))),
+            )));
         }
         loading.push(path.clone());
-        let text = crate::text::read_text(&path)
-            .map_err(|e| parse(format!("cannot read {}: {e}", show(&path))))?;
-        let schema = parse_text(&text)?;
+        let text = match crate::text::read_text(&path) {
+            Ok(text) => text,
+            Err(e) => {
+                return Err(Box::new(LoadFault::bare(
+                    &path,
+                    parse(format!("cannot read {}: {e}", show(&path))),
+                )));
+            }
+        };
+        let schema = match parse_text(&text) {
+            Ok(schema) => schema,
+            Err(e) => return Err(Box::new(LoadFault::at(&path, e, text))),
+        };
         let imports: Vec<PathBuf> = schema
             .imports
             .iter()
@@ -91,6 +181,7 @@ fn load_modules(paths: &[impl AsRef<Path>]) -> BmlResult<ModuleTable> {
         modules.index.insert(path.clone(), modules.order.len());
         modules.order.push(Module {
             path,
+            text,
             schema,
             imports,
         });
@@ -162,12 +253,16 @@ impl Providers {
     }
 }
 
-fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) -> BmlResult<()> {
+fn check_imports(
+    module: &Module,
+    modules: &ModuleTable,
+    providers: &Providers,
+) -> Result<(), Box<LoadFault>> {
     let mut visible: Vec<PathBuf> = vec![module.path.clone()];
     visible.extend(module.imports.iter().cloned());
     // file to import -> names it provides (insertion-ordered like Python's dict)
     let mut missing: Vec<(PathBuf, Vec<String>)> = Vec::new();
-    let mut nowhere: Vec<(String, Ref)> = Vec::new(); // name -> first use
+    let mut nowhere: Vec<(String, Ref)> = Vec::new(); // per (name, where_) for diags; error text will dedup names
 
     for ref_ in references(&module.schema) {
         if ref_.kind != RefKind::Packet && is_bare_primitive(&ref_.name) {
@@ -177,7 +272,11 @@ fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) 
         if visible.iter().any(|v| declared_in.contains(v)) {
             continue;
         }
-        if declared_in.is_empty() && !nowhere.iter().any(|(n, _)| n == &ref_.name) {
+        if declared_in.is_empty()
+            && !nowhere
+                .iter()
+                .any(|(n, r)| n == &ref_.name && r.where_ == ref_.where_)
+        {
             nowhere.push((ref_.name.clone(), ref_.clone()));
         }
         for provider in declared_in {
@@ -216,6 +315,13 @@ fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) 
         return Ok(());
     }
 
+    let mut text_nowhere: Vec<(String, Ref)> = Vec::new();
+    for (name, r) in &nowhere {
+        if !text_nowhere.iter().any(|(n, _)| n == name) {
+            text_nowhere.push((name.clone(), r.clone()));
+        }
+    }
+
     let mut names: Vec<String> = Vec::new();
     for (_, ns) in &missing {
         for n in ns {
@@ -224,7 +330,7 @@ fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) 
             }
         }
     }
-    let count = names.len() + nowhere.len();
+    let count = names.len() + text_nowhere.len();
     let mut lines = vec![format!(
         "{}: {} name{} not declared here or in an imported file",
         show(&module.path),
@@ -238,14 +344,79 @@ fn check_imports(module: &Module, modules: &ModuleTable, providers: &Providers) 
             names.join(", ")
         ));
     }
-    for (name, ref_) in &nowhere {
+    for (name, ref_) in &text_nowhere {
         lines.push(format!(
             "  {} (used in {}) is declared in no loaded or nearby .bml file",
             py_repr_str(name),
             ref_.where_
         ));
     }
-    Err(resolve(lines.join("\n")))
+    let (visible_types, visible_packets) = visible_names(module, modules);
+    Err(Box::new(LoadFault {
+        shown: show(&module.path),
+        text: Some(module.text.clone()),
+        error: resolve(lines.join("\n")),
+        uses: build_uses(module, &missing, &nowhere),
+        visible_types,
+        visible_packets,
+    }))
+}
+
+fn build_uses(
+    module: &Module,
+    missing: &[(PathBuf, Vec<String>)],
+    nowhere: &[(String, Ref)],
+) -> Vec<UnresolvedUse> {
+    let refs = references(&module.schema);
+    let mut uses: Vec<UnresolvedUse> = Vec::new();
+    for (provider, names) in missing {
+        let target = rel_path(provider, &module.path);
+        for name in names {
+            if let Some(existing) = uses.iter_mut().find(|u| u.name == *name) {
+                existing.imports.push(target.clone());
+                continue;
+            }
+            let site = refs.iter().find(|r| r.name == *name);
+            uses.push(UnresolvedUse {
+                name: name.clone(),
+                where_: site.map(|r| r.where_.clone()).unwrap_or_default(),
+                kind: site.map(|r| r.kind).unwrap_or(RefKind::Type),
+                imports: vec![target.clone()],
+            });
+        }
+    }
+    for (name, ref_) in nowhere {
+        uses.push(UnresolvedUse {
+            name: name.clone(),
+            where_: ref_.where_.clone(),
+            kind: ref_.kind,
+            imports: Vec::new(),
+        });
+    }
+    uses
+}
+
+fn visible_names(module: &Module, modules: &ModuleTable) -> (Vec<String>, Vec<String>) {
+    let mut types_ = Vec::new();
+    let mut packets = Vec::new();
+    let mut consider = |m: &Module| {
+        for enc in &m.schema.encodings {
+            types_.push(enc.name.clone());
+        }
+        for e in &m.schema.enums {
+            types_.push(e.name.clone());
+        }
+        for pkt in &m.schema.packets {
+            packets.push(pkt.name.clone());
+        }
+    };
+    consider(module);
+    for imp in &module.imports {
+        if let Some(&i) = modules.index.get(imp) {
+            consider(&modules.order[i]);
+        }
+    }
+    (types_, packets)
 }
 
 /// The `.bml` files `dir.glob("*.bml")` (`depth` 0) or `dir.glob("*/*.bml")` (`depth` 1) finds.
@@ -300,6 +471,7 @@ fn nearby_providers(module: &Module, loaded: &ModuleTable) -> Providers {
             };
             found.push(Module {
                 path: resolved,
+                text,
                 schema,
                 imports: Vec::new(),
             });

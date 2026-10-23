@@ -116,6 +116,7 @@ struct Args {
     json_value: Option<String>,
     std: Option<String>,
     compression: Option<String>,
+    format: Option<String>,
 }
 
 /// Pull a flag's value out of `argv`, leaving the positionals.
@@ -279,6 +280,9 @@ fn wire_check_cli(mut argv: Vec<String>) -> Result<i32, String> {
             buf
         }
     };
+    if let Some(code) = report_schema_errors(&argv) {
+        return Ok(code);
+    }
     let resolved = match load_and_analyze(&argv) {
         Ok(r) => r,
         Err(e) => {
@@ -336,6 +340,17 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
 
     match cmd.as_str() {
         "check" | "dump-json" | "routes" | "stages" => {
+            if cmd == "check" {
+                a.format = take_flag(&mut argv, &["--format"])?;
+                if let Some(f) = a.format.as_deref()
+                    && f != "human"
+                    && f != "json"
+                {
+                    return Err(format!(
+                        "check: argument --format: invalid choice: {f:?} (choose from 'human', 'json')"
+                    ));
+                }
+            }
             a.schemas = argv;
         }
         "targets" => {
@@ -453,20 +468,48 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
         }
     }
 }
+fn report_schema_errors(schemas: &[String]) -> Option<i32> {
+    if schemas.is_empty() {
+        return None;
+    }
+    let paths: Vec<PathBuf> = schemas.iter().map(PathBuf::from).collect();
+    let diags = crate::diag::diagnose_files(&paths);
+    if diags.is_empty() {
+        return None;
+    }
+    let sources = crate::diag::SourceSet::from_diagnostics(&diags);
+    eprintln!("{}", crate::diag::render(&diags, &sources));
+    Some(3)
+}
 
 fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
     match cmd {
         "check" => {
-            load_and_analyze(&a.schemas)?;
-            println!("ok");
-            Ok(0)
+            let format = a.format.as_deref().unwrap_or("human");
+            let paths: Vec<PathBuf> = a.schemas.iter().map(PathBuf::from).collect();
+            let diags = crate::diag::diagnose_files(&paths);
+            if format == "json" {
+                println!("{}", crate::diag::to_json(&diags));
+            } else if diags.is_empty() {
+                println!("ok");
+            } else {
+                let sources = crate::diag::SourceSet::from_diagnostics(&diags);
+                eprintln!("{}", crate::diag::render(&diags, &sources));
+            }
+            Ok(if diags.is_empty() { 0 } else { 3 })
         }
         "dump-json" => {
+            if let Some(code) = report_schema_errors(&a.schemas) {
+                return Ok(code);
+            }
             let resolved = load_and_analyze(&a.schemas)?;
             println!("{}", schema_to_json(&resolved.schema));
             Ok(0)
         }
         "routes" => {
+            if let Some(code) = report_schema_errors(&a.schemas) {
+                return Ok(code);
+            }
             let resolved = load_and_analyze(&a.schemas)?;
             for (route, pkt) in &resolved.routes {
                 println!(
@@ -487,8 +530,12 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             Ok(0)
         }
         "decode" => {
+            if let Some(code) = report_schema_errors(&a.schemas) {
+                return Ok(code);
+            }
             let resolved = load_and_analyze(&a.schemas)?;
             let raw = read_stdin()?;
+
             let mut data = hex_bytes(&raw)?;
             if let Some(spec) = &a.compression {
                 if a.packet.is_some() {
@@ -526,8 +573,12 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             Ok(0)
         }
         "encode" => {
+            if let Some(code) = report_schema_errors(&a.schemas) {
+                return Ok(code);
+            }
             let resolved = load_and_analyze(&a.schemas)?;
             let val = loads(a.json_value.as_deref().unwrap_or(""))?;
+
             let Value::Map(m) = val else {
                 return Err(BmlError::new(
                     crate::errors::ErrorKind::Encode,
@@ -572,8 +623,12 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             Ok(0)
         }
         "emit" => {
+            if let Some(code) = report_schema_errors(&a.schemas) {
+                return Ok(code);
+            }
             let resolved = load_and_analyze(&a.schemas)?;
             let target = a.target.as_deref().unwrap_or("");
+
             if target == "rstom-tree" {
                 let Some(rstom) = &a.rstom else {
                     return Err(emit("emit rstom-tree needs --rstom <workspace>"));

@@ -9,6 +9,9 @@ pub struct Cursor<'a> {
     /// A check that decodes random bytes sets it: a list of zero-width elements would
     /// otherwise loop `count` times without reading a byte.
     pub repeat_limit: Option<usize>,
+    /// Optional span recorder (set only by decode_*_spans entry points). When None
+    /// the decode path incurs no extra allocation or work.
+    pub(crate) recorder: Option<crate::spans::Recorder>,
 }
 
 impl<'a> Cursor<'a> {
@@ -17,6 +20,7 @@ impl<'a> Cursor<'a> {
             data,
             pos: 0,
             repeat_limit: None,
+            recorder: None,
         }
     }
 

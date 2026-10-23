@@ -109,11 +109,16 @@ pub fn boolean(cur: &mut Cursor) -> Result<bool, BmlError> {
 }
 
 pub fn sign_extend(v: i64, bits: u32) -> i64 {
-    let mask = 1i64 << (bits - 1);
-    if (v & mask) != 0 {
-        v - (1i64 << bits)
+    if bits == 0 || bits >= 64 {
+        return v;
+    }
+    let mask = (1u64 << bits) - 1;
+    let low = (v as u64) & mask;
+    let sign = 1u64 << (bits - 1);
+    if low & sign != 0 {
+        (low | !mask) as i64
     } else {
-        v
+        low as i64
     }
 }
 
