@@ -12,10 +12,6 @@ pub struct Cursor<'a> {
     /// Optional span recorder (set only by decode_*_spans entry points). When None
     /// the decode path incurs no extra allocation or work.
     pub(crate) recorder: Option<crate::spans::Recorder>,
-    /// Count of groups where the condition holds (present) but the group was skipped
-    /// because no bytes remained at end of input. Used by vector generation to reject
-    /// shapes that typed codecs cannot round-trip.
-    pub(crate) eof_group_skips: usize,
 }
 
 impl<'a> Cursor<'a> {
@@ -25,7 +21,6 @@ impl<'a> Cursor<'a> {
             pos: 0,
             repeat_limit: None,
             recorder: None,
-            eof_group_skips: 0,
         }
     }
 

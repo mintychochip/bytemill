@@ -90,7 +90,7 @@ fn cpp_mc26_vectors() {
     )
     .unwrap()
     .expect("mc produced vectors");
-    assert!(tr.vectors >= 661, "many vectors for mc");
+    assert!(tr.vectors >= 664, "many vectors for mc");
     if has_tool("g++") {
         let st = run_from(&dir, &tr.command);
         assert!(st.success(), "mc26 vectors roundtrip failed");

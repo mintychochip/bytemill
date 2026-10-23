@@ -109,7 +109,7 @@ fn ts_vectors_minecraft_50_plus() {
     );
     prettier_check_vectors(&dir);
     let tr = res.expect("mc vectors must yield TestRun");
-    assert!(tr.vectors >= 661);
+    assert!(tr.vectors >= 664);
     let out = node(&dir, &tr.file);
     assert!(
         out.status.success(),
