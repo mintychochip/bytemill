@@ -31,8 +31,8 @@ use std::path::Path;
 use crate::ResolvedSchema;
 use crate::errors::{BmlResult, emit};
 use crate::ir::typed::{
-    BinOp, Bind, Body, Codec, CodecIdx, CodecKind, Expr, Failure, Func, IntTy, LocalId, ParamRole,
-    Program, ReadOp, RepeatMode, Stmt, Ty, TypeIdx, WriteOp,
+    BinOp, Bind, Body, Codec, CodecIdx, CodecKind, Expr, Failure, FieldDecl, Func, IntTy, LocalId,
+    ParamRole, Program, ReadOp, RepeatMode, Stmt, Ty, TypeIdx, WriteOp,
 };
 use crate::ir::typed::{Origin, TypeKind};
 use crate::vectors::{TestRun, Vector};
@@ -967,6 +967,26 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// Class-body field order for `@dataclasses.dataclass`. Encode/decode keep
+    /// wire order; only the declared attributes move so required fields precede
+    /// optional defaults on Python versions without `kw_only=True` (3.8/3.9).
+    fn record_class_fields(fields: &[FieldDecl], ver: crate::PythonVersion) -> Vec<FieldDecl> {
+        if ver.supports_dataclass_slots() && ver.supports_dataclass_kw_only() {
+            return fields.to_vec();
+        }
+        let mut required = Vec::new();
+        let mut optional = Vec::new();
+        for f in fields {
+            if f.optional {
+                optional.push(f.clone());
+            } else {
+                required.push(f.clone());
+            }
+        }
+        required.extend(optional);
+        required
+    }
+
     /// `list[inner]` spelling: builtin generics stay for 3.10+,
     /// `typing.List` before that.
     fn list_ann(&self, inner: &str) -> String {
@@ -1075,7 +1095,7 @@ impl<'a> Emitter<'a> {
             if !fields.is_empty() {
                 e.blank();
             }
-            for f in &fields {
+            for f in Self::record_class_fields(&fields, ver) {
                 let name = escape_name(&f.name.snake());
                 let ann = annotation(self.prog, &f.ty, f.optional, ver);
                 if f.optional {

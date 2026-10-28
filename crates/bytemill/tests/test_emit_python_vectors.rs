@@ -158,8 +158,8 @@ fn python_minecraft_vectors() {
     .unwrap();
     let tr = some.expect("vectors present");
     assert!(
-        tr.vectors >= 661,
-        "minecraft must embed >=661 vectors (observed real count after source fix)"
+        tr.vectors >= 664,
+        "minecraft must embed >=664 vectors (includes EOF-skipped conditional groups)"
     );
     py_compile(&dir);
     let cmd_out = Command::new("python3")

@@ -1,16 +1,29 @@
-//! Ports tests/test_ledger_wave1.py: committed wave-1 shape ledger invariants.
+//! Shape ledger invariants: every committed ledger file reserialises and
+//! the special-render sets stay exactly known.
 
 mod common;
 
-const WAVE1_NEW_BODY_PACKETS: &[&str] = &["ClientNameItemPacket", "ClientPluginMessagePacket"];
+const SHAPED_NEW_BODY_PACKETS: &[&str] = &[
+    "ClientCommandChatPacket",
+    "ClientNameItemPacket",
+    "ClientPluginMessagePacket",
+];
 
-const WAVE1_READ_VIA_NEW_PACKETS: &[&str] = &[
+const SHAPED_READ_VIA_NEW_PACKETS: &[&str] = &[
+    "ClientAttackPacket",
+    "ClientChatAckPacket",
+    "ClientChunkBatchReceivedPacket",
     "ClientClickWindowButtonPacket",
     "ClientCloseWindowPacket",
+    "ClientCommandChatPacket",
+    "ClientGenerateStructurePacket",
     "ClientHeldItemChangePacket",
     "ClientLockDifficultyPacket",
     "ClientNameItemPacket",
+    "ClientPickItemFromBlockPacket",
     "ClientPickItemFromEntityPacket",
+    "TickStepPacket",
+    "UnloadChunkPacket",
     "UpdateHealthPacket",
     "UpdateSimulationDistancePacket",
     "UpdateViewDistancePacket",
@@ -21,6 +34,7 @@ const WAVE1_READ_VIA_NEW_PACKETS: &[&str] = &[
     "WorldBorderSizePacket",
     "WorldBorderWarningDelayPacket",
     "WorldBorderWarningReachPacket",
+    "WorldEventPacket",
 ];
 
 fn ledger_present() -> bool {
@@ -46,7 +60,7 @@ fn non_trivial_new_body_packets() {
         .map(|(_, s)| s.cls)
         .collect();
     found.sort();
-    let mut expected = WAVE1_NEW_BODY_PACKETS.to_vec();
+    let mut expected = SHAPED_NEW_BODY_PACKETS.to_vec();
     expected.sort();
     assert_eq!(found, expected);
 }
@@ -62,15 +76,15 @@ fn read_via_new_packets() {
         .map(|(_, s)| s.cls)
         .collect();
     found.sort();
-    let mut expected = WAVE1_READ_VIA_NEW_PACKETS.to_vec();
+    let mut expected = SHAPED_READ_VIA_NEW_PACKETS.to_vec();
     expected.sort();
     assert_eq!(found, expected);
 }
 
 #[test]
-fn exactly_sixty_four_shapes() {
+fn exactly_ninety_two_shapes() {
     if !ledger_present() {
         return;
     }
-    assert_eq!(ledger().len(), 64);
+    assert_eq!(ledger().len(), 92);
 }

@@ -4,7 +4,7 @@ mod common;
 
 use bytemill::shapes::{
     advance_item_start, docs_and_attrs_before, extract_shape, hand_packet_path, mismatch,
-    packet_report, shape_from_json, shape_to_json,
+    packet_report, pair_fields, shape_from_json, shape_to_json,
 };
 use std::collections::BTreeMap;
 
@@ -751,6 +751,20 @@ fn doc_line_preserves_markdown_indent() {
 }
 
 #[test]
+fn module_docs_keep_interior_blank_lines() {
+    let src = "//! Port of `x`.\n//!\n//! Second paragraph.\n\nuse std::sync::Arc;\n\n#[derive(Clone, Debug)]\npub struct X {\n    pub id: i32,\n}\n";
+    let shape = extract_shape(src, "X", "server/common/x", None).unwrap();
+    assert_eq!(
+        shape.module_docs,
+        vec![
+            "Port of `x`.".to_string(),
+            String::new(),
+            "Second paragraph.".to_string()
+        ]
+    );
+}
+
+#[test]
 fn module_pub_const_sets_extras() {
     let shape = extract_shape(
         TAB_COMPLETE_CONST_EXTRA,
@@ -772,6 +786,60 @@ fn mismatch_equal_and_differing() {
     assert!(bad[0].contains("id"), "{}", bad[0]);
     assert!(bad[0].contains("i64"), "{}", bad[0]);
     assert!(bad[0].contains("i32"), "{}", bad[0]);
+}
+
+#[test]
+fn pair_fields_accepts_renames_and_order_swaps() {
+    let bml = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(n, t)| ((*n).to_string(), (*t).to_string()))
+            .collect::<Vec<_>>()
+    };
+    // Identical: identity map.
+    assert_eq!(
+        pair_fields(&[("id", "i64")], &bml(&[("id", "i64")])),
+        Some(vec![0])
+    );
+    // Pure rename: unique leftover type binds.
+    assert_eq!(
+        pair_fields(&[("target_id", "i32")], &bml(&[("entity_id", "i32")])),
+        Some(vec![0])
+    );
+    // Order swap with exact names: wire order differs, values still pair.
+    assert_eq!(
+        pair_fields(
+            &[("chunk_x", "i32"), ("chunk_z", "i32")],
+            &bml(&[("chunk_z", "i32"), ("chunk_x", "i32")]),
+        ),
+        Some(vec![1, 0])
+    );
+    // Mixed rename plus exact anchor.
+    assert_eq!(
+        pair_fields(
+            &[("target_id", "i32"), ("hand", "i32")],
+            &bml(&[("entity_id", "i32"), ("hand", "i32")]),
+        ),
+        Some(vec![0, 1])
+    );
+    // Ambiguous same-type leftovers fail closed.
+    assert_eq!(
+        pair_fields(
+            &[("action_id", "i8"), ("action_param", "i8")],
+            &bml(&[("action_id_byte_1", "i8"), ("action_parameter_byte_2", "i8")]),
+        ),
+        None
+    );
+    // Same-name type clash fails closed.
+    assert_eq!(
+        pair_fields(&[("id", "i64")], &bml(&[("id", "i32")])),
+        None
+    );
+    // Count mismatch fails closed.
+    assert_eq!(
+        pair_fields(&[("a", "i32")], &bml(&[("a", "i32"), ("b", "i32")])),
+        None
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -833,7 +901,7 @@ fn eligible_packets_extract_and_match_bml() {
             .into_iter()
             .map(|(_, s)| s.cls)
             .collect();
-    assert_eq!(committed.len(), 64);
+    assert_eq!(committed.len(), 92);
     let eligible_set: std::collections::BTreeSet<String> = eligible.iter().cloned().collect();
     let lost: Vec<&String> = committed.difference(&eligible_set).collect();
     assert!(lost.is_empty(), "lost: {lost:?}");
@@ -868,9 +936,9 @@ fn eligible_packets_extract_and_match_bml() {
         *summary.entry(category).or_insert(0) += 1;
     }
     let expected: BTreeMap<String, usize> = [
-        ("eligible", 65),
+        ("eligible", 92),
         ("field count mismatch", 91),
-        ("field name/type mismatch", 78),
+        ("field name/type mismatch", 51),
         ("extract: missing derive on struct", 1),
         ("missing hand file", 1),
     ]

@@ -1,4 +1,4 @@
-//! Ports tests/test_emit_tree_real_tree.py: emit all 64 eligible wave-1
+//! Ports tests/test_emit_tree_real_tree.py: emit all 92 eligible shaped
 //! packets into a copied rstom tree.
 //!
 //! Deviation: scratch dirs use a Drop guard (unique per call: pid + counter +
@@ -71,7 +71,7 @@ fn has_rustfmt() -> bool {
 }
 
 #[test]
-fn emit_all_sixty_four_eligible_packets() {
+fn emit_all_ninety_two_eligible_packets() {
     let t0 = std::time::Instant::now();
     let rstom = common::rstom_tables::rstom_dir();
     let packet_src = rstom.join("crates/rstom/src/network/packet");
@@ -100,7 +100,7 @@ fn emit_all_sixty_four_eligible_packets() {
         .into_iter()
         .filter(|(_, shape)| committed.contains(&shape.cls))
         .collect();
-    assert_eq!(pairs.len(), 64, "eligible committed pairs: {}", pairs.len());
+    assert_eq!(pairs.len(), 92, "eligible committed pairs: {}", pairs.len());
 
     let scratch = TempRoot::new("realtree");
     let ws = scratch.path().join("rstom");
@@ -129,6 +129,10 @@ fn emit_all_sixty_four_eligible_packets() {
             let path = hand_packet_path(&ws, unit);
             write(&path.parent().unwrap().join(ext), "//! scratch\n");
         }
+        if let Some(tests) = &shape.tests {
+            let path = hand_packet_path(&ws, unit);
+            write(&path.parent().unwrap().join(tests), "//! scratch tests\n");
+        }
     }
 
     emit_tree(&resolved, &ws, &table, &shapes_dir, false).unwrap();
@@ -143,7 +147,7 @@ fn emit_all_sixty_four_eligible_packets() {
         );
         generated.push(path);
     }
-    assert_eq!(generated.len(), 64);
+    assert_eq!(generated.len(), 92);
 
     assert!(has_rustfmt(), "rustfmt not installed");
     for path in &generated {

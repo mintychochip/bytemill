@@ -45,31 +45,6 @@ pub fn decode_packet(
     Ok(env)
 }
 
-pub fn decode_packet_eof_skips(
-    resolved: &ResolvedSchema,
-    packet_name: &str,
-    data: &[u8],
-) -> BmlResult<(Env, usize)> {
-    let pkt = resolved
-        .packets
-        .get(packet_name)
-        .ok_or_else(|| decode(format!("unknown packet {}", py_repr_str(packet_name))))?;
-    let mut cur = Cursor::new(data);
-    let env = decode_block_items(&pkt.items, &mut cur, resolved, &Env::new(), None)?;
-    if cur.remaining() != 0 {
-        return Err(decode_at(
-            format!(
-                "{} of {} bytes left unread after packet {}",
-                cur.remaining(),
-                data.len(),
-                py_repr_str(packet_name)
-            ),
-            cur.pos,
-        ));
-    }
-    Ok((env, cur.eof_group_skips))
-}
-
 pub fn decode_packet_spans(
     resolved: &ResolvedSchema,
     packet_name: &str,
@@ -583,9 +558,6 @@ fn decode_expanded(
                 }
                 if cur.remaining() == 0 {
                     // Optional trailing group absent on the wire.
-                    // Only count when the condition held (present); this is the
-                    // case that produces shapes typed codecs cannot re-encode.
-                    cur.eof_group_skips += 1;
                     continue;
                 }
                 let decoded = decode_expanded(items, cur, resolved, &group_env, prebind)?;

@@ -1866,7 +1866,10 @@ impl<'a> Builder<'a> {
                 let cond = if *fallback {
                     let (c, refs) = self.guard(f, cond)?;
                     match all_present(&refs) {
-                        None => c,
+                        None => match self.any_present(f, then_body) {
+                            None => c,
+                            Some(any) => and(c, any),
+                        },
                         Some(all) => match self.any_present(f, then_body) {
                             None => or(not(all), c),
                             Some(any) => or(and(all.clone(), c), and(not(all), any)),
@@ -2608,6 +2611,9 @@ impl<'a> Builder<'a> {
                 Ok(TE::leaf(not(self.as_bool(te)?), Ty::Bool))
             }
             AstExpr::Binop(op, l, r) => {
+                if mode == Mode::Stmt && matches!(op.as_str(), "&&" | "||") {
+                    return self.lazy_logical(f, op.as_str(), l, r, mode);
+                }
                 let l = self.expr(f, l, mode)?;
                 let r = self.expr(f, r, mode)?;
                 self.binop(op, l, r)
@@ -2615,6 +2621,9 @@ impl<'a> Builder<'a> {
             AstExpr::Ternary(c, a, b) => {
                 let c = self.expr(f, c, mode)?;
                 let c = self.as_bool(c)?;
+                if mode == Mode::Stmt {
+                    return self.lazy_ternary(f, c, a, b);
+                }
                 let a = self.expr(f, a, mode)?;
                 let b = self.expr(f, b, mode)?;
                 self.ternary(c, a, b)
@@ -2627,6 +2636,121 @@ impl<'a> Builder<'a> {
                 self.call(name, tes)
             }
         }
+    }
+
+    fn expr_in_block(
+        &mut self,
+        f: &mut Fun,
+        e: &AstExpr,
+        mode: Mode,
+    ) -> BmlResult<(Vec<Stmt>, TE)> {
+        f.push_block();
+        let te = self.expr(f, e, mode)?;
+        let stmts = f.pop_block();
+        Ok((stmts, te))
+    }
+
+    fn lazy_ternary(&mut self, f: &mut Fun, cond: Expr, a: &AstExpr, b: &AstExpr) -> BmlResult<TE> {
+        let (a_stmts, a_te) = self.expr_in_block(f, a, Mode::Stmt)?;
+        let (b_stmts, b_te) = self.expr_in_block(f, b, Mode::Stmt)?;
+        if a_stmts.is_empty() && b_stmts.is_empty() {
+            return self.ternary(cond, a_te, b_te);
+        }
+        let a_val = a_te.e.clone();
+        let b_val = b_te.e.clone();
+        let merged = self.ternary(cond.clone(), a_te, b_te)?;
+        let local = f.local(Name::new("ternary").with("tmp"), merged.ty.clone(), false);
+        f.emit(Stmt::Declare { local, zero: true });
+        let dst = Bind {
+            local,
+            declare: false,
+            some: false,
+        };
+        let mut then_body = a_stmts;
+        then_body.push(Stmt::Let { dst, value: a_val });
+        let mut els_body = b_stmts;
+        els_body.push(Stmt::Let {
+            dst: Bind {
+                local,
+                declare: false,
+                some: false,
+            },
+            value: b_val,
+        });
+        f.emit(Stmt::If {
+            cond,
+            then: then_body,
+            els: els_body,
+        });
+        Ok(TE {
+            e: Expr::Local(local),
+            ty: merged.ty,
+            lit: merged.lit,
+            lo: merged.lo,
+            hi: merged.hi,
+        })
+    }
+
+    fn lazy_logical(
+        &mut self,
+        f: &mut Fun,
+        op: &str,
+        l: &AstExpr,
+        r: &AstExpr,
+        mode: Mode,
+    ) -> BmlResult<TE> {
+        let l_te = self.expr(f, l, mode)?;
+        let (r_stmts, r_te) = self.expr_in_block(f, r, mode)?;
+        if r_stmts.is_empty() {
+            return self.binop(op, l_te, r_te);
+        }
+        let l_bool = self.as_bool(l_te)?;
+        let r_bool = self.as_bool(r_te)?;
+        let local = f.local(Name::new(op).with("short"), Ty::Bool, false);
+        f.emit(Stmt::Declare { local, zero: true });
+        let dst = Bind {
+            local,
+            declare: false,
+            some: false,
+        };
+        let (then, els) = match op {
+            "&&" => {
+                let mut then = r_stmts;
+                then.push(Stmt::Let { dst, value: r_bool });
+                let els = vec![Stmt::Let {
+                    dst: Bind {
+                        local,
+                        declare: false,
+                        some: false,
+                    },
+                    value: Expr::Bool(false),
+                }];
+                (then, els)
+            }
+            "||" => {
+                let then = vec![Stmt::Let {
+                    dst,
+                    value: Expr::Bool(true),
+                }];
+                let mut els = r_stmts;
+                els.push(Stmt::Let {
+                    dst: Bind {
+                        local,
+                        declare: false,
+                        some: false,
+                    },
+                    value: r_bool,
+                });
+                (then, els)
+            }
+            _ => unreachable!(),
+        };
+        f.emit(Stmt::If {
+            cond: l_bool,
+            then,
+            els,
+        });
+        Ok(TE::leaf(Expr::Local(local), Ty::Bool))
     }
 
     fn read(&mut self, f: &mut Fun, name: &str, mode: Mode) -> BmlResult<TE> {

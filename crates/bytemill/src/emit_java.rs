@@ -591,6 +591,8 @@ impl<'a> Data<'a> {
                         direct.insert((s, v));
                         if let Some(Ty::Named(t)) = payload {
                             direct_targets.insert(*t);
+                            // Lifted under the sum's wrapper, not its declaration stem.
+                            type_owner[*t] = stem_class(&stem);
                         }
                     } else {
                         let base = format!(

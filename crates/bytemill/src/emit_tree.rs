@@ -24,10 +24,11 @@ fn which_rustfmt() -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// Run rustfmt on `path` in place, with the ext-module flags when `mod ext;` is present.
+/// Run rustfmt on `path` in place, with the child-skipping flags when an
+/// out-of-line sibling (`mod ext;` / `mod tests;`) is present.
 fn run_rustfmt(rustfmt: &Path, path: &Path, text: &str) -> Result<(), String> {
     let mut cmd = Command::new(rustfmt);
-    if text.contains("mod ext;") {
+    if text.contains("mod ext;") || text.contains("mod tests;") {
         cmd.args(["--unstable-features", "--skip-children"]);
     }
     cmd.args(["--edition", "2024"]).arg(path);
@@ -144,6 +145,17 @@ fn require_extras(workspace: &Path, shape: &Shape, packet_dir: &Path) -> BmlResu
     Ok(())
 }
 
+fn require_tests(workspace: &Path, shape: &Shape, packet_dir: &Path) -> BmlResult<()> {
+    let Some(tests) = shape.tests.as_deref().filter(|e| !e.is_empty()) else {
+        return Ok(());
+    };
+    let path = packet_dir.join(tests);
+    if !path.is_file() {
+        return Err(emit(format!("create {} first", posix_rel(&path, workspace))));
+    }
+    Ok(())
+}
+
 fn refuse_orphan_ext(module: &str, shape: &Shape, packet_path: &Path) -> BmlResult<()> {
     if shape.extras.as_deref().is_some_and(|e| !e.is_empty()) {
         return Ok(());
@@ -162,6 +174,23 @@ fn refuse_orphan_ext(module: &str, shape: &Shape, packet_path: &Path) -> BmlResu
     Ok(())
 }
 
+fn refuse_orphan_tests(module: &str, shape: &Shape, packet_path: &Path) -> BmlResult<()> {
+    if shape.tests.as_deref().is_some_and(|e| !e.is_empty()) {
+        return Ok(());
+    }
+    if !packet_path.is_file() || !is_generated(packet_path) {
+        return Ok(());
+    }
+    let stem = module.rsplit('/').next().unwrap_or("");
+    let tests_name = format!("{stem}.tests.rs");
+    let dir = packet_path.parent().unwrap_or(Path::new(""));
+    if dir.join(&tests_name).is_file() {
+        return Err(emit(format!(
+            "{module}: tests file {tests_name} would be orphaned: record tests in the shape"
+        )));
+    }
+    Ok(())
+}
 /// Python `str.splitlines()`.
 fn splitlines(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
@@ -370,7 +399,9 @@ fn planned_packets(
         let path = packet_output_path(workspace, unit);
         let packet_dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
         require_extras(workspace, shape, &packet_dir)?;
+        require_tests(workspace, shape, &packet_dir)?;
         refuse_orphan_ext(&module, shape, &path)?;
+        refuse_orphan_tests(&module, shape, &path)?;
         let raw = tree_packet(unit, shape, &body)?;
         let text = rustfmt_text(&raw)?;
         if swap_hand && path.is_file() && !is_generated(&path) {
