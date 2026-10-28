@@ -144,7 +144,7 @@ fn worktree_extract_matches_committed_ledger_bytes() {
     }
     let shapes_dir = common::repo_root().join("targets/rstom/shapes");
     let ledger = bytemill::shapes::load_ledger(&shapes_dir).unwrap();
-    assert_eq!(ledger.len(), 64);
+    assert_eq!(ledger.len(), 92);
     let td = TempDir::named("ledger");
     let out = td.path.join("extracted");
     let (code, _, stderr) = run_cli(&[

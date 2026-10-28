@@ -181,7 +181,7 @@ fn every_committed_ledger_file_reserialises_byte_for_byte() {
     }
     let ledger =
         bytemill::shapes::load_ledger(&common::repo_root().join("targets/rstom/shapes")).unwrap();
-    assert_eq!(ledger.len(), 64);
+    assert_eq!(ledger.len(), 92);
     for (module, shape) in &ledger {
         let path = common::repo_root().join("targets/rstom/shapes").join(format!("{module}.json"));
         let text = std::fs::read_to_string(&path).unwrap();

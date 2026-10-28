@@ -158,6 +158,7 @@ pub fn keep_alive_shape() -> bytemill::shapes::Shape {
             read_via_new: false,
         },
         extras: None,
+        tests: Some("client_keep_alive_packet.tests.rs".into()),
         ..bytemill::shapes::Shape::default()
     }
 }

@@ -55,3 +55,7 @@ impl PacketSerializer for ClientKeepAliveSerializer {
         Box::new(ClientKeepAlivePacket { id })
     }
 }
+
+#[cfg(test)]
+#[path = "client_keep_alive_packet.tests.rs"]
+mod tests;

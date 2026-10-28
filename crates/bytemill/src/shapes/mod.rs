@@ -10,7 +10,7 @@ pub use extract::{PACKET_ROOT, extract_shape};
 pub use items::{Item, Member, impl_body_bounds, impl_members, scan_items};
 pub use ledger::{
     bml_field_pairs, extract_shapes_for_units, hand_packet_path, load_ledger, mismatch,
-    module_path, packet_report,
+    module_path, packet_report, pair_fields,
 };
 pub use model::{
     Accepted, FieldShape, NewShape, SerializerShape, Shape, ShapeError, shape_from_json,

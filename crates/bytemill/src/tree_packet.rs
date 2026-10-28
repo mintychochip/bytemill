@@ -5,9 +5,11 @@ use crate::emit_rstom::PacketBody;
 use crate::errors::{BmlResult, emit, py_repr_str};
 use crate::minestom::Unit;
 use crate::shapes::model::{FieldShape, Shape};
+use crate::tree_mapping::{remap_idents, remap_plan};
 
 const COPY_TYPES: &[&str] = &[
     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "Uuid",
+    "CoordVec",
 ];
 
 const MAX_LINES: usize = 400;
@@ -299,14 +301,15 @@ fn inherent_impl(shape: &Shape) -> String {
     format!("impl {} {{\n{body}\n}}\n\n", shape.cls)
 }
 
-fn serializer_impl(shape: &Shape, body: &PacketBody) -> String {
+fn serializer_impl(shape: &Shape, body: &PacketBody, plan: &[(String, String)]) -> String {
     if shape.serializer.style == "constant" {
         return String::new();
     }
     let ser = &shape.serializer.name;
     let vis = if shape.serializer.public { "pub " } else { "" };
     let docs = doc_lines("/// ", &shape.serializer.docs);
-    let writes = adapt_tree_writes(&body.writes, &shape.fields);
+    let writes = adapt_tree_writes(&remap_idents(&body.writes, plan), &shape.fields);
+    let reads = remap_idents(&body.reads, plan);
     let read_tail = if shape.serializer.read_via_new {
         if shape.form == "unit" {
             format!("        Box::new({}::new())", shape.cls)
@@ -335,7 +338,7 @@ fn serializer_impl(shape: &Shape, body: &PacketBody) -> String {
          \x20   }}\n\
          }}\n",
         cls = shape.cls,
-        reads = body.reads,
+        reads = reads,
     )
 }
 
@@ -354,10 +357,26 @@ fn extras_tail(shape: &Shape) -> String {
     }
 }
 
-/// `tree_packet(unit, shape, body)`: render the in-tree packet source.
+fn tests_tail(shape: &Shape) -> String {
+    match &shape.tests {
+        None => String::new(),
+        Some(t) if t.is_empty() => String::new(),
+        Some(_) => {
+            let stem = shape.module.rsplit('/').next().unwrap_or("");
+            format!("\n#[cfg(test)]\n#[path = \"{stem}.tests.rs\"]\nmod tests;\n")
+        }
+    }
+}
+
 pub fn tree_packet(unit: &Unit, shape: &Shape, body: &PacketBody) -> BmlResult<String> {
     validate_shape(shape)?;
     guard_frames_walkers(&shape.module, body)?;
+    let plan = remap_plan(shape, body).ok_or_else(|| {
+        emit(format!(
+            "{}: hand fields do not pair with BML fields",
+            shape.module
+        ))
+    })?;
     if shape.cls != unit.cls.name {
         return Err(emit(format!(
             "{}: shape class {} != unit {}",
@@ -386,8 +405,9 @@ pub fn tree_packet(unit: &Unit, shape: &Shape, body: &PacketBody) -> BmlResult<S
     let (_, marker_impls) = marker_imports(unit);
     parts.push(marker_impls);
     parts.push("\n".into());
-    parts.push(serializer_impl(shape, body));
+    parts.push(serializer_impl(shape, body, &plan));
     parts.push(extras_tail(shape));
+    parts.push(tests_tail(shape));
     let mut text = parts.concat();
     let newlines = text.matches('\n').count() + usize::from(!text.ends_with('\n'));
     if newlines > MAX_LINES {

@@ -5,7 +5,7 @@ recreate them on demand instead of committing them.
 
 ## shapes/
 
-The shape ledger (`shapes/**/*.json`, 64 files) is extracted from an
+The shape ledger (`shapes/**/*.json`, 92 files) is extracted from an
 rstom worktree with the `bml` CLI:
 
 ```sh

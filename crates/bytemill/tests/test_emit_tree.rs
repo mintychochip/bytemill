@@ -12,6 +12,7 @@ use bytemill::shapes::{
     extract_shape, hand_packet_path, shape_to_json, FieldShape, NewShape, SerializerShape, Shape,
 };
 use bytemill::tree_packet::{tree_packet, validate_shape};
+use bytemill::tree_mapping::remap_idents;
 use bytemill::Value;
 use std::path::{Path, PathBuf};
 
@@ -219,7 +220,11 @@ fn rustfmt(text: &str) -> String {
             .as_nanos()
     ));
     std::fs::write(&path, text).unwrap();
-    let _ = std::process::Command::new("rustfmt")
+    let mut cmd = std::process::Command::new("rustfmt");
+    if text.contains("mod ext;") || text.contains("mod tests;") {
+        cmd.args(["--unstable-features", "--skip-children"]);
+    }
+    let _ = cmd
         .args(["--edition", "2024", path.to_str().unwrap()])
         .output();
     let out = std::fs::read_to_string(&path).unwrap_or_else(|_| text.to_string());
@@ -319,6 +324,12 @@ fn copy_fields_are_not_cloned() {
                 docs: Vec::new(),
                 wire: None,
             },
+            FieldShape {
+                name: "loc".into(),
+                type_: "CoordVec".into(),
+                docs: Vec::new(),
+                wire: None,
+            },
         ],
         new: NewShape {
             present: true,
@@ -344,7 +355,7 @@ fn copy_fields_are_not_cloned() {
     let source = format!(
         "import \"{}\"\n{}",
         common::repo_root().join("schemas/minecraft_core.bml").display(),
-        probe_source("packet probe { n: i64be label: string }")
+        probe_source("packet probe { n: i64be label: string loc: position }")
     );
     let dir = temp_dir("probecopy");
     let schema = dir.join("p.bml");
@@ -359,6 +370,97 @@ fn copy_fields_are_not_cloned() {
     let body2 = packet_body(&unit2, &resolved2).unwrap();
     let text2 = tree_packet(&unit2, &probe_shape, &body2).unwrap();
     assert!(text2.contains("value.label.clone()"), "{text2}");
+    assert!(text2.contains("value.loc)"), "{text2}");
+    assert!(!text2.contains("value.loc.clone()"), "{text2}");
+}
+
+#[test]
+fn renamed_fields_render_with_hand_names_in_bml_order() {
+    let probe_shape = Shape {
+        cls: "ProbePacket".into(),
+        module: "server/play/probe_packet".into(),
+        module_docs: Vec::new(),
+        struct_docs: Vec::new(),
+        derives: vec!["Clone".into(), "Debug".into(), "PartialEq".into()],
+        form: "braced".into(),
+        fields: vec![
+            FieldShape { name: "target_id".into(), type_: "i32".into(), docs: Vec::new(), wire: None },
+            FieldShape {
+                name: "label".into(),
+                type_: "String".into(),
+                docs: Vec::new(),
+                wire: None,
+            },
+        ],
+        new: NewShape {
+            present: true,
+            const_: false,
+            must_use: true,
+            attrs: Vec::new(),
+            docs: Vec::new(),
+            body: Vec::new(),
+            params: None,
+        },
+        serializer_fn_docs: Vec::new(),
+        serializer_fn_must_use: true,
+        serializer: SerializerShape {
+            style: "struct".into(),
+            name: "ProbePacketSerializer".into(),
+            public: false,
+            docs: Vec::new(),
+            read_via_new: false,
+        },
+        extras: None,
+        ..Shape::default()
+    };
+    let source = format!(
+        "import \"{}\"\n{}",
+        common::repo_root().join("schemas/minecraft_core.bml").display(),
+        probe_source("packet probe { entity_id: varint label: string }")
+    );
+    let dir = temp_dir("proberename");
+    let schema = dir.join("p.bml");
+    write(&schema, &source);
+    let resolved = bytemill::analyze(&bytemill::load_schema(&[schema]).unwrap()).unwrap();
+    let table = common::rstom_tables::probe_table();
+    let unit = build_units(&resolved, &table)
+        .unwrap()
+        .into_iter()
+        .find(|u| u.pkt.name == "probe")
+        .unwrap();
+    let body = packet_body(&unit, &resolved).unwrap();
+    let text = tree_packet(&unit, &probe_shape, &body).unwrap();
+    assert!(text.contains("pub target_id: i32,"), "{text}");
+    assert!(text.contains("buffer.write(VAR_INT, value.target_id)"), "{text}");
+    assert!(text.contains("let target_id = buffer.read(VAR_INT)"), "{text}");
+    assert!(!text.contains("entity_id"), "{text}");
+}
+
+#[test]
+fn remap_idents_replaces_whole_words_only() {
+    let plan = vec![("id".to_string(), "keep_alive_id".to_string())];
+    let text = "buffer.write(LONG, value.id);\nlet uuid = buffer.read(LONG);\n";
+    let out = remap_idents(text, &plan);
+    assert!(out.contains("value.keep_alive_id"), "{out}");
+    assert!(out.contains("let uuid ="), "{out}");
+    assert!(!out.contains("value.id"), "{out}");
+}
+
+#[test]
+fn remap_idents_covers_guards_repeats_and_swaps_in_one_pass() {
+    let plan = vec![
+        ("location".to_string(), "block_position".to_string()),
+        ("a".to_string(), "b".to_string()),
+        ("b".to_string(), "a".to_string()),
+    ];
+    let text = "if let Some(v) = &location {\n    buffer.write(X, v);\n}\nfor x in &items {\n    buffer.write(Y, x.clone());\n}\nbuffer.write(X, value.a);\nbuffer.write(Y, value.b);\n// café — naïve\n";
+    let out = remap_idents(text, &plan);
+    assert!(out.contains("if let Some(v) = &block_position"), "{out}");
+    assert!(out.contains("for x in &items"), "{out}");
+    assert!(out.contains("buffer.write(X, value.b);"), "{out}");
+    assert!(out.contains("buffer.write(Y, value.a);"), "{out}");
+    assert!(out.contains("// café — naïve\n"), "{out}");
+    assert!(!out.contains("location"), "{out}");
 }
 
 #[test]
@@ -497,6 +599,10 @@ fn emit_writes_shaped_packet() {
         &shapes.join("client/common/client_keep_alive_packet.json"),
         &shape_to_json(&shape),
     );
+    write(
+        &workspace.join("crates/rstom/src/network/packet/client/common/client_keep_alive_packet.tests.rs"),
+        "//! scratch tests\n",
+    );
     // The keep-alive table, not the probe table, so the unit routes.
     let written = emit_tree(&resolved, &workspace, &keep_alive_table(), &shapes, false).unwrap();
     let pkt = "crates/rstom/src/network/packet/client/common/client_keep_alive_packet.rs";
@@ -577,6 +683,10 @@ fn check_flags_a_shaped_packet_whose_file_is_hand_written() {
         &shapes.join("client/common/client_keep_alive_packet.json"),
         &shape_to_json(&keep_alive_shape()),
     );
+    write(
+        &workspace.join("crates/rstom/src/network/packet/client/common/client_keep_alive_packet.tests.rs"),
+        "//! scratch tests\n",
+    );
     emit_tree(&resolved, &workspace, &keep_alive_table(), &shapes, false).unwrap();
     write(&hand_packet_path(&workspace, &unit), "// hand\n");
     let msgs = emit_tree(&resolved, &workspace, &keep_alive_table(), &shapes, true).unwrap();
@@ -599,6 +709,10 @@ fn check_flags_a_generated_file_with_no_shape() {
     write(
         &shapes.join("client/common/client_keep_alive_packet.json"),
         &shape_to_json(&keep_alive_shape()),
+    );
+    write(
+        &workspace.join("crates/rstom/src/network/packet/client/common/client_keep_alive_packet.tests.rs"),
+        "//! scratch tests\n",
     );
     emit_tree(&resolved, &workspace, &keep_alive_table(), &shapes, false).unwrap();
     write(

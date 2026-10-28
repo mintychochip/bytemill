@@ -46,6 +46,7 @@ pub mod synth;
 pub mod target_version;
 pub mod text;
 pub mod trace;
+pub mod tree_mapping;
 pub mod tree_packet;
 pub mod value;
 pub mod vectors;
