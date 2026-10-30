@@ -1,0 +1,72 @@
+{
+  "class": "OpenSignEditorPacket",
+  "module": "server/play/open_sign_editor_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.OpenSignEditorPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record OpenSignEditorPacket(Point position, SignTextSlot slot)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `position()` \u2014 the sign's block position."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "slot",
+      "type": "SignTextSlot",
+      "docs": [
+        "Java: `slot()` \u2014 which side of the sign is edited."
+      ],
+      "wire": "text_slot",
+      "write": "$.ordinal()",
+      "read": "SignTextSlot::from_ordinal($)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new OpenSignEditorPacket(Point, SignTextSlot)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `OpenSignEditorPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "OpenSignEditorSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BLOCK_POSITION,",
+      "SignTextSlot.NETWORK_TYPE)` template \u2014 the slot is a var int ordinal."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::network::packet::client::play::client_update_sign_packet::SignTextSlot;"
+  ],
+  "tests": "open_sign_editor_packet.tests.rs",
+  "bound": true
+}

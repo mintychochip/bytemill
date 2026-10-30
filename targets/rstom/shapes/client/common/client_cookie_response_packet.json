@@ -1,0 +1,87 @@
+{
+  "class": "ClientCookieResponsePacket",
+  "module": "client/common/client_cookie_response_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientCookieResponsePacket`.",
+    "",
+    "Java caps the value with",
+    "[`CookieStorePacket.MAX_VALUE_LENGTH`](crate::network::packet::server::common::cookie_store_packet::MAX_VALUE_LENGTH)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientCookieResponsePacket(String key, byte @Nullable [] value)",
+      "implements ClientPacket.Login, Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "key",
+      "type": "String",
+      "docs": [
+        "Java: `key()`."
+      ]
+    },
+    {
+      "name": "value",
+      "type": "Option<Vec<u8>>",
+      "docs": [
+        "Java: `value()`."
+      ],
+      "wire": "payload"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientCookieResponsePacket(String, @Nullable byte[])`.",
+      "",
+      "# Panics",
+      "",
+      "Panics for a key longer than `Short.MAX_VALUE` or a value longer than",
+      "[`MAX_VALUE_LENGTH`], matching Java's `Check.argCondition`."
+    ],
+    "body": [
+      "        assert!(",
+      "            key.chars().count() <= i16::MAX as usize,",
+      "            \"Key length cannot be greater than Short.MAX_VALUE\"",
+      "        );",
+      "        let length = value.as_ref().map_or(0, Vec::len);",
+      "        assert!(",
+      "            length <= MAX_VALUE_LENGTH,",
+      "            \"Value is too long: {length} > {MAX_VALUE_LENGTH}\"",
+      "        );",
+      "        Self { key, value }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientCookieResponsePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientCookieResponseSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, \u2026, BYTE_ARRAY.optional(), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::network::packet::server::common::cookie_store_packet::MAX_VALUE_LENGTH;"
+  ],
+  "tests": "client_cookie_response_packet.tests.rs",
+  "bound": true
+}

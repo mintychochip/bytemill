@@ -1,0 +1,115 @@
+{
+  "class": "UpdateScorePacket",
+  "module": "server/play/update_score_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.UpdateScorePacket`",
+    "and the `Sidebar.NumberFormat` it optionally carries.",
+    "",
+    "[`Component`] is [`crate::text::Component`], adventure's component tree \u2014",
+    "the same type Java's records hold. It travels with [`Component::write`] /",
+    "[`Component::read`] (see [`crate::adventure::component_network`]).",
+    "",
+    "- [`NumberFormat`] stands in for `net.minestom.server.scoreboard.Sidebar.NumberFormat`;",
+    "  the `scoreboard` module is ported, and `scoreboard::sidebar` re-exports",
+    "  this record rather than declaring its own, so there is one wire form."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UpdateScorePacket(String entityName, String objectiveName,",
+      "int score, @Nullable Component displayName, @Nullable Sidebar.NumberFormat",
+      "numberFormat) implements ServerPacket.Play,",
+      "ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_name",
+      "type": "String",
+      "docs": [
+        "Java: `entityName()`."
+      ]
+    },
+    {
+      "name": "objective_name",
+      "type": "String",
+      "docs": [
+        "Java: `objectiveName()`."
+      ]
+    },
+    {
+      "name": "score",
+      "type": "i32",
+      "docs": [
+        "Java: `score()`."
+      ],
+      "wire": "value"
+    },
+    {
+      "name": "display_name",
+      "type": "Option<Component>",
+      "docs": [
+        "Java: `displayName()` \u2014 `COMPONENT.optional()`."
+      ],
+      "wire": "display_name"
+    },
+    {
+      "name": "number_format",
+      "type": "Option<NumberFormat>",
+      "docs": [
+        "Java: `numberFormat()` \u2014 `Sidebar.NumberFormat.SERIALIZER.optional()`."
+      ],
+      "wire": "@number_format"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UpdateScorePacket(String, String, int, @Nullable Component,",
+      "@Nullable Sidebar.NumberFormat)`."
+    ],
+    "body": [
+      "        Self {",
+      "            entity_name: entity_name.into(),",
+      "            objective_name: objective_name.into(),",
+      "            score,",
+      "            display_name,",
+      "            number_format,",
+      "        }"
+    ],
+    "params": "entity_name: impl Into<String>, objective_name: impl Into<String>, score: i32, display_name: Option<Component>, number_format: Option<NumberFormat>"
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UpdateScorePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UpdateScoreSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(STRING,",
+      "UpdateScorePacket::entityName, STRING, UpdateScorePacket::objectiveName,",
+      "VAR_INT, UpdateScorePacket::score, COMPONENT.optional(),",
+      "UpdateScorePacket::displayName, Sidebar.NumberFormat.SERIALIZER.optional(),",
+      "UpdateScorePacket::numberFormat, UpdateScorePacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "update_score_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "update_score_packet.tests.rs",
+  "bound": true
+}

@@ -1,0 +1,56 @@
+{
+  "class": "ClientPlayerAbilitiesPacket",
+  "module": "client/play/client_player_abilities_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerAbilitiesPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerAbilitiesPacket(byte flags) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPlayerAbilitiesPacket(byte flags)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerAbilitiesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlayerAbilitiesSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BYTE, ClientPlayerAbilitiesPacket::flags, \u2026)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

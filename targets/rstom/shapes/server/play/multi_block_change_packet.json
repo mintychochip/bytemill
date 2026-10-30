@@ -1,0 +1,67 @@
+{
+  "class": "MultiBlockChangePacket",
+  "module": "server/play/multi_block_change_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.MultiBlockChangePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record MultiBlockChangePacket(long chunkSectionPosition, long[]",
+      "blocks)`.",
+      "",
+      "Java overrides `equals`/`hashCode` to compare the array by content, which",
+      "Rust's `Vec` already does."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chunk_section_position",
+      "type": "i64",
+      "docs": [
+        "Java: `chunkSectionPosition()` \u2014 the packed section coordinates."
+      ]
+    },
+    {
+      "name": "blocks",
+      "type": "Vec<i64>",
+      "docs": [
+        "Java: `blocks()` \u2014 the packed local-position/state pairs."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new MultiBlockChangePacket(long, long[])`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `MultiBlockChangePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "MultiBlockChangeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(LONG, VAR_LONG_ARRAY)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "multi_block_change_packet.ext.rs",
+  "tests": "multi_block_change_packet.tests.rs"
+}

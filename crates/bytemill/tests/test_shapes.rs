@@ -847,9 +847,7 @@ fn pair_fields_accepts_renames_and_order_swaps() {
 // ---------------------------------------------------------------------------
 
 fn worktree_present() -> bool {
-    common::rstom_tables::rstom_dir()
-        .join("crates/rstom/src/network/packet")
-        .is_dir()
+    bytemill::shapes::packet_root(&common::rstom_tables::rstom_dir()).is_dir()
 }
 
 #[test]
@@ -884,8 +882,8 @@ fn eligible_packets_extract_and_match_bml() {
                 continue;
             }
         };
-        let bml = bytemill::shapes::bml_field_pairs(&unit.pkt, &resolved).unwrap();
-        let reasons = mismatch(&shape, &bml);
+        let (fields, _) = bytemill::emit_rstom::packet_fields(&unit.pkt, &resolved).unwrap();
+        let reasons = bytemill::shapes::mismatch_fields(&shape, &fields);
         if !reasons.is_empty() {
             ineligible.insert(unit.cls.name.clone(), reasons.join("; "));
             continue;
@@ -894,57 +892,29 @@ fn eligible_packets_extract_and_match_bml() {
         assert_eq!(shape_from_json(&shape_to_json(&shape)).unwrap(), shape);
     }
 
-    // The committed ledger is a subset of the eligible set.
+    // The shapes that mirror BML one to one are a subset of the eligible set: a generated file of
+    // theirs still extracts, and still matches. A bound shape's hand fields do not mirror the
+    // wire, so its generated file is not eligible and nothing in the tree can produce its keys.
     let committed: std::collections::BTreeSet<String> =
         bytemill::shapes::load_ledger(&common::repo_root().join("targets/rstom/shapes"))
             .unwrap()
             .into_iter()
+            .filter(|(_, s)| !s.has_bindings())
             .map(|(_, s)| s.cls)
             .collect();
-    assert_eq!(committed.len(), 92);
+    assert!(!committed.is_empty());
     let eligible_set: std::collections::BTreeSet<String> = eligible.iter().cloned().collect();
     let lost: Vec<&String> = committed.difference(&eligible_set).collect();
     assert!(lost.is_empty(), "lost: {lost:?}");
 
-    // The worklist summary matches the committed one.
+    // The worklist is empty: every packet of the protocol is generated.
     let mut summary: BTreeMap<String, usize> = BTreeMap::new();
     for unit in &units {
         let status = packet_report(unit, &resolved, &rstom).unwrap();
-        let category = if status == "eligible" {
-            "eligible".to_string()
-        } else if status.starts_with("field count") {
-            "field count mismatch".to_string()
-        } else if status.starts_with("field ") {
-            "field name/type mismatch".to_string()
-        } else if status == "unexpected public type" {
-            "extract: extra public type in hand file".to_string()
-        } else if status.starts_with("unexpected public type") {
-            "extract: nested public type".to_string()
-        } else if status.starts_with("missing hand file") {
-            "missing hand file".to_string()
-        } else if status.starts_with("impl ") {
-            "extract: unsupported trait impl".to_string()
-        } else if status == "free function" {
-            "extract: free function".to_string()
-        } else if status == "missing derive on struct" {
-            "extract: missing derive on struct".to_string()
-        } else if status.starts_with("missing serializer struct") {
-            "extract: missing serializer struct".to_string()
-        } else {
-            status
-        };
-        *summary.entry(category).or_insert(0) += 1;
+        *summary.entry(status).or_insert(0) += 1;
     }
-    let expected: BTreeMap<String, usize> = [
-        ("eligible", 92),
-        ("field count mismatch", 91),
-        ("field name/type mismatch", 51),
-        ("extract: missing derive on struct", 1),
-        ("missing hand file", 1),
-    ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), *v))
-    .collect();
+    let expected: BTreeMap<String, usize> =
+        [("generated".to_string(), units.len())].into_iter().collect();
     assert_eq!(summary, expected);
 }
 
@@ -967,7 +937,7 @@ fn module_level_fn_packets_extract() {
             "client/play/client_advancement_tab_packet",
         ),
     ] {
-        let path = rstom.join("crates/rstom/src/network/packet").join(format!("{module}.rs"));
+        let path = bytemill::shapes::packet_root(&rstom).join(format!("{module}.rs"));
         let text = std::fs::read_to_string(&path).unwrap();
         let shape = extract_shape(&text, cls, module, Some(&path)).unwrap();
         assert!(shape.serializer.name.ends_with("Serializer"), "{cls}");
@@ -1009,10 +979,12 @@ fn shapes_extract_eligible_keeps_committed_packets_with_worktree() {
         out.to_string_lossy().into_owned(),
     ]);
     assert_eq!(code, 0);
+    // The shapes that mirror BML one to one come back out of their generated files.
     let committed: std::collections::BTreeSet<String> =
         bytemill::shapes::load_ledger(&common::repo_root().join("targets/rstom/shapes"))
             .unwrap()
             .into_iter()
+            .filter(|(_, s)| !s.has_bindings())
             .map(|(_, s)| s.cls)
             .collect();
     let written: std::collections::BTreeSet<String> =
@@ -1038,7 +1010,10 @@ fn shapes_report_runs() {
         common::rstom_tables::rstom_dir().to_string_lossy().into_owned(),
     ]);
     assert_eq!(code, 0);
-    assert!(out.contains("eligible"), "{out}");
+    // every packet of the protocol is generated: nothing is left on the worklist
+    let statuses: std::collections::BTreeSet<&str> =
+        out.lines().filter_map(|line| line.split('\t').nth(1)).collect();
+    assert_eq!(statuses, ["generated"].into_iter().collect(), "{out}");
 }
 
 // Ports tests/test_shapes.py `test_shapes_extract_eligible_skips_unrepresentable`.
@@ -1075,11 +1050,11 @@ fn shapes_extract_eligible_skips_unrepresentable() {
         std::fs::write(&path, text).unwrap();
     };
     write(
-        "ws/crates/rstom/src/network/packet/server/common/clear_dialog_packet.rs",
+        "ws/crates/netherstar/src/network/packet/server/common/clear_dialog_packet.rs",
         CLEAR_DIALOG,
     );
     write(
-        "ws/crates/rstom/src/network/packet/server/play/recipe_book_settings_packet.rs",
+        "ws/crates/netherstar/src/network/packet/server/play/recipe_book_settings_packet.rs",
         &format!("//! x\npub fn bad() {{}}\n{RECIPE_BOOK_SNIPPET}"),
     );
     std::fs::write(tmp.join("packets.json"), std::fs::read(&packets_json).unwrap()).unwrap();

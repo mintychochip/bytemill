@@ -8,4 +8,3 @@ tools/protodef-oracle/node_modules/
 # Generated inputs: fetch/extract instead of committing.
 build/
 data/minecraft-data/pc/
-targets/rstom/shapes/

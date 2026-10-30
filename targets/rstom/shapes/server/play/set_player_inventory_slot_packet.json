@@ -1,0 +1,79 @@
+{
+  "class": "SetPlayerInventorySlotPacket",
+  "module": "server/play/set_player_inventory_slot_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetPlayerInventorySlotPacket`.",
+    "",
+    "Java also implements `ServerPacket.ComponentHolding`, ported as",
+    "[`ComponentHoldingServerPacket`](super::super::server_packet::ComponentHoldingServerPacket).",
+    "The wire form is unaffected.",
+    "",
+    "# Deferrals",
+    "",
+    "The `ItemStack` component patch has no ported wire codec; see",
+    "`set_slot_packet.rs` for the exact scope."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetPlayerInventorySlotPacket(slot i32, itemStack ItemStack) implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "slot",
+      "type": "i32",
+      "docs": [
+        "Java: `slot()`."
+      ]
+    },
+    {
+      "name": "item_stack",
+      "type": "ItemStack",
+      "docs": [
+        "Java: `itemStack()`."
+      ],
+      "wire": "slot_data",
+      "put": "write_item_stack(buffer, &$);",
+      "take": "read_item_stack(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetPlayerInventorySlotPacket(slot: i32, item_stack: ItemStack)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetPlayerInventorySlotPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetPlayerInventorySlotSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, SetPlayerInventorySlotPacket::slot, ItemStack.NETWORK_TYPE, SetPlayerInventorySlotPacket::itemStack, SetPlayerInventorySlotPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "set_player_inventory_slot_packet.ext.rs",
+  "imports": [
+    "use crate::item::item_stack::ItemStack;"
+  ],
+  "bound": true,
+  "uses": [
+    "use super::set_slot_packet::{read_item_stack, write_item_stack};"
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "class": "ServerDifficultyPacket",
+  "module": "server/play/server_difficulty_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.ServerDifficultyPacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "Java's field is `net.minestom.server.world.Difficulty`, which is not",
+    "ported; the port declares the same four constants locally. The wire form is",
+    "the constant's ordinal as a var int, exactly as Java's",
+    "`Enum(Difficulty.class)` writes it."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ServerDifficultyPacket(Difficulty difficulty, boolean locked)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "difficulty",
+      "type": "Difficulty",
+      "docs": [
+        "Java: `difficulty()`."
+      ],
+      "codec": "enum_type::<Difficulty>()"
+    },
+    {
+      "name": "locked",
+      "type": "bool",
+      "docs": [
+        "Java: `locked()`."
+      ],
+      "wire": "difficulty_locked"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ServerDifficultyPacket(Difficulty, boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ServerDifficultyPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ServerDifficultySerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(Enum(Difficulty.class),",
+      "ServerDifficultyPacket::difficulty, BOOLEAN,",
+      "ServerDifficultyPacket::locked, ServerDifficultyPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "server_difficulty_packet.ext.rs",
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;"
+  ]
+}

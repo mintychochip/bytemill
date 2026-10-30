@@ -1,0 +1,83 @@
+{
+  "class": "EntityRotationPacket",
+  "module": "server/play/entity_rotation_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityRotationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityRotationPacket(int entityId, float yaw, float pitch,",
+      "boolean onGround)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()` \u2014 in degrees."
+      ],
+      "write": "pack_angle($)",
+      "read": "unpack_angle($)"
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()` \u2014 in degrees."
+      ],
+      "write": "pack_angle($)",
+      "read": "unpack_angle($)"
+    },
+    {
+      "name": "on_ground",
+      "type": "bool",
+      "docs": [
+        "Java: `onGround()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityRotationPacket(int, float, float, boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityRotationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityRotationSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, BOOLEAN, BYTE, BYTE)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_rotation_packet.ext.rs",
+  "tests": "entity_rotation_packet.tests.rs",
+  "bound": true
+}

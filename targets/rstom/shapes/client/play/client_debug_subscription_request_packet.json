@@ -1,0 +1,103 @@
+{
+  "class": "ClientDebugSubscriptionRequestPacket",
+  "module": "client/play/client_debug_subscription_request_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientDebugSubscriptionRequestPacket`.",
+    "",
+    "# Local stub",
+    "",
+    "[`DebugSubscription`] stands in for",
+    "`net.minestom.server.network.debug.DebugSubscription`, a sealed interface",
+    "whose constants are registered from the debug-subscriptions table. Java",
+    "keys the wire value by an `int id` and hands out the singleton for it",
+    "(`VAR_INT.transform(DebugSubscription::fromId, DebugSubscription::id)`), so",
+    "that is exactly what the port carries; the sixteen registered constants are",
+    "the sixteen consecutive ids recorded by `Client2Probe`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientDebugSubscriptionRequestPacket(Set<DebugSubscription<?>>",
+      "subscriptions) implements ClientPacket.Play`.",
+      "",
+      "Java stores an immutable `Set.copyOf` whose iteration order is the JDK",
+      "`HashSet` order and therefore leaks into the wire form; the port keeps the",
+      "caller's order in a `Vec` (membership is still a set \u2014 duplicates are",
+      "written as written)."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "subscriptions",
+      "type": "Vec<DebugSubscription>",
+      "docs": [
+        "Java: `subscriptions()`."
+      ],
+      "wire": "subscriptions",
+      "item": {
+        "fields": [
+          {
+            "name": "_",
+            "type": "DebugSubscription",
+            "docs": [],
+            "write": "$.id",
+            "read": "match DebugSubscription::from_id($) { Some(subscription) => subscription, None => panic!(\"NullPointerException\") }"
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientDebugSubscriptionRequestPacket(Set<DebugSubscription<?>>",
+      "subscriptions)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientDebugSubscriptionRequestPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientDebugSubscriptionRequestSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(DebugSubscription.NETWORK_TYPE.set(size), subscriptions,",
+      "ClientDebugSubscriptionRequestPacket::new)` \u2014 a `VAR_INT` element count",
+      "followed by each subscription's id."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_debug_subscription_request_packet.ext.rs",
+  "hooks": {
+    "read.after:subscriptions_count": [
+      "if !(0..=SUBSCRIPTION_COUNT).contains(&subscriptions_count) {",
+      "    panic!(\"Collection size ({}) is outside the allowed range (0-{})\", message_format_int(i64::from(subscriptions_count)), message_format_int(i64::from(SUBSCRIPTION_COUNT)));",
+      "}"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "the generated read loops 0..count, which the hook bounds at SUBSCRIPTION_COUNT"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use crate::network::types::message_format_int;"
+  ]
+}

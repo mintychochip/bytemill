@@ -1,0 +1,67 @@
+{
+  "class": "SetTitleTimePacket",
+  "module": "server/play/set_title_time_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetTitleTimePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetTitleTimePacket(fadeIn i32, stay i32, fadeOut i32) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "fade_in",
+      "type": "i32",
+      "docs": [
+        "Java: `fadeIn()`."
+      ]
+    },
+    {
+      "name": "stay",
+      "type": "i32",
+      "docs": [
+        "Java: `stay()`."
+      ]
+    },
+    {
+      "name": "fade_out",
+      "type": "i32",
+      "docs": [
+        "Java: `fadeOut()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetTitleTimePacket(fade_in: i32, stay: i32, fade_out: i32)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetTitleTimePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetTitleTimeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(INT, SetTitleTimePacket::fadeIn, INT, SetTitleTimePacket::stay, INT, SetTitleTimePacket::fadeOut, SetTitleTimePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

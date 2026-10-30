@@ -1,0 +1,79 @@
+{
+  "class": "ClientEntityActionPacket",
+  "module": "client/play/client_entity_action_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientEntityActionPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientEntityActionPacket(int playerId, Action action, int",
+      "horseJumpBoost) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "player_id",
+      "type": "i32",
+      "docs": [
+        "Java: `playerId()`."
+      ],
+      "wire": "entity_id"
+    },
+    {
+      "name": "action",
+      "type": "Action",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "wire": "action_id",
+      "write": "$.ordinal()",
+      "read": "Action::from_ordinal($)"
+    },
+    {
+      "name": "horse_jump_boost",
+      "type": "i32",
+      "docs": [
+        "Java: `horseJumpBoost()`."
+      ],
+      "wire": "jump_boost"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientEntityActionPacket(int playerId, Action action, int",
+      "horseJumpBoost)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientEntityActionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientEntityActionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, playerId, Enum(Action.class), action, VAR_INT,",
+      "horseJumpBoost, ClientEntityActionPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_entity_action_packet.ext.rs",
+  "bound": true
+}

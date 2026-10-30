@@ -1,0 +1,78 @@
+{
+  "class": "RecipeBookRemovePacket",
+  "module": "server/play/recipe_book_remove_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.RecipeBookRemovePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record RecipeBookRemovePacket(List<Integer> displayIds) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "display_ids",
+      "type": "Vec<i32>",
+      "docs": [
+        "Java: `displayIds()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new RecipeBookRemovePacket(List<Integer>)` (the compact",
+      "constructor copies)."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `RecipeBookRemovePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "RecipeBookRemoveSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(NetworkBuffer.VAR_INT.list(),",
+      "RecipeBookRemovePacket::displayIds, RecipeBookRemovePacket::new)` template",
+      "\u2014 `list()` with no argument caps the size at `Integer.MAX_VALUE`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "recipe_book_remove_packet.tests.rs",
+  "hooks": {
+    "read.after:recipes_count": [
+      "assert!(",
+      "    recipes_count >= 0,",
+      "    \"Collection size ({recipes_count}) is outside the allowed range (0-2,147,483,647)\"",
+      ");"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "The helper rejects a declared size below zero or above i32::MAX; the upper bound cannot be exceeded and the lower one is reproduced by the read.after:recipes_count hook."
+    },
+    {
+      "construct": ".min(",
+      "reason": "Capacity hint only: the hand read reserved at most 64 entries up front; the generated loop reserves nothing."
+    }
+  ]
+}

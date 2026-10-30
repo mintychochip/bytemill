@@ -1,0 +1,96 @@
+{
+  "class": "WorldEventPacket",
+  "module": "server/play/world_event_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.WorldEventPacket`.",
+    "",
+    "# Shared geometry helpers",
+    "",
+    "Java exposes `BLOCK_POSITION`, `VECTOR3I`, `POS` and `LP_VECTOR3` as",
+    "constants of the sealed `NetworkBuffer` interface; this workspace's",
+    "`network::types` module has not ported them (it stops at the primitive",
+    "types), so the four `NetworkBufferTypeImpl` records they name are ported",
+    "here as free functions and shared by the packets of this partition that",
+    "need them (`SpawnEntityPacket`, `SpawnPositionPacket`,",
+    "`TestInstanceBlockStatus`, `VehicleMovePacket`)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WorldEventPacket(int effectId, Point position, int data,",
+      "boolean disableRelativeVolume) implements ServerPacket.Play`.",
+      "",
+      "# Local stubs",
+      "",
+      "The ported `coordinate::Vec` stands in for Java's `Point`; Java's readers",
+      "build a `Vec` too (`new Vec(x, y, z)`), so the two are the same value."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "effect_id",
+      "type": "i32",
+      "docs": [
+        "Java: `effectId()`."
+      ]
+    },
+    {
+      "name": "position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `position()`."
+      ]
+    },
+    {
+      "name": "data",
+      "type": "i32",
+      "docs": [
+        "Java: `data()`."
+      ]
+    },
+    {
+      "name": "disable_relative_volume",
+      "type": "bool",
+      "docs": [
+        "Java: `disableRelativeVolume()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WorldEventPacket(int effectId, Point position, int data,",
+      "boolean disableRelativeVolume)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WorldEventPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WorldEventSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(INT, WorldEventPacket::effectId,",
+      "BLOCK_POSITION, WorldEventPacket::position, INT, WorldEventPacket::data,",
+      "BOOLEAN, WorldEventPacket::disableRelativeVolume,",
+      "WorldEventPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "world_event_packet.ext.rs",
+  "tests": "world_event_packet.tests.rs"
+}

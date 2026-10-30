@@ -1,0 +1,57 @@
+{
+  "class": "TickStepPacket",
+  "module": "server/play/tick_step_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.TickStepPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TickStepPacket(int steps) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "steps",
+      "type": "i32",
+      "docs": [
+        "Java: `steps()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TickStepPacket(int steps)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TickStepPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TickStepSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "TickStepPacket::steps, TickStepPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "tests": "tick_step_packet.tests.rs"
+}

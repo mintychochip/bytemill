@@ -1,0 +1,55 @@
+{
+  "class": "KeepAlivePacket",
+  "module": "server/common/keep_alive_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.KeepAlivePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record KeepAlivePacket(long id) implements ServerPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "i64",
+      "docs": [
+        "Java: `id()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `KeepAlivePacket(long id)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `KeepAlivePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "KeepAlivePacketSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(LONG, KeepAlivePacket::id, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

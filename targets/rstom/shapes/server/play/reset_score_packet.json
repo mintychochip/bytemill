@@ -1,0 +1,64 @@
+{
+  "class": "ResetScorePacket",
+  "module": "server/play/reset_score_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ResetScorePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ResetScorePacket(String owner, @Nullable String objective)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "owner",
+      "type": "String",
+      "docs": [
+        "Java: `owner()`."
+      ]
+    },
+    {
+      "name": "objective",
+      "type": "Option<String>",
+      "docs": [
+        "Java: `objective()` \u2014 `None` resets every objective."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ResetScorePacket(String, String)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ResetScorePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ResetScoreSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(STRING,",
+      "ResetScorePacket::owner, STRING.optional(), ResetScorePacket::objective,",
+      "ResetScorePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

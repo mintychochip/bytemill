@@ -1,0 +1,84 @@
+{
+  "class": "ClientChangeDifficultyPacket",
+  "module": "client/play/client_change_difficulty_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientChangeDifficultyPacket`.",
+    "",
+    "Java's template is `Enum(Difficulty.class)` plus a boolean. Vanilla's",
+    "`ServerboundChangeDifficultyPacket` is the difficulty alone, as its enum ordinal,",
+    "and the packet follows vanilla: `locked` is not on the wire, a read leaves it",
+    "`false` and a write ignores it. [`crate::world::difficulty::Difficulty`]",
+    "is the ported `net.minestom.server.world.Difficulty`; the impl of",
+    "[`JavaEnum`] below is what makes it readable and writable as that var int."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientChangeDifficultyPacket(Difficulty difficulty, boolean",
+      "locked) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "difficulty",
+      "type": "Difficulty",
+      "docs": [
+        "Java: `difficulty()`."
+      ],
+      "wire": "new_difficulty",
+      "codec": "enum_type::<Difficulty>()"
+    },
+    {
+      "name": "locked",
+      "type": "bool",
+      "docs": [
+        "Java: `locked()` \u2014 not on the wire: vanilla carries the difficulty alone."
+      ],
+      "wire": [],
+      "read": "false"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientChangeDifficultyPacket(Difficulty difficulty, boolean locked)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientChangeDifficultyPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientChangeDifficultySerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(Enum(Difficulty.class), difficulty, BOOLEAN, locked,",
+      "ClientChangeDifficultyPacket::new)`; vanilla writes the difficulty alone."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_change_difficulty_packet.ext.rs",
+  "imports": [
+    "use crate::world::difficulty::Difficulty;"
+  ],
+  "tests": "client_change_difficulty_packet.tests.rs",
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;"
+  ]
+}

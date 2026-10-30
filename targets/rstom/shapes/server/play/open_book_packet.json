@@ -1,0 +1,62 @@
+{
+  "class": "OpenBookPacket",
+  "module": "server/play/open_book_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.OpenBookPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record OpenBookPacket(PlayerHand hand)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "hand",
+      "type": "PlayerHand",
+      "docs": [
+        "Java: `hand()` \u2014 which hand holds the book."
+      ],
+      "wire": "hand"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new OpenBookPacket(PlayerHand)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `OpenBookPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "OpenBookSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(NetworkBuffer.Enum(PlayerHand.class))`",
+      "template \u2014 a var int holding `PlayerHand#ordinal()`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::network::packet::client::play::client_player_block_placement_packet::PlayerHand;"
+  ],
+  "tests": "open_book_packet.tests.rs",
+  "bound": true
+}

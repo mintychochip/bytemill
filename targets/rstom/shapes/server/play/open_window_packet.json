@@ -1,0 +1,79 @@
+{
+  "class": "OpenWindowPacket",
+  "module": "server/play/open_window_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.OpenWindowPacket`.",
+    "",
+    "Java also implements `ServerPacket.ComponentHolding`, ported as",
+    "[`ComponentHoldingServerPacket`](super::super::server_packet::ComponentHoldingServerPacket).",
+    "The wire form is unaffected."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record OpenWindowPacket(int windowId, int windowType, Component title)",
+      "implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "window_type",
+      "type": "i32",
+      "docs": [
+        "Java: `windowType()` \u2014 a window/inventory kind id."
+      ]
+    },
+    {
+      "name": "title",
+      "type": "Component",
+      "docs": [
+        "Java: `title()`."
+      ],
+      "wire": "window_title"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new OpenWindowPacket(int, int, Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `OpenWindowPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "OpenWindowSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, OpenWindowPacket::windowId,",
+      "VAR_INT, OpenWindowPacket::windowType, COMPONENT, OpenWindowPacket::title,",
+      "OpenWindowPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "open_window_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "bound": true
+}

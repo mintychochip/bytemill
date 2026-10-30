@@ -1,0 +1,73 @@
+{
+  "class": "DebugEntityValuePacket",
+  "module": "server/play/debug_entity_value_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.DebugEntityValuePacket`.",
+    "",
+    "The [`DebugSubscription`](super::debug_block_value_packet) model it shares",
+    "with the other debug packets lives in",
+    "[`debug_block_value_packet`](super::debug_block_value_packet)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DebugEntityValuePacket(int entityId, DebugSubscription.Update<?>",
+      "update) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "update",
+      "type": "DebugUpdate",
+      "docs": [
+        "Java: `update()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DebugEntityValuePacket(int, DebugSubscription.Update)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DebugEntityValuePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DebugEntityValueSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "DebugSubscription.Update.NETWORK_TYPE, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use super::debug_block_value_packet::DebugUpdate;"
+  ],
+  "tests": "debug_entity_value_packet.tests.rs",
+  "bound": true
+}

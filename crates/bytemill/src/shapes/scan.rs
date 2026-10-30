@@ -370,9 +370,8 @@ pub(crate) fn parse_struct_attrs(
         }
         pos = end;
     }
-    if derives.is_empty() {
-        return Err(shape("missing derive on struct"));
-    }
+    // A struct with hand-written `Debug`, `Clone` or `PartialEq` has no derive: those impls stay
+    // with the hand code that moves to the `.ext.rs` sibling.
     Ok(derives)
 }
 
@@ -541,6 +540,15 @@ pub(crate) fn collect_attrs_before(src: &str, item_pos: usize) -> Vec<String> {
             let stripped = sub(src, line_begin, pos).trim();
             if stripped.starts_with("///") {
                 break;
+            }
+            // An attribute with a trailing line comment: keep the line, comment included.
+            if stripped.starts_with("#[")
+                && let Some(end) = stripped.find("] //")
+                && !stripped[..end].contains("//")
+            {
+                attrs.insert(0, stripped.to_string());
+                pos = line_begin;
+                continue;
             }
             if stripped.starts_with("pub ") || stripped.starts_with("fn ") {
                 break;

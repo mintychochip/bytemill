@@ -1,0 +1,107 @@
+{
+  "class": "EntityAttributesPacket",
+  "module": "server/play/entity_attributes_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.EntityAttributesPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityAttributesPacket(int entityId, List<Property> properties)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "properties",
+      "type": "Vec<Property>",
+      "docs": [
+        "Java: `properties()` \u2014 at most [`MAX_ENTRIES`] entries."
+      ],
+      "wire": "property",
+      "item": {
+        "fields": [
+          {
+            "name": "attribute",
+            "type": "Attribute",
+            "docs": [],
+            "wire": "id",
+            "codec": "AttributeNetworkType"
+          },
+          {
+            "name": "value",
+            "type": "f64",
+            "docs": [],
+            "wire": "value"
+          },
+          {
+            "name": "modifiers",
+            "type": "Vec<AttributeModifier>",
+            "docs": [],
+            "wire": "modifiers",
+            "item": {
+              "fields": [
+                {
+                  "name": "_",
+                  "type": "AttributeModifier",
+                  "docs": [],
+                  "codec": "AttributeModifierNetworkType"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityAttributesPacket(int, List<Property>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityAttributesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityAttributesSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "Property.SERIALIZER.list(MAX_ENTRIES))` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_attributes_packet.ext.rs",
+  "imports": [
+    "use crate::entity::attribute::AttributeModifier;"
+  ],
+  "tests": "entity_attributes_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "downcast_ref",
+      "reason": "the generated read builds each property directly"
+    }
+  ],
+  "bound": true
+}

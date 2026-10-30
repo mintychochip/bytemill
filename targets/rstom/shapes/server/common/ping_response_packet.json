@@ -1,0 +1,55 @@
+{
+  "class": "PingResponsePacket",
+  "module": "server/common/ping_response_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.PingResponsePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PingResponsePacket(long number) implements ServerPacket.Status, Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "number",
+      "type": "i64",
+      "docs": [
+        "Java: `number()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `PingResponsePacket(long number)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PingResponsePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PingResponsePacketSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(LONG, PingResponsePacket::number, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

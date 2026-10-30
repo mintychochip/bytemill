@@ -1,0 +1,67 @@
+{
+  "class": "SetExperiencePacket",
+  "module": "server/play/set_experience_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetExperiencePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetExperiencePacket(percentage f32, level i32, totalExperience i32) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "percentage",
+      "type": "f32",
+      "docs": [
+        "Java: `percentage()`."
+      ]
+    },
+    {
+      "name": "level",
+      "type": "i32",
+      "docs": [
+        "Java: `level()`."
+      ]
+    },
+    {
+      "name": "total_experience",
+      "type": "i32",
+      "docs": [
+        "Java: `totalExperience()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetExperiencePacket(percentage: f32, level: i32, total_experience: i32)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetExperiencePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetExperienceSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(FLOAT, SetExperiencePacket::percentage, VAR_INT, SetExperiencePacket::level, VAR_INT, SetExperiencePacket::totalExperience, SetExperiencePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

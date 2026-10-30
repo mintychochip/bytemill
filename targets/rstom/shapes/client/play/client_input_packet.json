@@ -1,0 +1,55 @@
+{
+  "class": "ClientInputPacket",
+  "module": "client/play/client_input_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientInputPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientInputPacket(byte flags) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientInputPacket(byte flags)` \u2014 the record constructor."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientInputPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientInputSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BYTE, ClientInputPacket::flags, \u2026)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_input_packet.ext.rs"
+}

@@ -1,0 +1,91 @@
+{
+  "class": "EntityPositionSyncPacket",
+  "module": "server/play/entity_position_sync_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.EntityPositionSyncPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityPositionSyncPacket(int entityId, PositionPath position,",
+      "float yaw, float pitch, boolean onGround)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "position",
+      "type": "PositionPath",
+      "docs": [
+        "Java: `position()` \u2014 the path walked to reach the position."
+      ],
+      "wire": "position_path_type..steps"
+    },
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()` \u2014 in degrees."
+      ]
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()` \u2014 in degrees."
+      ]
+    },
+    {
+      "name": "on_ground",
+      "type": "bool",
+      "docs": [
+        "Java: `onGround()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityPositionSyncPacket(int, PositionPath, float, float,",
+      "boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityPositionSyncPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityPositionSyncSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, PositionPath.NETWORK_TYPE, \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use super::data::position_path::PositionPath;"
+  ],
+  "tests": "entity_position_sync_packet.tests.rs",
+  "bound": true
+}

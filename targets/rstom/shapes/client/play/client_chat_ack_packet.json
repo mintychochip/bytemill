@@ -1,0 +1,55 @@
+{
+  "class": "ClientChatAckPacket",
+  "module": "client/play/client_chat_ack_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientChatAckPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientChatAckPacket(int offset) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "offset",
+      "type": "i32",
+      "docs": [
+        "Java: `offset()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientChatAckPacket(int offset)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientChatAckPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientChatAckSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ClientChatAckPacket::offset, ClientChatAckPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

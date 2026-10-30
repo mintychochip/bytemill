@@ -1,0 +1,58 @@
+{
+  "class": "CookieRequestPacket",
+  "module": "server/common/cookie_request_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.CookieRequestPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CookieRequestPacket(String key) implements ServerPacket.Login,",
+      "Configuration, Play`.",
+      "",
+      "Java reads the key as a plain string; the `Key` overload lives in",
+      "[`CookieStorePacket`](crate::network::packet::server::common::cookie_store_packet::CookieStorePacket)."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "key",
+      "type": "String",
+      "docs": [
+        "Java: `key()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new CookieRequestPacket(String)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CookieRequestPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CookieRequestSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, CookieRequestPacket::key, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

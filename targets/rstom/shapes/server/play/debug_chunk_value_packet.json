@@ -1,0 +1,78 @@
+{
+  "class": "DebugChunkValuePacket",
+  "module": "server/play/debug_chunk_value_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.DebugChunkValuePacket`.",
+    "",
+    "The [`DebugSubscription`](super::debug_block_value_packet) model it shares",
+    "with the other debug packets lives in",
+    "[`debug_block_value_packet`](super::debug_block_value_packet)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DebugChunkValuePacket(long chunkPos, DebugSubscription.Update<?>",
+      "update) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chunk_pos",
+      "type": "i64",
+      "docs": [
+        "Java: `chunkPos()` \u2014 the chunk position as a single long."
+      ],
+      "wire": [
+        "chunk_z",
+        "chunk_x"
+      ],
+      "codec": "LONG"
+    },
+    {
+      "name": "update",
+      "type": "DebugUpdate",
+      "docs": [
+        "Java: `update()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DebugChunkValuePacket(long, DebugSubscription.Update)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DebugChunkValuePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DebugChunkValueSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(LONG,",
+      "DebugSubscription.Update.NETWORK_TYPE, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use super::debug_block_value_packet::DebugUpdate;"
+  ],
+  "tests": "debug_chunk_value_packet.tests.rs",
+  "bound": true
+}

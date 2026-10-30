@@ -1,0 +1,149 @@
+{
+  "class": "ClientChatMessagePacket",
+  "module": "client/play/client_chat_message_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientChatMessagePacket`.",
+    "",
+    "# Local representations",
+    "",
+    "- `signature` is the ported `crypto::MessageSignature` \u2014 Java's",
+    "  `MessageSignature` is exactly 256 bytes, which the ported type enforces.",
+    "- `ack_list` is Java's `FixedBitSet(20)`. A `BitSet` has no Rust equivalent,",
+    "  so the 20 bits are held as the little-endian bit-index mask Java's",
+    "  `BitSet.toByteArray`/`BitSet.valueOf` exchange; [`ACK_LIST_BYTES`] is the",
+    "  `(20 + 7) / Long.BYTES` byte length the wire type writes."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientChatMessagePacket(String message, long timestamp, long",
+      "salt, @Nullable MessageSignature signature, int ackOffset, BitSet ackList,",
+      "byte checksum) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "message",
+      "type": "String",
+      "docs": [
+        "Java: `message()`."
+      ]
+    },
+    {
+      "name": "timestamp",
+      "type": "i64",
+      "docs": [
+        "Java: `timestamp()`."
+      ]
+    },
+    {
+      "name": "salt",
+      "type": "i64",
+      "docs": [
+        "Java: `salt()`."
+      ]
+    },
+    {
+      "name": "signature",
+      "type": "Option<MessageSignature>",
+      "docs": [
+        "Java: `signature()`."
+      ],
+      "wire": "signature",
+      "write": "$.signature().to_vec()",
+      "read": "{ let mut fixed = [0u8; 256]; fixed.copy_from_slice(&$); MessageSignature::new(fixed).ok() }",
+      "read_flat": true
+    },
+    {
+      "name": "ack_offset",
+      "type": "i32",
+      "docs": [
+        "Java: `ackOffset()`."
+      ],
+      "wire": "message_count"
+    },
+    {
+      "name": "ack_list",
+      "type": "u32",
+      "docs": [
+        "Java: `ackList()` \u2014 see the module docs."
+      ],
+      "wire": "acknowledged",
+      "write": "$.to_le_bytes()[..3].to_vec()",
+      "read": "{ let mut bytes = [0u8; 4]; bytes[..3].copy_from_slice(&$); u32::from_le_bytes(bytes) }"
+    },
+    {
+      "name": "checksum",
+      "type": "i8",
+      "docs": [
+        "Java: `checksum()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientChatMessagePacket(String message, long timestamp, long salt,",
+      "@Nullable MessageSignature signature, int ackOffset, BitSet ackList, byte",
+      "checksum)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics with Java's `IllegalArgumentException` message when the message is",
+      "longer than 256 and when an `ackList` sets a bit outside the 20 bits",
+      "`FixedBitSet(20)` accepts."
+    ],
+    "body": [
+      "        if message.chars().count() > 256 {",
+      "            panic!(\"Message length cannot be greater than 256\");",
+      "        }",
+      "        if ack_list >= 1 << 20 {",
+      "            panic!(",
+      "                \"BitSet is larger than expected size ({}>20)\",",
+      "                32 - ack_list.leading_zeros()",
+      "            );",
+      "        }",
+      "        Self {",
+      "            message,",
+      "            timestamp,",
+      "            salt,",
+      "            signature,",
+      "            ack_offset,",
+      "            ack_list,",
+      "            checksum,",
+      "        }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientChatMessagePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientChatMessageSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(STRING, message, LONG, timestamp, LONG, salt,",
+      "MessageSignature.SERIALIZER.optional(), signature, VAR_INT, ackOffset,",
+      "FixedBitSet(20), ackList, BYTE, checksum,",
+      "ClientChatMessagePacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_chat_message_packet.ext.rs",
+  "imports": [
+    "use crate::crypto::MessageSignature;"
+  ],
+  "bound": true
+}

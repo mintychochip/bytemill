@@ -1,0 +1,74 @@
+{
+  "class": "ShowDialogPacket",
+  "module": "server/configuration/show_dialog_packet",
+  "module_docs": [
+    "The configuration form of `ShowDialogPacket`: Java `ClientboundShowDialogPacket.CONTEXT_FREE_STREAM_CODEC`,",
+    "the dialog as bare network NBT with no holder id. The type is the play packet's;",
+    "this module adds the serializer the configuration registry holds."
+  ],
+  "struct": {
+    "docs": [],
+    "derives": [],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "dialog",
+      "type": "DialogHolder",
+      "docs": [],
+      "nest": {
+        "fields": [
+          {
+            "name": "registry_id",
+            "type": "i32",
+            "docs": [],
+            "wire": [],
+            "read": "0"
+          },
+          {
+            "name": "data",
+            "type": "BinaryTag",
+            "docs": [],
+            "wire": "dialog",
+            "put": "write_nbt(buffer, &$);",
+            "take": "read_nbt(buffer)"
+          }
+        ],
+        "ctor": "DialogHolder { registry_id, data }"
+      }
+    }
+  ],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ShowDialogPacket.INLINE_SERIALIZER` \u2014 the dialog's NBT without",
+      "its registry id."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ShowDialogConfigurationSerializer",
+    "pub": false,
+    "docs": [
+      "The serializer of the configuration packet, generated from the BML schema."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "bound": true,
+  "alias": {
+    "path": "crate::network::packet::server::common::show_dialog_packet::{DialogHolder, ShowDialogPacket}",
+    "serializer_fn": "inline_serializer"
+  },
+  "uses": [
+    "use crate::network::packet::server::configuration::registry_data_packet::{read_nbt, write_nbt};"
+  ]
+}

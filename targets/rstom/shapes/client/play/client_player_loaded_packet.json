@@ -1,0 +1,45 @@
+{
+  "class": "ClientPlayerLoadedPacket",
+  "module": "client/play/client_player_loaded_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerLoadedPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerLoadedPacket() implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerLoadedPacket.SERIALIZER` \u2014 the payload-free",
+      "`NetworkBufferTemplate.template(new ClientPlayerLoadedPacket())`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "ClientPlayerLoadedPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

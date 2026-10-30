@@ -1,0 +1,159 @@
+{
+  "class": "ExplosionPacket",
+  "module": "server/play/explosion_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ExplosionPacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "**None** for the particles: both go out through the ported",
+    "`crate::particle::network_type()` \u2014 `Particle.NETWORK_TYPE`, the var-int id",
+    "*and* the variant's `writeData`. A `Particle.Block` therefore carries its",
+    "block state id, which `probes/expected/particlewireprobe.json` pins.",
+    "",
+    "- `SoundEvent.NETWORK_TYPE` is reused from",
+    "  [`EntitySoundEffectPacket`](super::entity_sound_effect_packet), which",
+    "  declares the same local type for the same Java constant. Java's field is",
+    "  not `@Nullable`, so a `None` sound is rejected rather than invented."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ExplosionPacket(Point center, float radius, int blockCount,",
+      "Point playerKnockback, Particle particle, SoundEvent sound, WeightedList<BlockParticleInfo>",
+      "blockParticles, boolean playSound)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "center",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `center()`."
+      ],
+      "wire": [
+        "center_x",
+        "center_y",
+        "center_z"
+      ]
+    },
+    {
+      "name": "radius",
+      "type": "f32",
+      "docs": [
+        "Java: `radius()`."
+      ]
+    },
+    {
+      "name": "block_count",
+      "type": "i32",
+      "docs": [
+        "Java: `blockCount()`."
+      ]
+    },
+    {
+      "name": "player_knockback",
+      "type": "Option<CoordVec>",
+      "docs": [
+        "Java: `playerKnockback()` \u2014 `None` is Java's `@Nullable Point`."
+      ],
+      "wire": [
+        "player_knockback_x",
+        "player_knockback_y",
+        "player_knockback_z"
+      ]
+    },
+    {
+      "name": "particle",
+      "type": "Particle",
+      "docs": [
+        "Java: `particle()` \u2014 the explosion smoke particle."
+      ],
+      "wire": "@particle",
+      "put": "crate::particle::network_type().write(buffer, &$);",
+      "take": "crate::particle::network_type().read(buffer)"
+    },
+    {
+      "name": "sound",
+      "type": "Option<SoundEvent>",
+      "docs": [
+        "Java: `sound()` \u2014 `None` is Java's `null`."
+      ],
+      "wire": "@sound",
+      "put": "match &$ { Some(sound) => buffer.write(SoundEventNetworkType, sound.clone()), None => panic!(\"ExplosionPacket#sound is null; SoundEvent.NETWORK_TYPE has no null wire form\") }",
+      "take": "Some(buffer.read(SoundEventNetworkType))"
+    },
+    {
+      "name": "block_particles",
+      "type": "WeightedList<BlockParticleInfo>",
+      "docs": [
+        "Java: `blockParticles()`."
+      ],
+      "wire": "block_particles",
+      "codec": "WeightedParticleListNetworkType"
+    },
+    {
+      "name": "play_sound",
+      "type": "bool",
+      "docs": [
+        "Java: `playSound()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)] // Java's eight-field canonical constructor"
+    ],
+    "docs": [
+      "Java: `new ExplosionPacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ExplosionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ExplosionSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VECTOR3D, FLOAT, INT,",
+      "VECTOR3D.optional(), Particle.NETWORK_TYPE, SoundEvent.NETWORK_TYPE,",
+      "WeightedList.networkType(\u2026), BOOLEAN)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "explosion_packet.ext.rs",
+  "imports": [
+    "use crate::particle::Particle;",
+    "use crate::utils::weighted_list::WeightedList;",
+    "use super::entity_sound_effect_packet::SoundEvent;"
+  ],
+  "tests": "explosion_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "VECTOR3D",
+      "reason": "the vectors are carried by the CoordVec bindings, which write three doubles in the same order"
+    },
+    {
+      "construct": ".optional(",
+      "reason": "the knockback is an Option over a presence flag and three doubles, written the same way"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use crate::network::types::Type;",
+    "use super::entity_sound_effect_packet::SoundEventNetworkType;"
+  ]
+}

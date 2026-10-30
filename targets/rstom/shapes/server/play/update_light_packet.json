@@ -1,0 +1,88 @@
+{
+  "class": "UpdateLightPacket",
+  "module": "server/play/update_light_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.UpdateLightPacket`",
+    "and the `data.LightData` it carries.",
+    "",
+    "# Local stubs",
+    "",
+    "- [`LightData`] stands in for",
+    "  `net.minestom.server.network.packet.server.play.data.LightData`; the",
+    "  `play.data` package belongs to another porting wave, so the record lives",
+    "  here.",
+    "- Java's four `BitSet` masks are written with `NetworkBuffer.BITSET`, which",
+    "  is `BYTE_ARRAY.transform(BitSet::valueOf, BitSet::toByteArray)` \u2014 a var-int",
+    "  length plus the set's bytes. `java.util.BitSet` itself is not ported, and",
+    "  the port has no bit-set type, so each mask is carried as those bytes",
+    "  ([`LightData::sky_mask`] and friends), which is exactly the wire form."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UpdateLightPacket(int chunkX, int chunkZ, LightData lightData)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chunk_x",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkX()`."
+      ]
+    },
+    {
+      "name": "chunk_z",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkZ()`."
+      ]
+    },
+    {
+      "name": "light_data",
+      "type": "LightData",
+      "docs": [
+        "Java: `lightData()` \u2014 see the module docs for the local stand-in."
+      ],
+      "wire": "@light"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UpdateLightPacket(int chunkX, int chunkZ, LightData",
+      "lightData)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UpdateLightPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UpdateLightSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, UpdateLightPacket::chunkX,",
+      "VAR_INT, UpdateLightPacket::chunkZ, LightData.NETWORK_TYPE,",
+      "UpdateLightPacket::lightData, UpdateLightPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "update_light_packet.ext.rs",
+  "tests": "update_light_packet.tests.rs",
+  "bound": true
+}

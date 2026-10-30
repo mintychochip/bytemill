@@ -1,0 +1,67 @@
+{
+  "class": "ClientTabCompletePacket",
+  "module": "client/play/client_tab_complete_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientTabCompletePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientTabCompletePacket(int transactionId, String text)",
+      "implements ClientPacket.Play`.",
+      "",
+      "The compact constructor's `Check.argCondition(text.length() >",
+      "MAX_TEXT_LENGTH, \"Text length cannot be greater than {0}\", MAX_TEXT_LENGTH)`",
+      "is a validation Rust leaves to the caller; the probe pins Java's UTF-16",
+      "`String.length()` semantics at the boundary."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "i32",
+      "docs": [
+        "Java: `transactionId()`."
+      ]
+    },
+    {
+      "name": "text",
+      "type": "String",
+      "docs": [
+        "Java: `text()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientTabCompletePacket(transactionId, text)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientTabCompletePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientTabCompleteSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ..., STRING, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_tab_complete_packet.ext.rs"
+}

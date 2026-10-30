@@ -20,9 +20,7 @@ use std::path::Path;
 const KNOWN_UNEXTRACTABLE: &[&str] = &["ClientSignedCommandChatPacket", "ShowDialogPacket"];
 
 fn packet_sources_present() -> bool {
-    common::rstom_tables::rstom_dir()
-        .join("crates/rstom/src/network/packet")
-        .is_dir()
+    bytemill::shapes::packet_root(&common::rstom_tables::rstom_dir()).is_dir()
 }
 
 /// Every unit whose hand file extracts, with its shape.
@@ -297,10 +295,16 @@ fn every_kept_import_binds_a_name_the_packet_uses_and_the_generator_does_not_own
         let (hand, siblings) = hand_and_siblings(&rstom, unit);
         let needed = format!("{}{}", strip_use_statements(&hand), siblings);
         for statement in &shape.imports {
-            if statement.starts_with("pub ") {
+            // A re-export keeps its docs in the statement; the docs are not code.
+            let code: String = statement
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if code.trim_start().starts_with("pub ") {
                 continue;
             }
-            for name in bound_names(statement) {
+            for name in bound_names(&code) {
                 assert!(
                     !owned.contains(name.as_str()),
                     "cls={} statement={statement} name={name} is generator-owned",

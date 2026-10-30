@@ -1,0 +1,81 @@
+{
+  "class": "ServerLinksPacket",
+  "module": "server/common/server_links_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.ServerLinksPacket`",
+    "with its nested `Entry` and `KnownLinkType`.",
+    "",
+    "`Entry.linkType` is a `net.minestom.server.utils.Either<KnownLinkType,",
+    "Component>`; the port models the tagged union as a Rust enum. The component",
+    "side is [`Component`](crate::text::Component), adventure's component tree."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ServerLinksPacket(List<Entry> entries)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entries",
+      "type": "Vec<Entry>",
+      "docs": [
+        "Java: `entries()`."
+      ],
+      "wire": "links",
+      "item": {
+        "fields": [
+          {
+            "name": "_",
+            "type": "Entry",
+            "docs": [],
+            "wire": "is_builtin..url",
+            "put": "EntrySerializer.write(buffer, &(Box::new($.clone()) as PacketValue));",
+            "take": "EntrySerializer.read(buffer).downcast_ref::<Entry>().expect(\"Entry\").clone()",
+            "whole_span": true
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ServerLinksPacket(List<Entry>)` and the varargs constructor."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ServerLinksPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ServerLinksSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `Entry.NETWORK_TYPE.list(MAX_ENTRIES)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "server_links_packet.ext.rs",
+  "tests": "server_links_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "the generated read loops 0..count, which is empty for a negative count just as size.max(0) is"
+    }
+  ],
+  "bound": true
+}

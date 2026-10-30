@@ -287,12 +287,19 @@ Bytemill supports in-tree code generation for the Rust Minestom server (`rstom`)
 # Standalone drop-in mirror crate for rstom-packets (its package is named `bml_rstom`)
 bml emit rstom $ROOT --out ../rstom/crates/bml_rstom
 
-# In-place generation within rstom workspace using AST shape ledgers
-bml shapes extract $ROOT --rstom ../rstom --eligible --out targets/rstom/shapes
-bml emit rstom-tree $ROOT --rstom ../rstom --shapes targets/rstom/shapes [--check]
+# In-place generation within rstom workspace: every packet payload module is written from the
+# shape ledger (targets/rstom/shapes) and the bindings table (targets/rstom/bindings.json)
+bml emit rstom-tree $ROOT --rstom ../rstom [--check]
+
+# Author or change a shape
+bml shapes wires $ROOT --rstom ../rstom --class SetSlotPacket    # the wire fields a shape binds
+bml shapes render $ROOT --rstom ../rstom --class SetSlotPacket   # preview what it generates
+bml shapes fmt                                                   # canonical form of the ledger
 ```
 
-See the [rstom packet generation design](docs/superpowers/specs/2026-10-11-bps-generates-rstom-packets-design.md) for shape ledgers and wire pin gates.
+See the [rstom packet generation design](docs/superpowers/specs/2026-10-11-bps-generates-rstom-packets-design.md)
+for shape ledgers and wire pin gates, and [bound shapes](docs/superpowers/specs/2026-10-30-bml-bound-shapes-generate-every-packet.md)
+for how the hand fields bind to the wire fields.
 
 ---
 
@@ -308,15 +315,15 @@ scripts/bytemill_cargo.sh clippy --workspace --all-targets -- -D warnings
 
 `scripts/bytemill_cargo.sh` wraps `cargo` under a systemd user scope (`MemoryMax=8G`, 4 jobs, 4 test threads) to cap memory usage during large protocol oracle suites.
 
-Generated inputs are not stored in the repository:
+The ProtoDef oracle input is not stored in the repository:
 
 ```bash
 scripts/fetch_minecraft_data.py   # pinned ProtoDef protocol.json files (data/minecraft-data/pc)
-scripts/extract_rstom_shapes.sh   # rstom shape ledger (targets/rstom/shapes)
 ```
 
-Tests that need them skip with the matching command in the message when they are absent.
-`build/` and `target/` are build output and stay untracked.
+Tests that need it skip with the matching command in the message when it is absent.
+`build/` and `target/` are build output and stay untracked. The rstom shape ledger
+(`targets/rstom/shapes`) and bindings table are authored source and are tracked.
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: it builds `bml` for every
 supported platform, smoke-tests each binary, writes `SHA256SUMS`, and attaches the archives

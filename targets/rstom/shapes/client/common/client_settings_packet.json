@@ -1,0 +1,130 @@
+{
+  "class": "ClientSettingsPacket",
+  "module": "client/common/client_settings_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientSettingsPacket`.",
+    "",
+    "# Local stub",
+    "",
+    "`net.minestom.server.network.player.ClientSettings` lives in the `network.player`",
+    "package, which is not part of this port, so [`ClientSettings`] is declared",
+    "here with exactly the record components and the `NETWORK_TYPE` template Java",
+    "defines. `MainHand` comes from the ported `entity` module and",
+    "`ChatMessageType` from the ported `message` module; `Locale` is carried as",
+    "its language tag, which is what `LOCALE_SERIALIZER` writes",
+    "(`Locale::toLanguageTag`, read back by replacing `_` with `-`)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSettingsPacket(ClientSettings settings) implements",
+      "ClientPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "settings",
+      "type": "ClientSettings",
+      "docs": [
+        "Java: `settings()`."
+      ],
+      "nest": {
+        "fields": [
+          {
+            "name": "locale",
+            "type": "String",
+            "docs": [],
+            "wire": "locale",
+            "read": "$.replace('_', \"-\")"
+          },
+          {
+            "name": "view_distance",
+            "type": "i8",
+            "docs": []
+          },
+          {
+            "name": "chat_message_type",
+            "type": "ChatMessageType",
+            "docs": [],
+            "wire": "chat_mode",
+            "write": "chat_message_type_id($)",
+            "read": "chat_message_type_from_id($)"
+          },
+          {
+            "name": "chat_colors",
+            "type": "bool",
+            "docs": []
+          },
+          {
+            "name": "displayed_skin_parts",
+            "type": "i8",
+            "docs": []
+          },
+          {
+            "name": "main_hand",
+            "type": "MainHand",
+            "docs": [],
+            "wire": "main_hand",
+            "write": "main_hand_id($)",
+            "read": "main_hand_from_id($)"
+          },
+          {
+            "name": "enable_text_filtering",
+            "type": "bool",
+            "docs": []
+          },
+          {
+            "name": "allow_server_listings",
+            "type": "bool",
+            "docs": []
+          },
+          {
+            "name": "particle_setting",
+            "type": "ParticleSetting",
+            "docs": [],
+            "wire": "particle_status",
+            "write": "$.ordinal()",
+            "read": "ParticleSetting::from_ordinal($)"
+          }
+        ],
+        "ctor": "ClientSettings::new(locale, view_distance, chat_message_type, chat_colors, displayed_skin_parts, main_hand, enable_text_filtering, allow_server_listings, particle_setting)"
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSettingsPacket(ClientSettings)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSettingsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSettingsSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(LOCALE_SERIALIZER, \u2026, BYTE, \u2026, Enum(ChatMessageType), \u2026,",
+      "BOOLEAN, \u2026, BYTE, \u2026, MainHand.NETWORK_TYPE, \u2026, BOOLEAN, \u2026, BOOLEAN, \u2026,",
+      "ParticleSetting.NETWORK_TYPE, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_settings_packet.ext.rs",
+  "tests": "client_settings_packet.tests.rs",
+  "bound": true
+}

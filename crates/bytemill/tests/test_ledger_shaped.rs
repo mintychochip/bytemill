@@ -1,41 +1,7 @@
-//! Shape ledger invariants: every committed ledger file reserialises and
-//! the special-render sets stay exactly known.
+//! Shape ledger invariants: every committed ledger file reserialises and the ledger covers the
+//! protocol, one shape per BML packet.
 
 mod common;
-
-const SHAPED_NEW_BODY_PACKETS: &[&str] = &[
-    "ClientCommandChatPacket",
-    "ClientNameItemPacket",
-    "ClientPluginMessagePacket",
-];
-
-const SHAPED_READ_VIA_NEW_PACKETS: &[&str] = &[
-    "ClientAttackPacket",
-    "ClientChatAckPacket",
-    "ClientChunkBatchReceivedPacket",
-    "ClientClickWindowButtonPacket",
-    "ClientCloseWindowPacket",
-    "ClientCommandChatPacket",
-    "ClientGenerateStructurePacket",
-    "ClientHeldItemChangePacket",
-    "ClientLockDifficultyPacket",
-    "ClientNameItemPacket",
-    "ClientPickItemFromBlockPacket",
-    "ClientPickItemFromEntityPacket",
-    "TickStepPacket",
-    "UnloadChunkPacket",
-    "UpdateHealthPacket",
-    "UpdateSimulationDistancePacket",
-    "UpdateViewDistancePacket",
-    "UpdateViewPositionPacket",
-    "WindowPropertyPacket",
-    "WorldBorderCenterPacket",
-    "WorldBorderLerpSizePacket",
-    "WorldBorderSizePacket",
-    "WorldBorderWarningDelayPacket",
-    "WorldBorderWarningReachPacket",
-    "WorldEventPacket",
-];
 
 fn ledger_present() -> bool {
     if common::committed_shapes_present() {
@@ -50,41 +16,32 @@ fn ledger() -> Vec<(String, bytemill::shapes::Shape)> {
 }
 
 #[test]
-fn non_trivial_new_body_packets() {
+fn a_new_body_or_a_read_through_new_needs_a_new() {
     if !ledger_present() {
         return;
     }
-    let mut found: Vec<String> = ledger()
+    let broken: Vec<String> = ledger()
         .into_iter()
-        .filter(|(_, s)| !s.new.body.is_empty())
+        .filter(|(_, s)| (!s.new.body.is_empty() || s.serializer.read_via_new) && !s.new.present)
         .map(|(_, s)| s.cls)
         .collect();
-    found.sort();
-    let mut expected = SHAPED_NEW_BODY_PACKETS.to_vec();
-    expected.sort();
-    assert_eq!(found, expected);
+    assert!(broken.is_empty(), "no `new` to carry the body or the read: {broken:?}");
 }
 
 #[test]
-fn read_via_new_packets() {
+fn every_bml_unit_has_exactly_one_shape() {
     if !ledger_present() {
         return;
     }
-    let mut found: Vec<String> = ledger()
-        .into_iter()
-        .filter(|(_, s)| s.serializer.read_via_new)
-        .map(|(_, s)| s.cls)
-        .collect();
-    found.sort();
-    let mut expected = SHAPED_READ_VIA_NEW_PACKETS.to_vec();
-    expected.sort();
-    assert_eq!(found, expected);
-}
-
-#[test]
-fn exactly_ninety_two_shapes() {
-    if !ledger_present() {
+    let Some(table) = common::rstom_tables::real_table() else {
+        eprintln!("skipped: rstom packets.json not present");
         return;
-    }
-    assert_eq!(ledger().len(), 92);
+    };
+    let resolved = common::load_minecraft().unwrap();
+    let units = bytemill::minestom::build_units(&resolved, &table).unwrap();
+    let mut modules: Vec<String> = ledger().into_iter().map(|(m, _)| m).collect();
+    modules.sort();
+    let mut wanted: Vec<String> = units.iter().map(bytemill::shapes::module_path).collect();
+    wanted.sort();
+    assert_eq!(modules, wanted);
 }

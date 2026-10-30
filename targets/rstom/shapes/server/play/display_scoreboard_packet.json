@@ -1,0 +1,72 @@
+{
+  "class": "DisplayScoreboardPacket",
+  "module": "server/play/display_scoreboard_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.DisplayScoreboardPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DisplayScoreboardPacket(byte position, String scoreName)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "position",
+      "type": "i8",
+      "docs": [
+        "Java: `position()` \u2014 the sidebar slot."
+      ],
+      "codec": "BYTE"
+    },
+    {
+      "name": "score_name",
+      "type": "String",
+      "docs": [
+        "Java: `scoreName()` \u2014 the objective's display name, empty to clear."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DisplayScoreboardPacket(byte, String)`."
+    ],
+    "body": [
+      "        Self {",
+      "            position,",
+      "            score_name: score_name.into(),",
+      "        }"
+    ],
+    "params": "position: i8, score_name: impl Into<String>"
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DisplayScoreboardPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DisplayScoreboardSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BYTE, STRING, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "display_scoreboard_packet.tests.rs",
+  "bound": true
+}

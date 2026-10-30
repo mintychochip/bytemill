@@ -1,0 +1,84 @@
+{
+  "class": "SetPassengersPacket",
+  "module": "server/play/set_passengers_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetPassengersPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetPassengersPacket(int vehicleEntityId, List<Integer>",
+      "passengersId) implements ServerPacket.Play`.",
+      "",
+      "Java's compact constructor copies the list; a `Vec` needs no equivalent."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "vehicle_entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `vehicleEntityId()`."
+      ]
+    },
+    {
+      "name": "passengers_id",
+      "type": "Vec<i32>",
+      "docs": [
+        "Java: `passengersId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetPassengersPacket(int, List<Integer>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetPassengersPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetPassengersSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "SetPassengersPacket::vehicleEntityId, VAR_INT.list(MAX_PASSENGERS),",
+      "SetPassengersPacket::passengersId, SetPassengersPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "set_passengers_packet.ext.rs",
+  "tests": "set_passengers_packet.tests.rs",
+  "hooks": {
+    "write.start": [
+      "i32::try_from(value.passengers_id.len()).expect(\"list length fits an int\");"
+    ],
+    "read.after:passengers_count": [
+      "assert!(",
+      "    (0..=MAX_PASSENGERS).contains(&passengers_count),",
+      "    \"Collection size ({passengers_count}) is outside the allowed range (0-{MAX_PASSENGERS})\"",
+      ");"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": ".list(",
+      "reason": "Type::list(max): write checks the length fits an int and read checks the declared size against the bound; both are reproduced by the hooks. The hand read also reserved min(size, 65536, readable bytes) up front; the generated loop grows the Vec as it reads, so a forged size reserves nothing."
+    }
+  ]
+}

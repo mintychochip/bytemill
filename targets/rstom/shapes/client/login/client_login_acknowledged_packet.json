@@ -1,0 +1,44 @@
+{
+  "class": "ClientLoginAcknowledgedPacket",
+  "module": "client/login/client_login_acknowledged_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.login.ClientLoginAcknowledgedPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientLoginAcknowledgedPacket() implements ClientPacket.Login`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientLoginAcknowledgedPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "ClientLoginAcknowledgedPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

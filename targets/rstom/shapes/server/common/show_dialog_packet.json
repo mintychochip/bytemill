@@ -1,0 +1,101 @@
+{
+  "class": "ShowDialogPacket",
+  "module": "server/common/show_dialog_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.ShowDialogPacket`.",
+    "",
+    "Java's `Dialog.NETWORK_TYPE` is",
+    "`Holder.networkType(Registries::dialog, REGISTRY_NETWORK_TYPE)`. A direct",
+    "holder writes var int `0` and then the dialog's typed NBT. A registry",
+    "reference writes `registryId + 1` and stops. [`DialogHolder::registry_id`]",
+    "stores that registry id (`0` is the direct form). `INLINE_SERIALIZER`",
+    "(bare typed NBT, no holder prefix) is",
+    "[`ShowDialogPacket::inline_serializer`], generated with the configuration",
+    "form of the packet in `server::configuration::show_dialog_packet`; it is",
+    "the configuration state's serializer, not this module's."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ShowDialogPacket(Holder<Dialog> dialog)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "dialog",
+      "type": "DialogHolder",
+      "docs": [
+        "Java: `dialog()` \u2014 see the module docs for the local holder."
+      ],
+      "nest": {
+        "fields": [
+          {
+            "name": "registry_id",
+            "type": "i32",
+            "docs": [],
+            "wire": "dialog_id",
+            "write": "if $ == 0 { 0 } else { $ + 1 }",
+            "read": "if $ == 0 { 0 } else { $ - 1 }"
+          },
+          {
+            "name": "data",
+            "type": "BinaryTag",
+            "docs": [],
+            "wire": "dialog",
+            "put": "write_nbt(buffer, &$);",
+            "take": "read_nbt(buffer)",
+            "absent": "BinaryTag::Compound(crate::nbt::CompoundBinaryTag::empty())"
+          }
+        ],
+        "ctor": "DialogHolder { registry_id, data }"
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ShowDialogPacket(Holder<Dialog>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ShowDialogPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ShowDialogSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(Dialog.NETWORK_TYPE, \u2026)` \u2014 `HolderNetworkTypeImpl`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "show_dialog_packet.ext.rs",
+  "tests": "show_dialog_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "write_nbt",
+      "reason": "the dialog tag is written by the put of the `dialog` wire field, as the hand write did"
+    },
+    {
+      "construct": "read_nbt",
+      "reason": "the dialog tag is read by the take of the `dialog` wire field, as the hand read did"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use crate::nbt::BinaryTag;",
+    "use crate::network::packet::server::configuration::registry_data_packet::{read_nbt, write_nbt};"
+  ]
+}

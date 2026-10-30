@@ -1,0 +1,86 @@
+{
+  "class": "ClientUseItemPacket",
+  "module": "client/play/client_use_item_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientUseItemPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientUseItemPacket(PlayerHand hand, int sequence, float yaw,",
+      "float pitch) implements ClientPacket.Play`.",
+      "",
+      "`PlayerHand` comes from the ported",
+      "[`client_player_block_placement_packet`](crate::network::packet::client::play::client_player_block_placement_packet)",
+      "module, which carries the enum as a local stand-in for the unported",
+      "`entity` package."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "hand",
+      "type": "PlayerHand",
+      "docs": [
+        "Java: `hand()`."
+      ]
+    },
+    {
+      "name": "sequence",
+      "type": "i32",
+      "docs": [
+        "Java: `sequence()`."
+      ]
+    },
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()`."
+      ]
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientUseItemPacket(hand, sequence, yaw, pitch)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientUseItemPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientUseItemSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(Enum(PlayerHand.class), ..., VAR_INT, ..., FLOAT, ...,",
+      "FLOAT, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::network::packet::client::play::client_player_block_placement_packet::PlayerHand;"
+  ],
+  "bound": true
+}

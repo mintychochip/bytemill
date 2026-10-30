@@ -1,0 +1,103 @@
+{
+  "class": "TagsPacket",
+  "module": "server/common/tags_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.TagsPacket` with",
+    "its nested `Registry` and `Tag`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TagsPacket(List<Registry> registries)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "registries",
+      "type": "Vec<Registry>",
+      "docs": [
+        "Java: `registries()`."
+      ],
+      "wire": "registries",
+      "item": {
+        "fields": [
+          {
+            "name": "registry",
+            "type": "String",
+            "docs": []
+          },
+          {
+            "name": "tags",
+            "type": "Vec<Tag>",
+            "docs": [],
+            "wire": "tags",
+            "item": {
+              "fields": [
+                {
+                  "name": "identifier",
+                  "type": "String",
+                  "docs": [],
+                  "wire": "name"
+                },
+                {
+                  "name": "entries",
+                  "type": "Vec<i32>",
+                  "docs": [],
+                  "wire": "entries"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TagsPacket(List<Registry>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TagsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TagsSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `Registry.SERIALIZER.list()` template \u2014 an unbounded size var int,",
+      "then each registry."
+    ],
+    "read_via_new": false
+  },
+  "extras": "tags_packet.ext.rs",
+  "imports": [
+    "use crate::network::types::VAR_INT_ARRAY;"
+  ],
+  "tests": "tags_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "the generated read loops 0..count, which is empty for a negative count just as size.max(0) is"
+    },
+    {
+      "construct": ".expect(",
+      "reason": "the generated read builds each entry itself, so there is no downcast of an erased packet value to unwrap"
+    }
+  ],
+  "bound": true
+}

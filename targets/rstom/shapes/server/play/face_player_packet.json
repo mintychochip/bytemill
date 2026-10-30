@@ -1,0 +1,109 @@
+{
+  "class": "FacePlayerPacket",
+  "module": "server/play/face_player_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.FacePlayerPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record FacePlayerPacket(FacePosition facePosition, Point target, int",
+      "entityId, FacePosition entityFacePosition)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "face_position",
+      "type": "FacePosition",
+      "docs": [
+        "Java: `facePosition()` \u2014 which part of the player faces the target."
+      ],
+      "wire": "feeteyes",
+      "codec": "enum_type::<FacePosition>()"
+    },
+    {
+      "name": "target",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `target()` \u2014 the point being looked at."
+      ],
+      "wire": [
+        "target_x",
+        "target_y",
+        "target_z"
+      ]
+    },
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()` \u2014 written only when strictly positive."
+      ],
+      "wire": "entity_id",
+      "guarded_default": true
+    },
+    {
+      "name": "entity_face_position",
+      "type": "Option<FacePosition>",
+      "docs": [
+        "Java: `entityFacePosition()` \u2014 written only alongside `entityId`."
+      ],
+      "wire": "entity_feeteyes",
+      "write": "$.unwrap_or(FacePosition::Feet).ordinal()",
+      "read": "FacePosition::from_ordinal($)",
+      "write_whole": true
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new FacePlayerPacket(FacePosition, Point, int, FacePosition)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `FacePlayerPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "FacePlayerSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the hand-written `SERIALIZER` of `FacePlayerPacket`. The entity id and",
+      "its face position are present exactly when the id is strictly positive."
+    ],
+    "read_via_new": false
+  },
+  "extras": "face_player_packet.ext.rs",
+  "tests": "face_player_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "VECTOR3D",
+      "reason": "the target is carried by the CoordVec bindings, which write three doubles in the same order"
+    },
+    {
+      "construct": ".unwrap_or",
+      "reason": "the write puts the face position or Feet, as the hand write did"
+    }
+  ],
+  "constants": {
+    "is_entity": "value.entity_id > 0"
+  },
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;",
+    "use crate::network::types::JavaEnum;"
+  ]
+}

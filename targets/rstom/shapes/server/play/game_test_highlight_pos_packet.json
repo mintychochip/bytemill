@@ -1,0 +1,68 @@
+{
+  "class": "GameTestHighlightPosPacket",
+  "module": "server/play/game_test_highlight_pos_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.GameTestHighlightPosPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record GameTestHighlightPosPacket(Point absoluteBlockPosition, Point",
+      "relativeBlockPosition)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "absolute_block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `absoluteBlockPosition()`."
+      ],
+      "wire": "absolute_location"
+    },
+    {
+      "name": "relative_block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `relativeBlockPosition()`."
+      ],
+      "wire": "relative_location"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new GameTestHighlightPosPacket(Point, Point)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `GameTestHighlightPosPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "GameTestHighlightPosSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BLOCK_POSITION, BLOCK_POSITION)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "game_test_highlight_pos_packet.tests.rs",
+  "bound": true
+}

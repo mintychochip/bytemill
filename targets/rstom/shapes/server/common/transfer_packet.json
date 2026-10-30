@@ -1,0 +1,62 @@
+{
+  "class": "TransferPacket",
+  "module": "server/common/transfer_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.TransferPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TransferPacket(String host, int port) implements",
+      "ServerPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "host",
+      "type": "String",
+      "docs": [
+        "Java: `host()`."
+      ]
+    },
+    {
+      "name": "port",
+      "type": "i32",
+      "docs": [
+        "Java: `port()` \u2014 a var int, not an unsigned short."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TransferPacket(String, int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TransferPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TransferSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, \u2026, VAR_INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -1,0 +1,175 @@
+{
+  "class": "PlayerChatMessagePacket",
+  "module": "server/play/player_chat_message_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.PlayerChatMessagePacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "- `components()` / `copyWithOperator` come from",
+    "  `ServerPacket.ComponentHolding`, ported as `ComponentHoldingServerPacket`",
+    "  (`super::super::server_packet`).",
+    "- Java's `msgTypeName` / `msgTypeTarget` are adventure components",
+    "  ([`Component`](crate::text::Component)); the display name rides the same",
+    "  type."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PlayerChatMessagePacket(int globalIndex, UUID sender, int",
+      "index, @Nullable MessageSignature signature, SignedMessageBody.Packed",
+      "messageBody, @Nullable Component unsignedContent, FilterMask filterMask, int",
+      "msgTypeId, Component msgTypeName, @Nullable Component msgTypeTarget)",
+      "implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "global_index",
+      "type": "i32",
+      "docs": [
+        "Java: `globalIndex()`."
+      ]
+    },
+    {
+      "name": "sender",
+      "type": "Uuid",
+      "docs": [
+        "Java: `sender()`."
+      ]
+    },
+    {
+      "name": "index",
+      "type": "i32",
+      "docs": [
+        "Java: `index()`."
+      ]
+    },
+    {
+      "name": "signature",
+      "type": "Option<MessageSignature>",
+      "docs": [
+        "Java: `signature()` \u2014 a 256-byte raw signature."
+      ],
+      "wire": "signature",
+      "write": "$.signature().to_vec()",
+      "read": "{ let mut fixed = [0u8; 256]; fixed.copy_from_slice(&$); MessageSignature::new(fixed).ok() }",
+      "read_flat": true
+    },
+    {
+      "name": "message_body",
+      "type": "SignedMessageBodyPacked",
+      "docs": [
+        "Java: `messageBody()`."
+      ],
+      "wire": "message..previous_messages",
+      "put": "write_message_body(buffer, &$);",
+      "take": "read_message_body(buffer)"
+    },
+    {
+      "name": "unsigned_content",
+      "type": "Option<Component>",
+      "docs": [
+        "Java: `unsignedContent()`."
+      ],
+      "wire": "unsigned_content"
+    },
+    {
+      "name": "filter_mask",
+      "type": "FilterMask",
+      "docs": [
+        "Java: `filterMask()`."
+      ],
+      "wire": "mask_type..mask_bytes",
+      "put": "write_filter_mask(buffer, &$);",
+      "take": "read_filter_mask(buffer)"
+    },
+    {
+      "name": "msg_type_id",
+      "type": "i32",
+      "docs": [
+        "Java: `msgTypeId()`."
+      ],
+      "wire": "holder_id..narration_style",
+      "put": "buffer.write(VAR_INT, $);",
+      "take": "buffer.read(VAR_INT)"
+    },
+    {
+      "name": "msg_type_name",
+      "type": "Component",
+      "docs": [
+        "Java: `msgTypeName()`."
+      ],
+      "wire": "sender_name"
+    },
+    {
+      "name": "msg_type_target",
+      "type": "Option<Component>",
+      "docs": [
+        "Java: `msgTypeTarget()`."
+      ],
+      "wire": "target_name"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)]"
+    ],
+    "docs": [
+      "Java: `new PlayerChatMessagePacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PlayerChatMessagePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PlayerChatMessageSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, \u2026, UUID, \u2026, VAR_INT, \u2026,",
+      "MessageSignature.SERIALIZER.optional(), \u2026, SignedMessageBody.Packed.SERIALIZER,",
+      "\u2026, COMPONENT.optional(), \u2026, FilterMask.SERIALIZER, \u2026, VAR_INT, \u2026, COMPONENT,",
+      "\u2026, COMPONENT.optional(), \u2026, PlayerChatMessagePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "player_chat_message_packet.ext.rs",
+  "imports": [
+    "use crate::crypto::{FilterMask, MessageSignature, SignedMessageBodyPacked};",
+    "use crate::text::Component;"
+  ],
+  "accepted": [
+    {
+      "construct": "write_signature",
+      "reason": "the generated write puts the presence flag and the 256 signature bytes, as write_signature does"
+    },
+    {
+      "construct": "read_signature",
+      "reason": "the generated read reads the presence flag and the 256 signature bytes, as read_signature does"
+    },
+    {
+      "construct": "write_component_optional",
+      "reason": "the generated write puts a presence flag and the component, as write_component_optional does"
+    },
+    {
+      "construct": "read_component_optional",
+      "reason": "the generated read reads a presence flag and the component, as read_component_optional does"
+    }
+  ],
+  "bound": true
+}

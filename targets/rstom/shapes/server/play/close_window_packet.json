@@ -1,0 +1,55 @@
+{
+  "class": "CloseWindowPacket",
+  "module": "server/play/close_window_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.CloseWindowPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CloseWindowPacket(int windowId) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new CloseWindowPacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CloseWindowPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CloseWindowSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

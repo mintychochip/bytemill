@@ -1,0 +1,89 @@
+{
+  "class": "ClientSetTestBlockPacket",
+  "module": "client/play/client_set_test_block_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientSetTestBlockPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSetTestBlockPacket(Point blockPosition, TestBlockMode",
+      "mode, String message) implements ClientPacket.Play`.",
+      "",
+      "The compact constructor's `Check.argCondition(message.length() >",
+      "Short.MAX_VALUE, ...)` is a validation that Rust leaves to the caller: a",
+      "`String` cannot fail to construct. `probes/expected/client3probe.json`",
+      "pins the Java outcome for a 32767/32768 code-unit boundary."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ],
+      "wire": "position"
+    },
+    {
+      "name": "mode",
+      "type": "TestBlockMode",
+      "docs": [
+        "Java: `mode()`."
+      ],
+      "wire": "mode",
+      "write": "$.ordinal()",
+      "read": "TestBlockMode::from_ordinal($)"
+    },
+    {
+      "name": "message",
+      "type": "String",
+      "docs": [
+        "Java: `message()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSetTestBlockPacket(blockPosition, mode, message)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSetTestBlockPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSetTestBlockSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BLOCK_POSITION, ..., TestBlockMode.NETWORK_TYPE, ...,",
+      "STRING, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_set_test_block_packet.ext.rs",
+  "accepted": [
+    {
+      "construct": "write_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which packs the block position the same way"
+    },
+    {
+      "construct": "read_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which unpacks the block position the same way"
+    }
+  ],
+  "bound": true
+}

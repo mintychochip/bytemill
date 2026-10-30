@@ -1,0 +1,150 @@
+{
+  "class": "AdvancementsPacket",
+  "module": "server/play/advancements_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.AdvancementsPacket`",
+    "and every record nested in it (`AdvancementMapping`, `Advancement`,",
+    "`Requirement`, `DisplayData`, `ProgressMapping`, `AdvancementProgress`,",
+    "`Criteria`, `CriterionProgress`).",
+    "",
+    "# Components",
+    "",
+    "[`Component`] is [`crate::text::Component`], adventure's component tree \u2014",
+    "the same type Java's records hold. It moves through a [`NetworkBuffer`]",
+    "with [`Component::write`] / [`Component::read`] (see",
+    "[`crate::adventure::component_network`]), which round-trip the full-NBT",
+    "payload `NetworkBuffer.COMPONENT` puts on the wire, and packet equality is",
+    "structural on the decoded tree.",
+    "",
+    "- [`Icon`] is the `ItemStack` of `DisplayData`. It holds a real",
+    "  [`ItemStack`] and writes it with `ItemStackTemplate.NETWORK_TYPE` \u2014 the",
+    "  **material id first**, then the amount, then `ItemStack::components`, the",
+    "  *resolved* component map (the material's prototype merged with the stack's",
+    "  own patch). Note that this is a different type from the",
+    "  `ItemStack::network_type()` the neighbouring packets use, which writes the",
+    "  **amount first** and the *patch* rather than the resolved map; the two",
+    "  orders disagree and each packet must use its own.",
+    "  `probes/expected/itemstackiconwireprobe.json` pins the field order and the",
+    "  total length for an air, a plain and a patched icon. The resolved map is a",
+    "  `java.util.HashMap`, so its entry order is not stable between JVM runs \u2014",
+    "  see the entry-order note on",
+    "  `crate::item::component::network::ItemStackTemplateNetworkType`.",
+    "",
+    "`FrameType` comes from the ported `advancements` module and `Material` from",
+    "the ported `item` module."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record AdvancementsPacket(boolean reset, List<AdvancementMapping>",
+      "advancementMappings, List<String> identifiersToRemove, List<ProgressMapping>",
+      "progressMappings, boolean showAdvancements) implements ServerPacket.Play,",
+      "ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "reset",
+      "type": "bool",
+      "docs": [
+        "Java: `reset()`."
+      ]
+    },
+    {
+      "name": "advancement_mappings",
+      "type": "Vec<AdvancementMapping>",
+      "docs": [
+        "Java: `advancementMappings()`."
+      ],
+      "wire": "advancement_mappings"
+    },
+    {
+      "name": "identifiers_to_remove",
+      "type": "Vec<String>",
+      "docs": [
+        "Java: `identifiersToRemove()`."
+      ],
+      "wire": "identifiers_to_remove"
+    },
+    {
+      "name": "progress_mappings",
+      "type": "Vec<ProgressMapping>",
+      "docs": [
+        "Java: `progressMappings()`."
+      ],
+      "wire": "progress_mappings"
+    },
+    {
+      "name": "show_advancements",
+      "type": "bool",
+      "docs": [
+        "Java: `showAdvancements()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new AdvancementsPacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `AdvancementsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "AdvancementsSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(...)` of `AdvancementsPacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "advancements_packet.ext.rs",
+  "imports": [
+    "/// [`Component`] is adventure's component tree (see the module docs).\npub use crate::text::Component;"
+  ],
+  "tests": "advancements_packet.tests.rs",
+  "hooks": {
+    "read.after:advancement_mappings_count": [
+      "check_size(advancement_mappings_count, MAX_ADVANCEMENTS);"
+    ],
+    "read.after:identifiers_to_remove_count": [
+      "check_size(identifiers_to_remove_count, MAX_ADVANCEMENTS);"
+    ],
+    "read.after:progress_mappings_count": [
+      "check_size(progress_mappings_count, MAX_ADVANCEMENTS);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "the generated read takes each count itself and checks it against the same limit with check_size"
+    },
+    {
+      "construct": "read_string_list",
+      "reason": "the generated read loops over the declared count, which the hook checks against MAX_ADVANCEMENTS"
+    },
+    {
+      "construct": "write_string_list",
+      "reason": "the generated write loops over the identifiers and writes them in wire order"
+    },
+    {
+      "construct": ".min(",
+      "reason": "the generated read does not reserve capacity up front"
+    }
+  ],
+  "bound": true
+}

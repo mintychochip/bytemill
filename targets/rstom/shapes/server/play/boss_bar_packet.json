@@ -1,0 +1,79 @@
+{
+  "class": "BossBarPacket",
+  "module": "server/play/boss_bar_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.BossBarPacket` and",
+    "every nested action record.",
+    "",
+    "The title is [`Component`](crate::text::Component), adventure's component",
+    "tree \u2014 the same type Java's records hold \u2014 and the colour / overlay are",
+    "adventure `BossBar.Color` / `BossBar.Overlay` enums, reproduced in",
+    "declaration order (they are sent as `NetworkBuffer.Enum`, i.e. a var int",
+    "ordinal). The title travels with [`Component::write`] /",
+    "[`Component::read`] (see [`crate::adventure::component_network`]).",
+    "",
+    "Java's `Action` is a sealed interface whose runtime type selects the wire",
+    "layout after the action id; the port models it as an enum with the same six",
+    "variants and ids."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record BossBarPacket(UUID uuid, Action action) implements",
+      "ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "uuid",
+      "type": "Uuid",
+      "docs": [
+        "Java: `uuid()` \u2014 the bar's identity."
+      ]
+    },
+    {
+      "name": "action",
+      "type": "Action",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "wire": "action..dividers",
+      "put": "buffer.write(VAR_INT, $.id()); $.write(buffer);",
+      "take": "{ let id = buffer.read(VAR_INT); Action::read(id, buffer) }"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new BossBarPacket(UUID, Action)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `BossBarPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "BossBarSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the anonymous `NetworkBuffer.Type<BossBarPacket>`, which writes the",
+      "action id before the action's own layout."
+    ],
+    "read_via_new": false
+  },
+  "extras": "boss_bar_packet.ext.rs",
+  "tests": "boss_bar_packet.tests.rs",
+  "bound": true
+}

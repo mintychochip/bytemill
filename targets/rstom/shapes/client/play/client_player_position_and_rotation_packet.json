@@ -1,0 +1,74 @@
+{
+  "class": "ClientPlayerPositionAndRotationPacket",
+  "module": "client/play/client_player_position_and_rotation_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerPositionAndRotationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerPositionAndRotationPacket(Pos position, byte",
+      "flags) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "position",
+      "type": "Pos",
+      "docs": [
+        "Java: `position()`."
+      ],
+      "wire": [
+        "x",
+        "feet_y",
+        "z",
+        "yaw",
+        "pitch"
+      ]
+    },
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPlayerPositionAndRotationPacket(Pos position, byte flags)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerPositionAndRotationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlayerPositionAndRotationSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(POS, \u2026, BYTE, \u2026)` \u2014 three doubles, two floats, then the",
+      "flag byte."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_player_position_and_rotation_packet.ext.rs",
+  "imports": [
+    "use crate::coordinate::Pos;"
+  ],
+  "bound": true
+}

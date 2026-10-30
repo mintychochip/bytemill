@@ -1,0 +1,55 @@
+{
+  "class": "ResponsePacket",
+  "module": "server/status/response_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.status.ResponsePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ResponsePacket(String jsonResponse) implements",
+      "ServerPacket.Status`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "json_response",
+      "type": "String",
+      "docs": [
+        "Java: `jsonResponse()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ResponsePacket(String jsonResponse)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ResponsePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ResponseSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, ResponsePacket::jsonResponse, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

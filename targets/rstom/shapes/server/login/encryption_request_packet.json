@@ -1,0 +1,85 @@
+{
+  "class": "EncryptionRequestPacket",
+  "module": "server/login/encryption_request_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.login.EncryptionRequestPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EncryptionRequestPacket(String serverId, byte[] publicKey,",
+      "byte[] verifyToken, boolean shouldAuthenticate) implements ServerPacket.Login`.",
+      "",
+      "Java's compact constructor clones both arrays and the record overrides",
+      "`equals`/`hashCode` with `Arrays.equals`; the port does the same through",
+      "`Vec<u8>` equality."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "server_id",
+      "type": "String",
+      "docs": [
+        "Java: `serverId()`."
+      ]
+    },
+    {
+      "name": "public_key",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `publicKey()`."
+      ],
+      "wire": "public_key"
+    },
+    {
+      "name": "verify_token",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `verifyToken()`."
+      ],
+      "wire": "verify_token"
+    },
+    {
+      "name": "should_authenticate",
+      "type": "bool",
+      "docs": [
+        "Java: `shouldAuthenticate()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `EncryptionRequestPacket(String, byte[], byte[], boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EncryptionRequestPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EncryptionRequestSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, \u2026, BYTE_ARRAY, \u2026, BYTE_ARRAY, \u2026, BOOLEAN, \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "encryption_request_packet.tests.rs",
+  "bound": true
+}

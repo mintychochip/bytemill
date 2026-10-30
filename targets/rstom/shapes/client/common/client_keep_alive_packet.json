@@ -1,0 +1,58 @@
+{
+  "class": "ClientKeepAlivePacket",
+  "module": "client/common/client_keep_alive_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientKeepAlivePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientKeepAlivePacket(long id) implements",
+      "ClientPacket.Configuration, Play` \u2014 the answer to",
+      "[`KeepAlivePacket`](crate::network::packet::server::common::keep_alive_packet::KeepAlivePacket)."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "i64",
+      "docs": [
+        "Java: `id()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientKeepAlivePacket(long)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientKeepAlivePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientKeepAliveSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(LONG, ClientKeepAlivePacket::id, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "client_keep_alive_packet.tests.rs"
+}

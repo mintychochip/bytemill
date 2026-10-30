@@ -1,0 +1,55 @@
+{
+  "class": "EndCombatEventPacket",
+  "module": "server/play/end_combat_event_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EndCombatEventPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EndCombatEventPacket(int duration) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "duration",
+      "type": "i32",
+      "docs": [
+        "Java: `duration()` \u2014 the ticks the combat will keep going for."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EndCombatEventPacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EndCombatEventPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EndCombatEventSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

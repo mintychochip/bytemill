@@ -1,0 +1,105 @@
+{
+  "class": "ChunkBiomesPacket",
+  "module": "server/play/chunk_biomes_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ChunkBiomesPacket`",
+    "and its nested `ChunkBiomeData` record.",
+    "",
+    "Java writes `chunkZ` before `chunkX` and swaps them back in the constructor",
+    "\u2014 \"x and z are inverted, not a bug\"."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ChunkBiomesPacket(List<ChunkBiomeData> chunks) implements",
+      "ServerPacket.Play` \u2014 the compact constructor copies the list."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chunks",
+      "type": "Vec<ChunkBiomeData>",
+      "docs": [
+        "Java: `chunks()`."
+      ],
+      "wire": "chunk_biome_data",
+      "item": {
+        "fields": [
+          {
+            "name": "chunk_x",
+            "type": "i32",
+            "docs": []
+          },
+          {
+            "name": "chunk_z",
+            "type": "i32",
+            "docs": []
+          },
+          {
+            "name": "data",
+            "type": "Vec<u8>",
+            "docs": []
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ChunkBiomesPacket(List<ChunkBiomeData>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ChunkBiomesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ChunkBiomesSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(ChunkBiomeData.SERIALIZER",
+      ".list(), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "chunk_biomes_packet.ext.rs",
+  "tests": "chunk_biomes_packet.tests.rs",
+  "hooks": {
+    "read.after:chunk_biome_data_count": [
+      "assert!((0..=i16::MAX as i32).contains(&chunk_biome_data_count), \"List size ({chunk_biome_data_count}) is outside the allowed range (0-{})\", i16::MAX);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "try_from",
+      "reason": "the generated write casts the list length to the wire int"
+    },
+    {
+      "construct": ".expect(",
+      "reason": "the generated write casts the list length to the wire int"
+    },
+    {
+      "construct": "write_list",
+      "reason": "the generated write loops over the chunks and writes their fields in wire order"
+    },
+    {
+      "construct": "read_list",
+      "reason": "the generated read loops over the declared count, which the hook checks"
+    }
+  ],
+  "bound": true
+}

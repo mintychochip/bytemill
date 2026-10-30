@@ -102,8 +102,8 @@ fn struct_docs_from_golden() -> Vec<String> {
 
 /// The shape of the hand keep-alive packet, extracted when the worktree has it.
 pub fn keep_alive_shape() -> bytemill::shapes::Shape {
-    let hand = crate::common::rstom_tables::rstom_dir()
-        .join("crates/rstom/src/network/packet/client/common/client_keep_alive_packet.rs");
+    let hand = bytemill::shapes::packet_root(&crate::common::rstom_tables::rstom_dir())
+        .join("client/common/client_keep_alive_packet.rs");
     if hand.is_file() {
         let text = std::fs::read_to_string(&hand).unwrap();
         if let Ok(s) = bytemill::shapes::extract_shape(
@@ -135,7 +135,7 @@ pub fn keep_alive_shape() -> bytemill::shapes::Shape {
             name: "id".into(),
             type_: "i64".into(),
             docs: vec!["Java: `id()`.".into()],
-            wire: None,
+            bind: Default::default(),
         }],
         new: bytemill::shapes::NewShape {
             present: true,

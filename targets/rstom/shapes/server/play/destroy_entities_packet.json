@@ -1,0 +1,69 @@
+{
+  "class": "DestroyEntitiesPacket",
+  "module": "server/play/destroy_entities_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.DestroyEntitiesPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DestroyEntitiesPacket(List<Integer> entityIds) implements",
+      "ServerPacket.Play` \u2014 the compact constructor copies the list."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_ids",
+      "type": "Vec<i32>",
+      "docs": [
+        "Java: `entityIds()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DestroyEntitiesPacket(List<Integer>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DestroyEntitiesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DestroyEntitiesSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT.list(Short.MAX_VALUE), \u2026)`",
+      "template, including Java's `Check.argCondition` on the declared size."
+    ],
+    "read_via_new": false
+  },
+  "extras": "destroy_entities_packet.ext.rs",
+  "tests": "destroy_entities_packet.tests.rs",
+  "hooks": {
+    "write.start": [
+      "i32::try_from(value.entity_ids.len()).expect(\"list length fits an int\");"
+    ],
+    "read.after:entity_ids_count": [
+      "assert!(",
+      "    (0..=MAX_ENTRIES).contains(&entity_ids_count),",
+      "    \"List size ({entity_ids_count}) is outside the allowed range (0-{MAX_ENTRIES})\"",
+      ");"
+    ]
+  }
+}

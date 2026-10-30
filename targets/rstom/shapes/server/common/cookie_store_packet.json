@@ -1,0 +1,86 @@
+{
+  "class": "CookieStorePacket",
+  "module": "server/common/cookie_store_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.CookieStorePacket`.",
+    "",
+    "# Local stub",
+    "",
+    "`text::Key` and `NetworkBuffer.KEY` (`STRING.transform(Key::key,",
+    "Key::asString)`) are both ported, but the only thing the wire holds is the",
+    "`namespace:value` spelling `Key.asString()` produces, so the field is a",
+    "`String`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CookieStorePacket(String key, byte[] value) implements",
+      "ServerPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "key",
+      "type": "String",
+      "docs": [
+        "Java: `key()`."
+      ]
+    },
+    {
+      "name": "value",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `value()`."
+      ],
+      "wire": "payload"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new CookieStorePacket(String, byte[])` \u2014 also the",
+      "`CookieStorePacket(Key, byte[])` constructor, whose key is",
+      "`Key.asString()`.",
+      "",
+      "# Panics",
+      "",
+      "Panics above [`MAX_VALUE_LENGTH`], matching Java's `Check.argCondition`."
+    ],
+    "body": [
+      "        assert!(",
+      "            value.len() <= MAX_VALUE_LENGTH,",
+      "            \"Cookie value length too long: {} > {}\",",
+      "            value.len(),",
+      "            MAX_VALUE_LENGTH",
+      "        );",
+      "        Self { key, value }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CookieStorePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CookieStoreSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, \u2026, BYTE_ARRAY, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "cookie_store_packet.ext.rs",
+  "tests": "cookie_store_packet.tests.rs",
+  "bound": true
+}

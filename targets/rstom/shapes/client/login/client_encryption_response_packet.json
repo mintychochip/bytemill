@@ -1,0 +1,69 @@
+{
+  "class": "ClientEncryptionResponsePacket",
+  "module": "client/login/client_encryption_response_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.login.ClientEncryptionResponsePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientEncryptionResponsePacket(byte[] sharedSecret, byte[]",
+      "encryptedVerifyToken) implements ClientPacket.Login`.",
+      "",
+      "Java clones both arrays in its compact constructor and compares them with",
+      "`Arrays.equals`; `Vec<u8>` equality is the same relation."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "shared_secret",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `sharedSecret()`."
+      ],
+      "wire": "secret"
+    },
+    {
+      "name": "encrypted_verify_token",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `encryptedVerifyToken()`."
+      ],
+      "wire": "verify_token"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientEncryptionResponsePacket(byte[], byte[])`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientEncryptionResponsePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientEncryptionResponseSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(BYTE_ARRAY, \u2026, BYTE_ARRAY, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "client_encryption_response_packet.tests.rs",
+  "bound": true
+}

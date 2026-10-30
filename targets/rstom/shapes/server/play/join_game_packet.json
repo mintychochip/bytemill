@@ -1,0 +1,162 @@
+{
+  "class": "JoinGamePacket",
+  "module": "server/play/join_game_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.JoinGamePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record JoinGamePacket(int entityId, boolean isHardcore, List<String>",
+      "worlds, int maxPlayers, int viewDistance, int simulationDistance, boolean",
+      "reducedDebugInfo, boolean enableRespawnScreen, boolean doLimitedCrafting,",
+      "PlayerSpawnInfo playerSpawnInfo, boolean onlineMode, boolean",
+      "enforcesSecureChat)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "is_hardcore",
+      "type": "bool",
+      "docs": [
+        "Java: `isHardcore()`."
+      ]
+    },
+    {
+      "name": "worlds",
+      "type": "Vec<String>",
+      "docs": [
+        "Java: `worlds()` \u2014 the dimension identifiers the server hosts."
+      ],
+      "wire": "dimension_names"
+    },
+    {
+      "name": "max_players",
+      "type": "i32",
+      "docs": [
+        "Java: `maxPlayers()`."
+      ]
+    },
+    {
+      "name": "view_distance",
+      "type": "i32",
+      "docs": [
+        "Java: `viewDistance()`."
+      ]
+    },
+    {
+      "name": "simulation_distance",
+      "type": "i32",
+      "docs": [
+        "Java: `simulationDistance()`."
+      ]
+    },
+    {
+      "name": "reduced_debug_info",
+      "type": "bool",
+      "docs": [
+        "Java: `reducedDebugInfo()`."
+      ]
+    },
+    {
+      "name": "enable_respawn_screen",
+      "type": "bool",
+      "docs": [
+        "Java: `enableRespawnScreen()`."
+      ]
+    },
+    {
+      "name": "do_limited_crafting",
+      "type": "bool",
+      "docs": [
+        "Java: `doLimitedCrafting()`."
+      ]
+    },
+    {
+      "name": "player_spawn_info",
+      "type": "PlayerSpawnInfo",
+      "docs": [
+        "Java: `playerSpawnInfo()`."
+      ],
+      "wire": "dimension_type..sea_level"
+    },
+    {
+      "name": "online_mode",
+      "type": "bool",
+      "docs": [
+        "Java: `onlineMode()`."
+      ]
+    },
+    {
+      "name": "enforces_secure_chat",
+      "type": "bool",
+      "docs": [
+        "Java: `enforcesSecureChat()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)] // Java's twelve-field canonical constructor"
+    ],
+    "docs": [
+      "Java: `new JoinGamePacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `JoinGamePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "JoinGameSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(INT, BOOLEAN, STRING.list(MAX_WORLDS), \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "join_game_packet.ext.rs",
+  "imports": [
+    "use super::data::player_spawn_info::PlayerSpawnInfo;"
+  ],
+  "tests": "join_game_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "try_from",
+      "reason": "the generated read does not reserve capacity up front, so there is no capacity bound to compute"
+    },
+    {
+      "construct": ".unwrap_or",
+      "reason": "the generated read does not reserve capacity up front, so there is no capacity bound to compute"
+    },
+    {
+      "construct": ".min(",
+      "reason": "the generated read does not reserve capacity up front, so there is no capacity bound to compute"
+    },
+    {
+      "construct": "MAX_",
+      "reason": "the generated read does not reserve capacity up front, so there is no capacity bound to compute"
+    }
+  ],
+  "bound": true
+}

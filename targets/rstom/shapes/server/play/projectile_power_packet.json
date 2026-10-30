@@ -1,0 +1,60 @@
+{
+  "class": "ProjectilePowerPacket",
+  "module": "server/play/projectile_power_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ProjectilePowerPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ProjectilePowerPacket(entityId i32, accelerationPower f64) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "acceleration_power",
+      "type": "f64",
+      "docs": [
+        "Java: `accelerationPower()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ProjectilePowerPacket(entity_id: i32, acceleration_power: f64)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ProjectilePowerPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ProjectilePowerSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, ProjectilePowerPacket::entityId, DOUBLE, ProjectilePowerPacket::accelerationPower, ProjectilePowerPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

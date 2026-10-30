@@ -1,0 +1,58 @@
+{
+  "class": "UpdateViewDistancePacket",
+  "module": "server/play/update_view_distance_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.UpdateViewDistancePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UpdateViewDistancePacket(int viewDistance) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "view_distance",
+      "type": "i32",
+      "docs": [
+        "Java: `viewDistance()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UpdateViewDistancePacket(int viewDistance)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UpdateViewDistancePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UpdateViewDistanceSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "UpdateViewDistancePacket::viewDistance, UpdateViewDistancePacket::new)`",
+      "template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

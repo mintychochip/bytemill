@@ -1,0 +1,102 @@
+{
+  "class": "ClientAdvancementTabPacket",
+  "module": "client/play/client_advancement_tab_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientAdvancementTabPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientAdvancementTabPacket(AdvancementAction action, @Nullable",
+      "String tabIdentifier) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "action",
+      "type": "AdvancementAction",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "write": "action_ordinal($)",
+      "read": "if $ == action_ordinal(AdvancementAction::OpenedTab) { AdvancementAction::OpenedTab } else { AdvancementAction::ClosedScreen }"
+    },
+    {
+      "name": "tab_identifier",
+      "type": "Option<String>",
+      "docs": [
+        "Java: `tabIdentifier()` \u2014 present only for `OPENED_TAB`."
+      ],
+      "wire": "tab_id"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientAdvancementTabPacket(AdvancementAction action, @Nullable",
+      "String tabIdentifier)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics with Java's `IllegalArgumentException` message when the tab",
+      "identifier is longer than 256."
+    ],
+    "body": [
+      "        if let Some(identifier) = &tab_identifier",
+      "            && identifier.chars().count() > 256",
+      "        {",
+      "            panic!(\"Tab identifier too long: {}\", identifier.chars().count());",
+      "        }",
+      "        Self {",
+      "            action,",
+      "            tab_identifier,",
+      "        }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientAdvancementTabPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientAdvancementTabSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `NetworkBuffer.Tagged(Enum(AdvancementAction.class), action, {OPENED_TAB:",
+      "template(STRING, tabIdentifier, \u2026)}, template(CLOSED_SCREEN, null))` \u2014 the",
+      "discriminator var int, then the selected arm's payload."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_advancement_tab_packet.ext.rs",
+  "imports": [
+    "use crate::advancements::action::AdvancementAction;"
+  ],
+  "hooks": {
+    "write.start": [
+      "// Java writes `tabIdentifier` unvalidated; the arm only exists for `OPENED_TAB`.",
+      "if value.action == AdvancementAction::OpenedTab && value.tab_identifier.is_none() {",
+      "    panic!(\"NullPointerException\");",
+      "}"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "panic!",
+      "reason": "the write hook panics for a missing identifier on OPENED_TAB, as the hand write did"
+    }
+  ],
+  "bound": true
+}

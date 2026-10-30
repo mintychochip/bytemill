@@ -1,0 +1,77 @@
+{
+  "class": "VehicleMovePacket",
+  "module": "server/play/vehicle_move_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.VehicleMovePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record VehicleMovePacket(Pos position) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "position",
+      "type": "Pos",
+      "docs": [
+        "Java: `position()`."
+      ],
+      "wire": [
+        "x",
+        "y",
+        "z",
+        "yaw",
+        "pitch"
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new VehicleMovePacket(Pos position)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `VehicleMovePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "VehicleMoveSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(POS, VehicleMovePacket::position,",
+      "VehicleMovePacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "imports": [
+    "use crate::coordinate::Pos;"
+  ],
+  "tests": "vehicle_move_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "write_pos",
+      "reason": "the generated serializer writes the five position fields (x, y, z, yaw, pitch) one by one, in the order write_pos does"
+    },
+    {
+      "construct": "read_pos",
+      "reason": "the generated serializer reads the five position fields (x, y, z, yaw, pitch) one by one and builds the Pos, as read_pos does"
+    }
+  ],
+  "bound": true
+}

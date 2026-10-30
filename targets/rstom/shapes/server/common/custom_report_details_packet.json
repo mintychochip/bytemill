@@ -1,0 +1,67 @@
+{
+  "class": "CustomReportDetailsPacket",
+  "module": "server/common/custom_report_details_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.CustomReportDetailsPacket`.",
+    "",
+    "Java's `STRING.mapValue(STRING, MAX_DETAILS)` writes a `java.util.HashMap`,",
+    "whose byte order is not stable between JVM runs; the probe therefore uses a",
+    "single-entry map, and the port keeps insertion order (`Vec` of pairs) so a",
+    "written map round-trips unchanged."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CustomReportDetailsPacket(Map<String, String> details)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "details",
+      "type": "Vec<(String, String)>",
+      "docs": [
+        "Java: `details()`, in insertion order."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new CustomReportDetailsPacket(Map<String, String>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CustomReportDetailsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CustomReportDetailsSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `STRING.mapValue(STRING, MAX_DETAILS)` template \u2014 size var int,",
+      "then key/value string pairs."
+    ],
+    "read_via_new": false
+  },
+  "extras": "custom_report_details_packet.ext.rs",
+  "tests": "custom_report_details_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "Negative declared sizes read as zero entries; the generated read loops `for _ in 0..count`, which also runs zero times, so a negative count yields the same empty list."
+    }
+  ]
+}

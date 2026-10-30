@@ -1,0 +1,61 @@
+{
+  "class": "ClientStatusPacket",
+  "module": "client/play/client_status_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientStatusPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientStatusPacket(Action action) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "action",
+      "type": "Action",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "wire": "action_id",
+      "write": "$.ordinal()",
+      "read": "Action::from_ordinal($)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientStatusPacket(Action action)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientStatusPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientStatusSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(NetworkBuffer.Enum(Action.class), \u2026)` \u2014 VAR_INT of the",
+      "ordinal."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_status_packet.ext.rs",
+  "bound": true
+}

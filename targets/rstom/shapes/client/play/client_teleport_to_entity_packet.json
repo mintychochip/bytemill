@@ -1,0 +1,59 @@
+{
+  "class": "ClientTeleportToEntityPacket",
+  "module": "client/play/client_teleport_to_entity_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientTeleportToEntityPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientTeleportToEntityPacket(UUID target) implements",
+      "ClientPacket.Play`.",
+      "",
+      "Java's compact constructor `Objects.requireNonNull(target, \"target\")` has",
+      "no Rust counterpart: the field is a [`Uuid`], which cannot be null."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "target",
+      "type": "Uuid",
+      "docs": [
+        "Java: `target()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientTeleportToEntityPacket(target)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientTeleportToEntityPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientTeleportToEntitySerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(UUID, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -1,0 +1,75 @@
+{
+  "class": "LoginDisconnectPacket",
+  "module": "server/login/login_disconnect_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.login.LoginDisconnectPacket`.",
+    "",
+    "Java writes the kick message with `NetworkBuffer.JSON_COMPONENT`",
+    "(`NetworkBufferTypeImpl.java:572-590`): `Codec.COMPONENT` encodes the",
+    "component to JSON, and that JSON text goes out as a `STRING`; reading",
+    "parses the string and decodes it back. The port does the same through",
+    "[`component_codec`](crate::codec::component_codecs::component_codec).",
+    "",
+    "Key-order note: the JSON text comes from `serde_json::Value::to_string`,",
+    "whose object keys sort lexicographically, while Java's Gson preserves the",
+    "writer's insertion order. The two agree whenever the writer emits keys in",
+    "sorted order \u2014 plain-text and single-key shapes, including the recorded",
+    "fixture below. A styled component's key order may differ textually from",
+    "Java's while decoding to the same tree."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record LoginDisconnectPacket(Component kickMessage) implements",
+      "ServerPacket.Login, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "kick_message",
+      "type": "Component",
+      "docs": [
+        "Java: `kickMessage()`."
+      ],
+      "wire": "reason",
+      "put": "write_reason(buffer, &$);",
+      "take": "read_reason(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new LoginDisconnectPacket(Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `LoginDisconnectPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "LoginDisconnectSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(JSON_COMPONENT, \u2026)` template \u2014 a JSON string."
+    ],
+    "read_via_new": true
+  },
+  "extras": "login_disconnect_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "login_disconnect_packet.tests.rs",
+  "bound": true
+}

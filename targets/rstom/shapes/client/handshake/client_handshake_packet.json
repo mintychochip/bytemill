@@ -1,0 +1,103 @@
+{
+  "class": "ClientHandshakePacket",
+  "module": "client/handshake/client_handshake_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.handshake.ClientHandshakePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientHandshakePacket(int protocolVersion, String",
+      "serverAddress, int serverPort, Intent intent) implements",
+      "ClientPacket.Handshake`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "protocol_version",
+      "type": "i32",
+      "docs": [
+        "Java: `protocolVersion()`."
+      ]
+    },
+    {
+      "name": "server_address",
+      "type": "String",
+      "docs": [
+        "Java: `serverAddress()`."
+      ]
+    },
+    {
+      "name": "server_port",
+      "type": "u16",
+      "docs": [
+        "Java: `serverPort()`."
+      ]
+    },
+    {
+      "name": "intent",
+      "type": "Intent",
+      "docs": [
+        "Java: `intent()`."
+      ],
+      "write": "$.id()",
+      "read": "Intent::from_id($)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: the `ClientHandshakePacket` compact constructor.",
+      "",
+      "# Panics",
+      "",
+      "Panics when the address is longer than `i16::MAX` characters, matching",
+      "Java's `Check.argCondition`."
+    ],
+    "body": [
+      "        assert!(",
+      "            server_address.chars().count() <= i16::MAX as usize,",
+      "            \"Server address length cannot be greater than 32767\"",
+      "        );",
+      "        Self {",
+      "            protocol_version,",
+      "            server_address,",
+      "            server_port,",
+      "            intent,",
+      "        }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientHandshakePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientHandshakeSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, \u2026, STRING, \u2026,",
+      "UNSIGNED_SHORT, \u2026, VAR_INT.transform(Intent::fromId, Intent::id), \u2026)`",
+      "template behind `ClientHandshakePacket.SERIALIZER`.",
+      "",
+      "Java builds every packet serializer through `NetworkBufferTemplate`; the",
+      "port writes the handful of ported ones out directly, because the template",
+      "combinator zoo (one function per arity, up to 20) only pays off once the",
+      "packet payload classes land."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_handshake_packet.ext.rs",
+  "bound": true
+}

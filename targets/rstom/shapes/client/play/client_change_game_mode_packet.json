@@ -1,0 +1,68 @@
+{
+  "class": "ClientChangeGameModePacket",
+  "module": "client/play/client_change_game_mode_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientChangeGameModePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientChangeGameModePacket(GameMode gameMode) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "game_mode",
+      "type": "GameMode",
+      "docs": [
+        "Java: `gameMode()`."
+      ],
+      "write": "$.ordinal()",
+      "read": "GameMode::from_ordinal($ as u8).unwrap_or_else(|| panic!(\"Index {$} out of bounds for length 4\"))"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientChangeGameModePacket(GameMode gameMode)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientChangeGameModePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientChangeGameModeSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(GameMode.NETWORK_TYPE, gameMode,",
+      "ClientChangeGameModePacket::new)` \u2014 `GameMode.NETWORK_TYPE` is",
+      "`NetworkBuffer.Enum(GameMode.class)`, a `VAR_INT` of the ordinal."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "imports": [
+    "use crate::entity::game_mode::GameMode;"
+  ],
+  "bound": true,
+  "uses": [
+    "use crate::network::types::JavaEnum;"
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "class": "ClientCommandChatPacket",
+  "module": "client/play/client_command_chat_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientCommandChatPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientCommandChatPacket(String message) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "message",
+      "type": "String",
+      "docs": [
+        "Java: `message()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientCommandChatPacket(String message)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics with Java's `IllegalArgumentException` message when the message is",
+      "longer than 256, mirroring",
+      "`Check.argCondition(message.length() > 256, \u2026)`."
+    ],
+    "body": [
+      "        if message.chars().count() > 256 {",
+      "            panic!(\"Message length cannot be greater than 256\");",
+      "        }",
+      "        Self { message }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientCommandChatPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientCommandChatSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(STRING, ClientCommandChatPacket::message,",
+      "ClientCommandChatPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

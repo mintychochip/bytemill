@@ -1,0 +1,69 @@
+{
+  "class": "EntityVelocityPacket",
+  "module": "server/play/entity_velocity_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityVelocityPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityVelocityPacket(int entityId, Vec velocity)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "velocity",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `velocity()` \u2014 a motion vector in blocks per tick."
+      ],
+      "wire": [
+        "scale_byte",
+        "packed_second",
+        "packed_high_4",
+        "continuation_scale"
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityVelocityPacket(int, Vec)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityVelocityPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityVelocitySerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, LP_VECTOR3)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "entity_velocity_packet.tests.rs",
+  "bound": true
+}

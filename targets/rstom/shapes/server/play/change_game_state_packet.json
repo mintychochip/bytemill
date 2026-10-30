@@ -1,0 +1,71 @@
+{
+  "class": "ChangeGameStatePacket",
+  "module": "server/play/change_game_state_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.ChangeGameStatePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ChangeGameStatePacket(Reason reason, float value) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "reason",
+      "type": "Reason",
+      "docs": [
+        "Java: `reason()`."
+      ],
+      "wire": "event",
+      "codec": "enum_type::<Reason>()"
+    },
+    {
+      "name": "value",
+      "type": "f32",
+      "docs": [
+        "Java: `value()` \u2014 the meaning depends on the reason."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new ChangeGameStatePacket(Reason, float)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ChangeGameStatePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ChangeGameStateSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(NetworkBuffer.Enum(Reason.class),",
+      "FLOAT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "change_game_state_packet.ext.rs",
+  "tests": "change_game_state_packet.tests.rs",
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;"
+  ]
+}

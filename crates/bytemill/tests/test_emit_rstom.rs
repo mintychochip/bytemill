@@ -67,8 +67,7 @@ static SHARED: LazyLock<Shared> = LazyLock::new(|| {
     let units = bytemill::minestom::build_units(&resolved, &table).expect("build units");
     let out = unique_temp_dir("full").join("bml_rstom");
     // Absolute, so the crate also builds from here: the test never writes into rstom.
-    let rstom_path = common::rstom_tables::rstom_dir()
-        .join("crates/rstom")
+    let rstom_path = bytemill::shapes::crate_root(&common::rstom_tables::rstom_dir())
         .to_string_lossy()
         .into_owned();
     bytemill::emit_rstom::emit_rstom(&resolved, &out, &table, &rstom_path).expect("emit rstom");
@@ -300,7 +299,13 @@ fn resolved(path: &Path) -> PathBuf {
 #[test]
 fn every_packet_module_of_rstom_packets_exists_at_the_same_path() {
     let rstom = common::rstom_tables::rstom_dir();
-    let packets_dir = rstom.join("crates/rstom-packets");
+    let lib = bytemill::shapes::crate_root(&rstom);
+    let packets_name = if lib.file_name().and_then(|n| n.to_str()) == Some("netherstar") {
+        "netherstar-packets"
+    } else {
+        "rstom-packets"
+    };
+    let packets_dir = lib.parent().unwrap().join(packets_name);
     if !packets_dir.is_dir() {
         eprintln!("skipped: rstom-packets not present");
         return;

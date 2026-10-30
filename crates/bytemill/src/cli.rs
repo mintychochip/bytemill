@@ -21,7 +21,7 @@ use crate::json::{Value, dumps_sorted, loads};
 use crate::load::load_schema;
 use crate::minestom::{ClassTable, build_units};
 use crate::shapes::{
-    bml_field_pairs, extract_shape, hand_packet_path, mismatch, module_path, packet_report,
+    extract_shape, hand_packet_path, known_deviations, mismatch_fields, module_path, packet_report,
     shape_to_json,
 };
 use crate::trace::{self, TraceOptions};
@@ -196,6 +196,40 @@ struct Args {
 }
 
 /// Pull a flag's value out of `argv`, leaving the positionals.
+/// Every value of a repeatable flag, in order (`--class A --class B`).
+fn take_flags(argv: &mut Vec<String>, names: &[&str]) -> Result<Vec<String>, String> {
+    let mut values = Vec::new();
+    while let Some(v) = take_first_flag(argv, names)? {
+        values.push(v);
+    }
+    Ok(values)
+}
+
+/// The first occurrence of a flag, removing just that one.
+fn take_first_flag(argv: &mut Vec<String>, names: &[&str]) -> Result<Option<String>, String> {
+    let Some(i) = argv.iter().position(|arg| {
+        names.iter().any(|n| {
+            arg == *n || (n.len() > 2 && n.starts_with("--") && arg.starts_with(&format!("{n}=")))
+        })
+    }) else {
+        return Ok(None);
+    };
+    let arg = argv[i].clone();
+    if let Some(eq) = arg.find('=')
+        && arg.starts_with("--")
+    {
+        argv.remove(i);
+        return Ok(Some(arg[eq + 1..].to_string()));
+    }
+    if i + 1 >= argv.len() {
+        return Err(format!("argument {arg}: expected one argument"));
+    }
+    let value = argv[i + 1].clone();
+    argv.remove(i);
+    argv.remove(i);
+    Ok(Some(value))
+}
+
 fn take_flag(argv: &mut Vec<String>, names: &[&str]) -> Result<Option<String>, String> {
     let mut found: Option<String> = None;
     let mut i = 0;
@@ -518,9 +552,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                     a.out = take_flag(&mut argv, &["--out"])?;
                     a.packets_json = take_flag(&mut argv, &["--packets-json"])?;
                     a.eligible = take_switch(&mut argv, "--eligible");
-                    while let Some(c) = take_flag(&mut argv, &["--class"])? {
-                        a.classes.push(c);
-                    }
+                    a.classes.extend(take_flags(&mut argv, &["--class"])?);
                     if a.rstom.is_none() {
                         return Err(
                             "shapes extract: the following arguments are required: --rstom"
@@ -546,9 +578,43 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
                     }
                     a.schemas = argv;
                 }
+                Some("wires") => {
+                    a.rstom = take_flag(&mut argv, &["--rstom"])?;
+                    a.packets_json = take_flag(&mut argv, &["--packets-json"])?;
+                    a.classes.extend(take_flags(&mut argv, &["--class"])?);
+                    if a.rstom.is_none() || a.classes.is_empty() {
+                        return Err(
+                            "shapes wires: the following arguments are required: --rstom, --class"
+                                .to_string(),
+                        );
+                    }
+                    a.schemas = argv;
+                }
+                Some("fmt") => {
+                    a.shapes = take_flag(&mut argv, &["--shapes"])?;
+                    if !argv.is_empty() {
+                        return Err(format!(
+                            "shapes fmt: unrecognized arguments: {}",
+                            argv.join(" ")
+                        ));
+                    }
+                }
+                Some("render") => {
+                    a.rstom = take_flag(&mut argv, &["--rstom"])?;
+                    a.packets_json = take_flag(&mut argv, &["--packets-json"])?;
+                    a.shapes = take_flag(&mut argv, &["--shapes"])?;
+                    a.classes.extend(take_flags(&mut argv, &["--class"])?);
+                    if a.rstom.is_none() || a.classes.is_empty() {
+                        return Err(
+                            "shapes render: the following arguments are required: --rstom, --class"
+                                .to_string(),
+                        );
+                    }
+                    a.schemas = argv;
+                }
                 _ => {
                     return Err(format!(
-                        "shapes: argument shapes_cmd: invalid choice: {:?} (choose from 'extract', 'report')",
+                        "shapes: argument shapes_cmd: invalid choice: {:?} (choose from 'extract', 'report', 'wires', 'render', 'fmt')",
                         shapes_cmd.unwrap()
                     ));
                 }
@@ -557,9 +623,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
         "gen" => {
             a.count = take_flag(&mut argv, &["--count"])?;
             a.seed = take_flag(&mut argv, &["--seed"])?;
-            while let Some(p) = take_flag(&mut argv, &["--packet"])? {
-                a.gen_packets.push(p);
-            }
+            a.gen_packets.extend(take_flags(&mut argv, &["--packet"])?);
             if let Some(c) = &a.count
                 && c.parse::<usize>().is_err()
             {
@@ -950,6 +1014,35 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
             println!("emitted {target} crate to {out}");
             Ok(0)
         }
+        "shapes" if shapes_cmd == Some("fmt") => {
+            // The canonical form `shape_to_json` writes, for a ledger authored by hand or script.
+            let dir = a
+                .shapes
+                .as_deref()
+                .map_or_else(default_shapes, PathBuf::from);
+            let mut rewritten = 0;
+            for (module, shape) in crate::shapes::load_ledger(&dir)? {
+                let path = dir.join(format!("{module}.json"));
+                let canonical = crate::shapes::shape_to_json(&shape);
+                let current = std::fs::read_to_string(&path).map_err(|e| {
+                    BmlError::new(
+                        crate::errors::ErrorKind::Shape,
+                        format!("{}: {e}", path.display()),
+                    )
+                })?;
+                if current != canonical {
+                    std::fs::write(&path, canonical).map_err(|e| {
+                        BmlError::new(
+                            crate::errors::ErrorKind::Shape,
+                            format!("{}: {e}", path.display()),
+                        )
+                    })?;
+                    rewritten += 1;
+                }
+            }
+            println!("rewrote {rewritten} shape files in {}", dir.display());
+            Ok(0)
+        }
         "shapes" => {
             let resolved = match load_or_report(&a.schemas) {
                 Ok(r) => r,
@@ -993,8 +1086,13 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
                             continue;
                         };
                         if a.eligible {
-                            let pairs = bml_field_pairs(&unit.pkt, &resolved)?;
-                            if !mismatch(&shape, &pairs).is_empty() {
+                            let (fields, _) =
+                                crate::emit_rstom::packet_fields(&unit.pkt, &resolved)?;
+                            if !mismatch_fields(&shape, &fields).is_empty()
+                                || known_deviations(&workspace)?
+                                    .iter()
+                                    .any(|d| d.class == unit.cls.name)
+                            {
                                 continue;
                             }
                         }
@@ -1007,6 +1105,29 @@ fn run(cmd: &str, a: &Args, shapes_cmd: Option<&str>) -> BmlResult<i32> {
                         std::fs::write(&dest, shape_to_json(&shape)).map_err(|e| {
                             BmlError::new(crate::errors::ErrorKind::Shape, format!("{e}"))
                         })?;
+                    }
+                    Ok(0)
+                }
+                Some("wires") => {
+                    for class in &a.classes {
+                        println!("# {class}");
+                        print!(
+                            "{}",
+                            crate::emit_tree::describe_packet(&resolved, &classes, class)?
+                        );
+                    }
+                    Ok(0)
+                }
+                Some("render") => {
+                    let shapes = match &a.shapes {
+                        Some(s) => PathBuf::from(s),
+                        None => default_shapes(),
+                    };
+                    for class in &a.classes {
+                        print!(
+                            "{}",
+                            crate::emit_tree::render_packet(&resolved, &classes, &shapes, class)?
+                        );
                     }
                     Ok(0)
                 }

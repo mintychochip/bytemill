@@ -1,0 +1,58 @@
+{
+  "class": "AcknowledgeBlockChangePacket",
+  "module": "server/play/acknowledge_block_change_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.AcknowledgeBlockChangePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record AcknowledgeBlockChangePacket(int sequence) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "sequence",
+      "type": "i32",
+      "docs": [
+        "Java: `sequence()` \u2014 the block-change sequence being acknowledged."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new AcknowledgeBlockChangePacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `AcknowledgeBlockChangePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "AcknowledgeBlockChangeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "acknowledge_block_change_packet.tests.rs"
+}

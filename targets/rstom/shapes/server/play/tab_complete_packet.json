@@ -1,0 +1,103 @@
+{
+  "class": "TabCompletePacket",
+  "module": "server/play/tab_complete_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.TabCompletePacket`",
+    "and its nested `Match` record.",
+    "",
+    "The tooltip is [`Component`](crate::text::Component), adventure's",
+    "component tree \u2014 the same type Java's `Match` holds. It travels with",
+    "[`Component::write`] / [`Component::read`] (see",
+    "[`crate::adventure::component_network`)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TabCompletePacket(int transactionId, int start, int length,",
+      "List<Match> matches) implements ServerPacket.Play,",
+      "ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "i32",
+      "docs": [
+        "Java: `transactionId()`."
+      ],
+      "wire": "id"
+    },
+    {
+      "name": "start",
+      "type": "i32",
+      "docs": [
+        "Java: `start()`."
+      ]
+    },
+    {
+      "name": "length",
+      "type": "i32",
+      "docs": [
+        "Java: `length()`."
+      ]
+    },
+    {
+      "name": "matches",
+      "type": "Vec<Match>",
+      "docs": [
+        "Java: `matches()` \u2014 Java's compact constructor copies the list."
+      ],
+      "wire": "matches"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TabCompletePacket(int, int, int, List<Match>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TabCompletePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TabCompleteSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "TabCompletePacket::transactionId, VAR_INT, TabCompletePacket::start, VAR_INT,",
+      "TabCompletePacket::length, Match.SERIALIZER.list(MAX_ENTRIES),",
+      "TabCompletePacket::matches, TabCompletePacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "tab_complete_packet.ext.rs",
+  "tests": "tab_complete_packet.tests.rs",
+  "hooks": {
+    "read.after:matches_count": [
+      "check_size(matches_count, MAX_ENTRIES);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "the generated read takes the count itself and checks it against the same limit with check_size, which read_size applies"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use super::advancements_packet::check_size;"
+  ]
+}

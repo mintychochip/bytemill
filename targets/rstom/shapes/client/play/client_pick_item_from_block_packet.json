@@ -1,0 +1,68 @@
+{
+  "class": "ClientPickItemFromBlockPacket",
+  "module": "client/play/client_pick_item_from_block_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientPickItemFromBlockPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPickItemFromBlockPacket(Point pos, boolean includeData)",
+      "implements ClientPacket.Play`.",
+      "",
+      "The position is a Java `Point`; the port carries it as the float-backed",
+      "[`Vec`] the sibling action packet uses, since a decoded block position is",
+      "always whole."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "pos",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `pos()`."
+      ]
+    },
+    {
+      "name": "include_data",
+      "type": "bool",
+      "docs": [
+        "Java: `includeData()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPickItemFromBlockPacket(Point pos, boolean includeData)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPickItemFromBlockPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPickItemFromBlockSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BLOCK_POSITION, pos, BOOLEAN, includeData,",
+      "ClientPickItemFromBlockPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

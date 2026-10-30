@@ -1,0 +1,70 @@
+{
+  "class": "SelectAdvancementTabPacket",
+  "module": "server/play/select_advancement_tab_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.SelectAdvancementTabPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SelectAdvancementTabPacket(@Nullable String tabId)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "tab_id",
+      "type": "Option<String>",
+      "docs": [
+        "Java: `tabId()` \u2014 the namespaced id of the tab, or `None` to reset the",
+        "client's selected tab."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SelectAdvancementTabPacket(String)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SelectAdvancementTabPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SelectAdvancementTabSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(NetworkBuffer.STRING.optional(),",
+      "SelectAdvancementTabPacket::tabId, SelectAdvancementTabPacket::new)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "select_advancement_tab_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "read_optional_string",
+      "reason": "Wire-equivalent to the derived presence flag followed by the STRING; the moved tests pin the bytes `01 14 minecraft:story/root`, `00` and `01 00`."
+    },
+    {
+      "construct": "write_optional_string",
+      "reason": "Wire-equivalent to the derived presence flag followed by the STRING; the moved tests pin the bytes `01 14 minecraft:story/root`, `00` and `01 00`."
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "class": "WorldBorderCenterPacket",
+  "module": "server/play/world_border_center_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.WorldBorderCenterPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WorldBorderCenterPacket(double x, double z) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "x",
+      "type": "f64",
+      "docs": [
+        "Java: `x()`."
+      ]
+    },
+    {
+      "name": "z",
+      "type": "f64",
+      "docs": [
+        "Java: `z()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WorldBorderCenterPacket(double x, double z)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WorldBorderCenterPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WorldBorderCenterSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(DOUBLE,",
+      "WorldBorderCenterPacket::x, DOUBLE, WorldBorderCenterPacket::z,",
+      "WorldBorderCenterPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

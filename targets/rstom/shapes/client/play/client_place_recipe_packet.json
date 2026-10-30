@@ -1,0 +1,75 @@
+{
+  "class": "ClientPlaceRecipePacket",
+  "module": "client/play/client_place_recipe_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlaceRecipePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlaceRecipePacket(byte windowId, int recipeDisplayId,",
+      "boolean makeAll) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i8",
+      "docs": [
+        "Java: `windowId()` \u2014 a raw byte, not an enum."
+      ],
+      "codec": "BYTE"
+    },
+    {
+      "name": "recipe_display_id",
+      "type": "i32",
+      "docs": [
+        "Java: `recipeDisplayId()`."
+      ],
+      "wire": "recipe_id"
+    },
+    {
+      "name": "make_all",
+      "type": "bool",
+      "docs": [
+        "Java: `makeAll()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPlaceRecipePacket(byte windowId, int recipeDisplayId, boolean",
+      "makeAll)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlaceRecipePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlaceRecipeSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BYTE, windowId, VAR_INT, recipeDisplayId, BOOLEAN, makeAll,",
+      "ClientPlaceRecipePacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "bound": true
+}

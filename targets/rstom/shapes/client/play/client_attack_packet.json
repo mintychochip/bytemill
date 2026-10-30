@@ -1,0 +1,55 @@
+{
+  "class": "ClientAttackPacket",
+  "module": "client/play/client_attack_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientAttackPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientAttackPacket(int targetId) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "target_id",
+      "type": "i32",
+      "docs": [
+        "Java: `targetId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientAttackPacket(int targetId)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientAttackPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientAttackSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ClientAttackPacket::targetId, ClientAttackPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

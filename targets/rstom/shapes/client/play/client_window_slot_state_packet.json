@@ -1,0 +1,71 @@
+{
+  "class": "ClientWindowSlotStatePacket",
+  "module": "client/play/client_window_slot_state_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientWindowSlotStatePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientWindowSlotStatePacket(int slot, int windowId, boolean",
+      "newState) implements ClientPacket.Play` \u2014 sent when a slot in a crafter UI is",
+      "toggled."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "slot",
+      "type": "i32",
+      "docs": [
+        "Java: `slot()`."
+      ]
+    },
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "new_state",
+      "type": "bool",
+      "docs": [
+        "Java: `newState()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientWindowSlotStatePacket(slot, windowId, newState)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientWindowSlotStatePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientWindowSlotStateSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ..., VAR_INT, ..., BOOLEAN, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -1,0 +1,76 @@
+{
+  "class": "ClientResourcePackStatusPacket",
+  "module": "client/common/client_resource_pack_status_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientResourcePackStatusPacket`.",
+    "",
+    "The status is adventure's canonical",
+    "[`ResourcePackStatus`](crate::adventure::resource_pack_status::ResourcePackStatus),",
+    "in the id order of Java's `readStatus`/`statusId`; this module only keeps",
+    "the packet around it."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientResourcePackStatusPacket(UUID id,",
+      "ResourcePackStatus status) implements ClientPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "Uuid",
+      "docs": [
+        "Java: `id()`."
+      ],
+      "wire": "uuid"
+    },
+    {
+      "name": "status",
+      "type": "ResourcePackStatus",
+      "docs": [
+        "Java: `status()`."
+      ],
+      "wire": "result",
+      "write": "$.id()",
+      "read": "ResourcePackStatus::from_id($)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientResourcePackStatusPacket(UUID, ResourcePackStatus)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientResourcePackStatusPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientResourcePackStatusSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(UUID, \u2026, VAR_INT.transform(\u2026), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_resource_pack_status_packet.ext.rs",
+  "imports": [
+    "pub use crate::adventure::resource_pack_status::ResourcePackStatus;"
+  ],
+  "tests": "client_resource_pack_status_packet.tests.rs",
+  "bound": true
+}

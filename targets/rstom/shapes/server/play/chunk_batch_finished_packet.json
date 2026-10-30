@@ -1,0 +1,57 @@
+{
+  "class": "ChunkBatchFinishedPacket",
+  "module": "server/play/chunk_batch_finished_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.ChunkBatchFinishedPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ChunkBatchFinishedPacket(int batchSize) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "batch_size",
+      "type": "i32",
+      "docs": [
+        "Java: `batchSize()` \u2014 how many chunks may still be acknowledged."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new ChunkBatchFinishedPacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ChunkBatchFinishedPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ChunkBatchFinishedSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

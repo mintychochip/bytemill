@@ -1,0 +1,100 @@
+{
+  "class": "ClientTestInstanceBlockActionPacket",
+  "module": "client/play/client_test_instance_block_action_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientTestInstanceBlockActionPacket`,",
+    "including the nested `Data` record.",
+    "",
+    "The `errorMessage` is [`Component`](crate::text::Component), adventure's",
+    "component tree \u2014 the same type Java's `Data` holds. It travels with",
+    "[`Component::write`] / [`Component::read`] (see",
+    "[`crate::adventure::component_network`]), and",
+    "`probes/expected/client3probe.json` records the payload hex.",
+    "",
+    "The `Data.test` cap (`Check.argCondition(test.length() >",
+    "Short.MAX_VALUE, ...)`) is a validation Rust leaves to the caller."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientTestInstanceBlockActionPacket(Point blockPosition,",
+      "Action action, Data data) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ],
+      "wire": "position"
+    },
+    {
+      "name": "action",
+      "type": "Action",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "wire": "action",
+      "write": "$.ordinal()",
+      "read": "Action::from_ordinal($)"
+    },
+    {
+      "name": "data",
+      "type": "Data",
+      "docs": [
+        "Java: `data()`."
+      ],
+      "wire": "test_flag..error_message",
+      "put": "write_data(buffer, &$);",
+      "take": "read_data(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientTestInstanceBlockActionPacket(blockPosition, action, data)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientTestInstanceBlockActionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientTestInstanceBlockActionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BLOCK_POSITION, ..., Action.NETWORK_TYPE, ...,",
+      "Data.NETWORK_TYPE, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_test_instance_block_action_packet.ext.rs",
+  "imports": [
+    "pub use crate::text::Component;"
+  ],
+  "accepted": [
+    {
+      "construct": "write_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which packs the block position the same way"
+    },
+    {
+      "construct": "read_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which unpacks the block position the same way"
+    }
+  ],
+  "bound": true
+}

@@ -1,0 +1,106 @@
+{
+  "class": "ClientChatSessionUpdatePacket",
+  "module": "client/play/client_chat_session_update_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientChatSessionUpdatePacket`.",
+    "",
+    "# Local stub",
+    "",
+    "[`ChatSessionWire`] stands in for `net.minestom.server.crypto.ChatSession`:",
+    "the ported `crypto::ChatSession` carries only the session UUID, while Java's",
+    "record also holds the `PlayerPublicKey` the wire form writes. Java's public",
+    "key is a `java.security.PublicKey`, which the port has no equivalent for;",
+    "`NetworkBuffer.PUBLIC_KEY` is `BYTE_ARRAY.transform(KeyUtils::publicRSAKeyFrom,",
+    "PublicKey::getEncoded)`, so the port carries the X.509 encoding verbatim",
+    "(`public_key_der`) and only the encoding is read back."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientChatSessionUpdatePacket(ChatSession chatSession)",
+      "implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chat_session",
+      "type": "ChatSessionWire",
+      "docs": [
+        "Java: `chatSession()`."
+      ],
+      "nest": {
+        "fields": [
+          {
+            "name": "session_id",
+            "type": "crate::network::uuid::Uuid",
+            "docs": [],
+            "wire": "session_id"
+          },
+          {
+            "name": "public_key",
+            "type": "PlayerPublicKeyWire",
+            "docs": [],
+            "nest": {
+              "fields": [
+                {
+                  "name": "expires_at",
+                  "type": "i64",
+                  "docs": [],
+                  "wire": "expires_at"
+                },
+                {
+                  "name": "public_key_der",
+                  "type": "Vec<u8>",
+                  "docs": [],
+                  "wire": "public_key"
+                },
+                {
+                  "name": "signature",
+                  "type": "Vec<u8>",
+                  "docs": [],
+                  "wire": "key_signature"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientChatSessionUpdatePacket(ChatSession chatSession)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientChatSessionUpdatePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientChatSessionUpdateSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(ChatSession.SERIALIZER, chatSession,",
+      "ClientChatSessionUpdatePacket::new)` \u2014 `UUID`, then `PlayerPublicKey`'s",
+      "`INSTANT_MS`, `PUBLIC_KEY` and `BYTE_ARRAY` fields."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_chat_session_update_packet.ext.rs",
+  "bound": true
+}

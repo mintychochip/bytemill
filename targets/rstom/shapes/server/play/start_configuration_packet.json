@@ -1,0 +1,44 @@
+{
+  "class": "StartConfigurationPacket",
+  "module": "server/play/start_configuration_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.StartConfigurationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record StartConfigurationPacket() implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `StartConfigurationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "StartConfigurationPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

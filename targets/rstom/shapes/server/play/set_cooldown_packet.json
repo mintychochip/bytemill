@@ -1,0 +1,60 @@
+{
+  "class": "SetCooldownPacket",
+  "module": "server/play/set_cooldown_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetCooldownPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetCooldownPacket(cooldownGroup String, cooldownTicks i32) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "cooldown_group",
+      "type": "String",
+      "docs": [
+        "Java: `cooldownGroup()`."
+      ]
+    },
+    {
+      "name": "cooldown_ticks",
+      "type": "i32",
+      "docs": [
+        "Java: `cooldownTicks()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetCooldownPacket(cooldown_group: String, cooldown_ticks: i32)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetCooldownPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetCooldownSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(STRING, SetCooldownPacket::cooldownGroup, VAR_INT, SetCooldownPacket::cooldownTicks, SetCooldownPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

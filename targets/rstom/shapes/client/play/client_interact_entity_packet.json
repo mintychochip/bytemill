@@ -1,0 +1,110 @@
+{
+  "class": "ClientInteractEntityPacket",
+  "module": "client/play/client_interact_entity_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientInteractEntityPacket`.",
+    "",
+    "# Local stubs",
+    "",
+    "- [`PlayerHand`] is reused from the sibling block-placement packet (a local",
+    "  stand-in for `net.minestom.server.entity.PlayerHand`).",
+    "- [`read_lp_vector3`]/[`write_lp_vector3`] port",
+    "  `NetworkBufferTypeImpl.LpVector3Type`; the ported `network::types` module",
+    "  does not carry it, so the quantised encoding lives next to its only user."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientInteractEntityPacket(int targetId, PlayerHand hand, Vec",
+      "location, boolean usingSecondaryAction) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "target_id",
+      "type": "i32",
+      "docs": [
+        "Java: `targetId()`."
+      ],
+      "wire": "entity_id"
+    },
+    {
+      "name": "hand",
+      "type": "PlayerHand",
+      "docs": [
+        "Java: `hand()`."
+      ]
+    },
+    {
+      "name": "location",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `location()`."
+      ],
+      "wire": [
+        "scale_byte",
+        "packed_second",
+        "packed_high_4",
+        "continuation_scale"
+      ]
+    },
+    {
+      "name": "using_secondary_action",
+      "type": "bool",
+      "docs": [
+        "Java: `usingSecondaryAction()`."
+      ],
+      "wire": "sneak"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientInteractEntityPacket(int targetId, PlayerHand hand, Vec",
+      "location, boolean usingSecondaryAction)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientInteractEntityPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientInteractEntitySerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, targetId, PlayerHand.NETWORK_TYPE, hand, LP_VECTOR3,",
+      "location, BOOLEAN, usingSecondaryAction,",
+      "ClientInteractEntityPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_interact_entity_packet.ext.rs",
+  "imports": [
+    "pub use crate::network::packet::client::play::client_player_block_placement_packet::PlayerHand;"
+  ],
+  "accepted": [
+    {
+      "construct": "write_lp_vector3",
+      "reason": "the location is carried by LP_VECTOR3, the same low-precision vector codec"
+    },
+    {
+      "construct": "read_lp_vector3",
+      "reason": "the location is carried by LP_VECTOR3, the same low-precision vector codec"
+    }
+  ],
+  "bound": true
+}

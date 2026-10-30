@@ -1,0 +1,66 @@
+{
+  "class": "EntityHeadLookPacket",
+  "module": "server/play/entity_head_look_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityHeadLookPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityHeadLookPacket(int entityId, float yaw)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()` \u2014 in degrees."
+      ],
+      "wire": "head_yaw",
+      "write": "pack_yaw($)",
+      "read": "unpack_yaw($)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityHeadLookPacket(int, float)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityHeadLookPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityHeadLookSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, BYTE, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_head_look_packet.ext.rs",
+  "tests": "entity_head_look_packet.tests.rs",
+  "bound": true
+}

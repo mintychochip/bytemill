@@ -1,0 +1,74 @@
+{
+  "class": "PlayerRotationPacket",
+  "module": "server/play/player_rotation_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.PlayerRotationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PlayerRotationPacket(yaw f32, relativeYaw bool, pitch f32, relativePitch bool) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()`."
+      ]
+    },
+    {
+      "name": "relative_yaw",
+      "type": "bool",
+      "docs": [
+        "Java: `relativeYaw()`."
+      ]
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()`."
+      ]
+    },
+    {
+      "name": "relative_pitch",
+      "type": "bool",
+      "docs": [
+        "Java: `relativePitch()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PlayerRotationPacket(yaw: f32, relative_yaw: bool, pitch: f32, relative_pitch: bool)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PlayerRotationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PlayerRotationSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(FLOAT, PlayerRotationPacket::yaw, BOOLEAN, PlayerRotationPacket::relativeYaw, FLOAT, PlayerRotationPacket::pitch, BOOLEAN, PlayerRotationPacket::relativePitch, PlayerRotationPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

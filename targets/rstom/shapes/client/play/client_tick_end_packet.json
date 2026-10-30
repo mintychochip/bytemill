@@ -1,0 +1,45 @@
+{
+  "class": "ClientTickEndPacket",
+  "module": "client/play/client_tick_end_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientTickEndPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientTickEndPacket() implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientTickEndPacket.SERIALIZER` \u2014 the payload-free",
+      "`NetworkBufferTemplate.template(new ClientTickEndPacket())`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "ClientTickEndPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

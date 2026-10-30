@@ -1,0 +1,65 @@
+{
+  "class": "ClientSpectatorActionPacket",
+  "module": "client/play/client_spectator_action_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientSpectatorActionPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSpectatorActionPacket(@Nullable Integer targetId)",
+      "implements ClientPacket.Play` \u2014 sent from spectator mode on a primary click.",
+      "",
+      "`NetworkBuffer.OPTIONAL_VAR_INT` is `value + 1` with `0` meaning absent, so",
+      "a target id of `-1` is indistinguishable from `None` on the wire."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "target_id",
+      "type": "Option<i32>",
+      "docs": [
+        "Java: `targetId()` \u2014 the clicked entity, absent when nothing was."
+      ],
+      "wire": "optional_entity_id",
+      "codec": "OPTIONAL_VAR_INT"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSpectatorActionPacket(targetId)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSpectatorActionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSpectatorActionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(OPTIONAL_VAR_INT, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "bound": true,
+  "uses": [
+    "use crate::network::types::OPTIONAL_VAR_INT;"
+  ]
+}

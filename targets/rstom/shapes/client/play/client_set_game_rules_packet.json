@@ -1,0 +1,111 @@
+{
+  "class": "ClientSetGameRulesPacket",
+  "module": "client/play/client_set_game_rules_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientSetGameRulesPacket`.",
+    "",
+    "Java's `Entry.key` is a `RegistryKey<GameRule<?>>`. Vanilla's",
+    "`ServerboundSetGameRulePacket` writes it as an identifier string, and so does",
+    "this packet: the key is carried as its namespaced string, with no registry lookup."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSetGameRulesPacket(List<Entry> entries) implements",
+      "ClientPacket.Play`.",
+      "",
+      "The compact constructor's `List.copyOf(entries)` becomes the `Vec` the",
+      "port owns."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entries",
+      "type": "Vec<Entry>",
+      "docs": [
+        "Java: `entries()`."
+      ],
+      "wire": "rules",
+      "item": {
+        "fields": [
+          {
+            "name": "key",
+            "type": "String",
+            "docs": [],
+            "wire": "name"
+          },
+          {
+            "name": "value",
+            "type": "String",
+            "docs": [],
+            "wire": "value"
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSetGameRulesPacket(entries)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSetGameRulesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSetGameRulesSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(Entry.NETWORK_TYPE.list(GameRule.staticRegistry().size()),",
+      "...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_set_game_rules_packet.ext.rs",
+  "tests": "client_set_game_rules_packet.tests.rs",
+  "hooks": {
+    "read.after:rules_count": [
+      "check_size(rules_count, i32::try_from(ClientSetGameRulesPacket::max_entries()).unwrap_or(i32::MAX));"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "vanilla wins (design doc, known deviations): the wire is the one the BML schema writes; the count is checked against the same limit by check_size"
+    },
+    {
+      "construct": ".min(",
+      "reason": "the generated read does not reserve capacity up front"
+    },
+    {
+      "construct": "game_rule_id",
+      "reason": "vanilla wins (design doc, known deviations): the wire is the one the BML schema writes: the key is the identifier string"
+    },
+    {
+      "construct": "game_rule_key",
+      "reason": "vanilla wins (design doc, known deviations): the wire is the one the BML schema writes: the key is the identifier string"
+    },
+    {
+      "construct": ".expect(",
+      "reason": "the limit is applied by the hook"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use crate::network::packet::server::play::advancements_packet::check_size;"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "class": "AttachEntityPacket",
+  "module": "server/play/attach_entity_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.AttachEntityPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record AttachEntityPacket(int attachedEntityId, int holdingEntityId)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "attached_entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `attachedEntityId()`."
+      ]
+    },
+    {
+      "name": "holding_entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `holdingEntityId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new AttachEntityPacket(int, int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `AttachEntityPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "AttachEntitySerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(INT, INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

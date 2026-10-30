@@ -1,0 +1,66 @@
+{
+  "class": "GameRuleValuesPacket",
+  "module": "server/play/game_rule_values_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.GameRuleValuesPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record GameRuleValuesPacket(Map<RegistryKey<GameRule<?>>, String>",
+      "values)`.",
+      "",
+      "Java's `RegistryKey<GameRule<?>>` keys are held as their namespaced",
+      "identifier (e.g. `\"minecraft:do_fire_tick\"`) and written as that identifier string,",
+      "as vanilla's `ClientboundGameRuleValuesPacket` does."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "values",
+      "type": "Vec<(String, String)>",
+      "docs": [
+        "Java: `values()` \u2014 the game rule keys and their string values."
+      ],
+      "wire": "rules"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new GameRuleValuesPacket(Map)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `GameRuleValuesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "GameRuleValuesSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the",
+      "`NetworkBufferTemplate.template(RegistryKey.networkType(gameRule).mapValue(STRING,",
+      "GameRule.staticRegistry().size()))` template \u2014 a var-int entry count then",
+      "identifier/value pairs."
+    ],
+    "read_via_new": false
+  },
+  "extras": "game_rule_values_packet.ext.rs",
+  "tests": "game_rule_values_packet.tests.rs",
+  "bound": true
+}

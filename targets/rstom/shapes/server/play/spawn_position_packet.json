@@ -1,0 +1,80 @@
+{
+  "class": "SpawnPositionPacket",
+  "module": "server/play/spawn_position_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SpawnPositionPacket`",
+    "and the `data.WorldPos` it carries.",
+    "",
+    "# Local stubs",
+    "",
+    "- [`WorldPos`] stands in for `net.minestom.server.network.packet.server.play.data.WorldPos`;",
+    "  the `play.data` package is not ported, so the record (and its",
+    "  `BLOCK_POSITION` field) lives here."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SpawnPositionPacket(WorldPos worldPos, float yaw, float pitch)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "world_pos",
+      "type": "WorldPos",
+      "docs": [
+        "Java: `worldPos()`."
+      ],
+      "wire": "dimension_name..location"
+    },
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()`."
+      ]
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SpawnPositionPacket(WorldPos, float yaw, float pitch)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SpawnPositionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SpawnPositionSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(WorldPos.NETWORK_TYPE,",
+      "SpawnPositionPacket::worldPos, FLOAT, SpawnPositionPacket::yaw, FLOAT,",
+      "SpawnPositionPacket::pitch, SpawnPositionPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "spawn_position_packet.ext.rs",
+  "tests": "spawn_position_packet.tests.rs",
+  "bound": true
+}

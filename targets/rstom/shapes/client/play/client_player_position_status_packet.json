@@ -1,0 +1,56 @@
+{
+  "class": "ClientPlayerPositionStatusPacket",
+  "module": "client/play/client_player_position_status_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerPositionStatusPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerPositionStatusPacket(byte flags) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPlayerPositionStatusPacket(byte flags)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerPositionStatusPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlayerPositionStatusSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BYTE, \u2026)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_player_position_status_packet.ext.rs"
+}

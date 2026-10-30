@@ -1,0 +1,130 @@
+{
+  "class": "ClientUpdateSignPacket",
+  "module": "client/play/client_update_sign_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientUpdateSignPacket`.",
+    "",
+    "`SignTextSlot` lives in the unported `instance.block` package, so this",
+    "module carries the enum as a local stand-in keyed on the declaration",
+    "ordinal the packet actually encodes."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientUpdateSignPacket(Point blockPosition, List<String> lines,",
+      "SignTextSlot slot) implements ClientPacket.Play`.",
+      "",
+      "The compact constructor requires exactly four lines, each at most 384",
+      "UTF-16 code units. [`ClientUpdateSignPacket::new`] and the serializer",
+      "both enforce that, so a public-field edit cannot change the string count",
+      "on the wire."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "lines",
+      "type": "Vec<String>",
+      "docs": [
+        "Java: `lines()` \u2014 always four entries on the wire."
+      ],
+      "wire": [
+        "line_1",
+        "line_2",
+        "line_3",
+        "line_4"
+      ],
+      "write": [
+        "$[0].clone()",
+        "$[1].clone()",
+        "$[2].clone()",
+        "$[3].clone()"
+      ],
+      "read": "vec![$0, $1, $2, $3]"
+    },
+    {
+      "name": "slot",
+      "type": "SignTextSlot",
+      "docs": [
+        "Java: `slot()`."
+      ],
+      "wire": "text_slot",
+      "write": "$.ordinal()",
+      "read": "SignTextSlot::from_ordinal($)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientUpdateSignPacket(blockPosition, lines, slot)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics with Java's `IllegalArgumentException` text when `lines` is not",
+      "four strings, or when a line is longer than 384 UTF-16 code units."
+    ],
+    "body": [
+      "        check_lines(&lines);",
+      "        Self {",
+      "            block_position,",
+      "            lines,",
+      "            slot,",
+      "        }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientUpdateSignPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientUpdateSignSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the hand-written `NetworkBuffer.Type` of `ClientUpdateSignPacket` \u2014",
+      "the block position, then exactly four strings, then the slot enum."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_update_sign_packet.ext.rs",
+  "hooks": {
+    "write.start": [
+      "check_lines(&value.lines);"
+    ],
+    "read.after:text_slot": [
+      "check_lines(&lines_val);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "check_lines",
+      "reason": "the hooks call check_lines where the hand serializer did: before the writes, and after the slot was read"
+    },
+    {
+      "construct": "write_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which packs the block position the same way"
+    },
+    {
+      "construct": "read_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which unpacks the block position the same way"
+    }
+  ],
+  "bound": true
+}

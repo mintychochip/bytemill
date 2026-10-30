@@ -1,0 +1,55 @@
+{
+  "class": "CodeOfConductPacket",
+  "module": "server/configuration/code_of_conduct_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.configuration.CodeOfConductPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CodeOfConductPacket(String codeOfConduct) implements",
+      "ServerPacket.Configuration`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "code_of_conduct",
+      "type": "String",
+      "docs": [
+        "Java: `codeOfConduct()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new CodeOfConductPacket(String)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CodeOfConductPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CodeOfConductSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(NetworkBuffer.STRING, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

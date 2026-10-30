@@ -1,0 +1,137 @@
+{
+  "class": "MapDataPacket",
+  "module": "server/play/map_data_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.MapDataPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record MapDataPacket(int mapId, byte scale, boolean locked, boolean",
+      "trackingPosition, List<Icon> icons, MapDataPacket.ColorContent",
+      "colorContent)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "map_id",
+      "type": "i32",
+      "docs": [
+        "Java: `mapId()`."
+      ]
+    },
+    {
+      "name": "scale",
+      "type": "i8",
+      "docs": [
+        "Java: `scale()`."
+      ]
+    },
+    {
+      "name": "locked",
+      "type": "bool",
+      "docs": [
+        "Java: `locked()`."
+      ]
+    },
+    {
+      "name": "tracking_position",
+      "type": "bool",
+      "docs": [
+        "Java: `trackingPosition()` \u2014 whether the icons list is on the wire."
+      ]
+    },
+    {
+      "name": "icons",
+      "type": "Vec<Icon>",
+      "docs": [
+        "Java: `icons()` \u2014 dropped by the read side unless `trackingPosition`."
+      ],
+      "wire": "icons",
+      "guarded_default": true,
+      "item": {
+        "fields": [
+          {
+            "name": "icon_type",
+            "type": "i32",
+            "docs": [],
+            "wire": "type"
+          },
+          {
+            "name": "x",
+            "type": "i8",
+            "docs": []
+          },
+          {
+            "name": "z",
+            "type": "i8",
+            "docs": []
+          },
+          {
+            "name": "direction",
+            "type": "i8",
+            "docs": []
+          },
+          {
+            "name": "display_name",
+            "type": "Option<Component>",
+            "docs": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "color_content",
+      "type": "Option<ColorContent>",
+      "docs": [
+        "Java: `colorContent()` \u2014 `None` is Java's `null`, written as a zero byte."
+      ],
+      "wire": "columns..data",
+      "put": "match &$ { Some(content) => ColorContentSerializer.write(buffer, &(Box::new(content.clone()) as PacketValue)), None => buffer.write(BYTE, 0) }",
+      "take": "{ let columns = buffer.read(BYTE); if columns <= 0 { None } else { let rows = buffer.read(BYTE); let x = buffer.read(BYTE); let z = buffer.read(BYTE); let data = buffer.read(BYTE_ARRAY); Some(ColorContent { columns, rows, x, z, data }) } }"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new MapDataPacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `MapDataPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "MapDataSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the hand-written `SERIALIZER` of `MapDataPacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "map_data_packet.ext.rs",
+  "imports": [
+    "use crate::network::types::BYTE_ARRAY;",
+    "use crate::text::Component;"
+  ],
+  "tests": "map_data_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "downcast",
+      "reason": "the generated read builds each icon directly"
+    }
+  ],
+  "bound": true
+}

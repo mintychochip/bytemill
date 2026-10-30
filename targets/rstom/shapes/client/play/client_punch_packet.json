@@ -1,0 +1,46 @@
+{
+  "class": "ClientPunchPacket",
+  "module": "client/play/client_punch_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPunchPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPunchPacket() implements ClientPacket.Play` \u2014 sent when",
+      "the player left clicks; the server answers with a `SwingAnimationPacket`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPunchPacket.SERIALIZER` \u2014 the payload-free",
+      "`NetworkBufferTemplate.template(new ClientPunchPacket())`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "ClientPunchPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

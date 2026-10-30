@@ -1,0 +1,100 @@
+{
+  "class": "StopSoundPacket",
+  "module": "server/play/stop_sound_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.StopSoundPacket`.",
+    "",
+    "# Local stubs",
+    "",
+    "The playback source is the canonical",
+    "[`crate::adventure::adventure_packet_convertor::SoundSource`]",
+    "(`net.kyori.adventure.sound.Sound.Source`, whose ordinals are the wire",
+    "values `AdventurePacketConvertor.getSoundSourceValue` writes)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record StopSoundPacket(byte flags, @Nullable Sound.Source source,",
+      "@Nullable String sound) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()` \u2014 a raw `byte`, written with [`BYTE`]."
+      ]
+    },
+    {
+      "name": "source",
+      "type": "Option<SoundSource>",
+      "docs": [
+        "Java: `source()` \u2014 written when `flags` is `1` or `3`."
+      ],
+      "wire": "source",
+      "write": "$.unwrap_or(SoundSource::Master).ordinal()",
+      "read": "SoundSource::from_ordinal($).unwrap_or_else(|| panic!(\"unknown sound source ordinal {}\", $))",
+      "write_whole": true
+    },
+    {
+      "name": "sound",
+      "type": "Option<String>",
+      "docs": [
+        "Java: `sound()` \u2014 written when `flags` is `2` or `3`."
+      ],
+      "wire": "sound",
+      "write": "$.clone().unwrap_or_default()",
+      "write_whole": true
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new StopSoundPacket(byte flags, @Nullable Sound.Source source,",
+      "@Nullable String sound)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `StopSoundPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "StopSoundSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the anonymous `NetworkBuffer.Type<StopSoundPacket>` of",
+      "`StopSoundPacket`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "imports": [
+    "use crate::adventure::adventure_packet_convertor::SoundSource;"
+  ],
+  "tests": "stop_sound_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".unwrap_or",
+      "reason": "the read looks the source up and panics naming the ordinal, as the hand read did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the read looks the source up and panics naming the ordinal, as the hand read did"
+    }
+  ],
+  "bound": true
+}

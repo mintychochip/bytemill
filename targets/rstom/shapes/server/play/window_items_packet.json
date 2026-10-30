@@ -1,0 +1,109 @@
+{
+  "class": "WindowItemsPacket",
+  "module": "server/play/window_items_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.WindowItemsPacket`.",
+    "",
+    "# Local stubs",
+    "",
+    "- [`ItemStackStub`] is imported from",
+    "  [`super::trade_list_packet::ItemStackStub`]. Its read and write are",
+    "  `ItemStack.NETWORK_TYPE`. Java's",
+    "  `ItemStack.NETWORK_TYPE.list(MAX_ENTRIES)` is a size var int then each",
+    "  element."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WindowItemsPacket(int windowId, int stateId, List<ItemStack>",
+      "items, ItemStack carriedItem) implements ServerPacket.Play,",
+      "ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "state_id",
+      "type": "i32",
+      "docs": [
+        "Java: `stateId()`."
+      ]
+    },
+    {
+      "name": "items",
+      "type": "Vec<ItemStackStub>",
+      "docs": [
+        "Java: `items()` \u2014 Java's compact constructor copies the list."
+      ],
+      "wire": "slot_data"
+    },
+    {
+      "name": "carried_item",
+      "type": "ItemStackStub",
+      "docs": [
+        "Java: `carriedItem()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WindowItemsPacket(int windowId, int stateId, List<ItemStack>",
+      "items, ItemStack carriedItem)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WindowItemsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WindowItemsSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "WindowItemsPacket::windowId, VAR_INT, WindowItemsPacket::stateId,",
+      "ItemStack.NETWORK_TYPE.list(MAX_ENTRIES), WindowItemsPacket::items,",
+      "ItemStack.NETWORK_TYPE, WindowItemsPacket::carriedItem,",
+      "WindowItemsPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "window_items_packet.ext.rs",
+  "imports": [
+    "use super::trade_list_packet::ItemStackStub;"
+  ],
+  "tests": "window_items_packet.tests.rs",
+  "hooks": {
+    "read.after:slot_data_count": [
+      "check_size(slot_data_count, MAX_ENTRIES);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "the generated read takes the count itself and checks it against the same limit with check_size, which read_size applies"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use super::advancements_packet::check_size;"
+  ]
+}

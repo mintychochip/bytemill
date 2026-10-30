@@ -1,0 +1,165 @@
+{
+  "class": "SpawnEntityPacket",
+  "module": "server/play/spawn_entity_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SpawnEntityPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SpawnEntityPacket(int entityId, UUID uuid, EntityType type,",
+      "Pos position, float headRot, int data, Vec velocity) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "uuid",
+      "type": "Uuid",
+      "docs": [
+        "Java: `uuid()`."
+      ],
+      "wire": "entity_uuid"
+    },
+    {
+      "name": "entity_type",
+      "type": "EntityType",
+      "docs": [
+        "Java: `type()`."
+      ],
+      "wire": "type",
+      "write": "$.id()",
+      "read": "entity_type::from_id($).unwrap_or_else(|| panic!(\"unknown entity type id {}\", $))"
+    },
+    {
+      "name": "position",
+      "type": "Pos",
+      "docs": [
+        "Java: `position()` \u2014 the world position, whose yaw/pitch carry the",
+        "packed byte angles."
+      ],
+      "wire": [
+        "x",
+        "y",
+        "z",
+        "pitch",
+        "yaw"
+      ],
+      "write": [
+        "$.x",
+        "$.y",
+        "$.z",
+        "($.pitch * 256.0 / 360.0) as i32 as i8",
+        "($.yaw * 256.0 / 360.0) as i32 as i8"
+      ],
+      "read": "Pos::new($0, $1, $2, f32::from($4) * 360.0 / 256.0, f32::from($3) * 360.0 / 256.0)"
+    },
+    {
+      "name": "head_rot",
+      "type": "f32",
+      "docs": [
+        "Java: `headRot()`."
+      ],
+      "wire": "head_yaw",
+      "write": "($ * 256.0 / 360.0) as i32 as i8",
+      "read": "f32::from($) * 360.0 / 256.0"
+    },
+    {
+      "name": "data",
+      "type": "i32",
+      "docs": [
+        "Java: `data()`."
+      ]
+    },
+    {
+      "name": "velocity",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `velocity()`."
+      ],
+      "wire": [
+        "scale_byte",
+        "packed_second",
+        "packed_high_4",
+        "continuation_scale"
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SpawnEntityPacket(int, UUID, EntityType, Pos, float, int,",
+      "Vec)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SpawnEntityPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SpawnEntitySerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "SpawnEntityPacket::entityId, UUID, SpawnEntityPacket::uuid,",
+      "EntityType.NETWORK_TYPE, SpawnEntityPacket::type, DOUBLE, \u2026::position.x(),",
+      "DOUBLE, \u2026::position.y(), DOUBLE, \u2026::position.z(), LP_VECTOR3,",
+      "SpawnEntityPacket::velocity, BYTE, \u2026::position.pitch(), BYTE,",
+      "\u2026::position.yaw(), BYTE, \u2026::headRot, VAR_INT, \u2026::data, \u2026)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "imports": [
+    "use crate::coordinate::Pos;",
+    "use crate::entity::entity_type::{self, EntityType};",
+    "use crate::network::types::LP_VECTOR3;"
+  ],
+  "tests": "spawn_entity_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "write_lp_vector3",
+      "reason": "the velocity is carried by LP_VECTOR3, the same low-precision vector codec"
+    },
+    {
+      "construct": "read_lp_vector3",
+      "reason": "the velocity is carried by LP_VECTOR3, the same low-precision vector codec"
+    },
+    {
+      "construct": "to_byte",
+      "reason": "the generated write applies the same degrees-to-byte conversion inline: (degrees * 256 / 360) narrowed through i32 to i8, as Java narrows to byte"
+    },
+    {
+      "construct": ".unwrap_or",
+      "reason": "the read looks the entity type up and panics naming the id, as the hand read did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the read looks the entity type up and panics naming the id, as the hand read did"
+    }
+  ],
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]",
+    "#[allow(clippy::cast_precision_loss)]"
+  ]
+}

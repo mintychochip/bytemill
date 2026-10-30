@@ -1,0 +1,72 @@
+{
+  "class": "LoginPluginRequestPacket",
+  "module": "server/login/login_plugin_request_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.login.LoginPluginRequestPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record LoginPluginRequestPacket(int messageId, String channel,",
+      "byte[] data) implements ServerPacket.Login`.",
+      "",
+      "Java clones `data` in its compact constructor and compares it with",
+      "`Arrays.equals`, which `Vec<u8>` equality reproduces exactly."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "message_id",
+      "type": "i32",
+      "docs": [
+        "Java: `messageId()`."
+      ]
+    },
+    {
+      "name": "channel",
+      "type": "String",
+      "docs": [
+        "Java: `channel()`."
+      ]
+    },
+    {
+      "name": "data",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `data()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new LoginPluginRequestPacket(int, String, byte[])`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `LoginPluginRequestPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "LoginPluginRequestSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(VAR_INT, \u2026, STRING, \u2026, RAW_BYTES, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -1,0 +1,81 @@
+{
+  "class": "RespawnPacket",
+  "module": "server/play/respawn_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.RespawnPacket`.",
+    "",
+    "`PlayerSpawnInfo` and `WorldPos` come from the ported",
+    "`\u2026server.play.data` package (`super::data`), which owns both records and",
+    "their wire form. `WorldPos` is re-exported here so a caller building a",
+    "`deathLocation` only needs this module."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record RespawnPacket(PlayerSpawnInfo playerSpawnInfo, byte copyData)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "player_spawn_info",
+      "type": "PlayerSpawnInfo",
+      "docs": [
+        "Java: `playerSpawnInfo()`."
+      ],
+      "wire": "dimension_type..sea_level"
+    },
+    {
+      "name": "copy_data",
+      "type": "i32",
+      "docs": [
+        "Java: `copyData()` \u2014 a `byte` in Java, a bit mask here; the wire form is",
+        "one raw byte."
+      ],
+      "wire": "data_kept",
+      "write": "$ as i8",
+      "read": "i32::from($)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new RespawnPacket(PlayerSpawnInfo, byte)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `RespawnPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "RespawnSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(PlayerSpawnInfo.NETWORK_TYPE,",
+      "RespawnPacket::playerSpawnInfo, BYTE, RespawnPacket::copyData,",
+      "RespawnPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "respawn_packet.ext.rs",
+  "imports": [
+    "pub use super::data::WorldPos;",
+    "use crate::network::packet::server::play::data::PlayerSpawnInfo;"
+  ],
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_wrap)]"
+  ]
+}

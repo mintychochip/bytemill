@@ -1,0 +1,94 @@
+{
+  "class": "PlayerInfoUpdatePacket",
+  "module": "server/play/player_info_update_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.PlayerInfoUpdatePacket`",
+    "and its nested `Entry`, `Property` and `Action` declarations.",
+    "",
+    "# Deferrals",
+    "",
+    "- `crypto.ChatSession.SERIALIZER` writes a session UUID and a",
+    "  `PlayerPublicKey` (an expiry instant, an X.509-encoded RSA public key and",
+    "  a signature). The ported `crypto::ChatSession` carries only the UUID, so",
+    "  [`ChatSessionRef`] declares the wire shape here. The public key is kept as",
+    "  its opaque DER bytes \u2014 nothing in the packet path decodes it.",
+    "- `components()` / `copyWithOperator` come from",
+    "  `ServerPacket.ComponentHolding`, ported as `ComponentHoldingServerPacket`",
+    "  (`super::super::server_packet`).",
+    "",
+    "Java's compact constructor copies both collections; `EnumSet.copyOf` keeps",
+    "the constants in **declaration order**, so the port stores a `Vec<Action>`",
+    "that the entry serializer walks in that order, and the `Action` bit set is",
+    "written as Java's `EnumSet(Action.class)` (a one-byte fixed bit set, because",
+    "`Action` has eight constants)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PlayerInfoUpdatePacket(EnumSet<Action> actions, List<Entry>",
+      "entries) implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "actions",
+      "type": "Vec<Action>",
+      "docs": [
+        "Java: `actions()`."
+      ],
+      "wire": "actions",
+      "write": "action_mask(&$)",
+      "read": "actions_of_mask($)"
+    },
+    {
+      "name": "entries",
+      "type": "Vec<Entry>",
+      "docs": [
+        "Java: `entries()`."
+      ],
+      "wire": "players_count..players",
+      "put": "write_entries(buffer, &value.actions, &$);",
+      "take": "read_entries(buffer, actions_of_mask(actions))"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PlayerInfoUpdatePacket(EnumSet<Action>, List<Entry>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PlayerInfoUpdatePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PlayerInfoUpdateSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the anonymous `NetworkBuffer.Type` on `PlayerInfoUpdatePacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "player_info_update_packet.ext.rs",
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "the entries are read by read_entries, which applies the same limit"
+    }
+  ],
+  "bound": true
+}

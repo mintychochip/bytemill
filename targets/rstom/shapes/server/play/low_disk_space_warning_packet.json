@@ -1,0 +1,46 @@
+{
+  "class": "LowDiskSpaceWarningPacket",
+  "module": "server/play/low_disk_space_warning_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.LowDiskSpaceWarningPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record LowDiskSpaceWarningPacket() implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new LowDiskSpaceWarningPacket()`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `LowDiskSpaceWarningPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "Self",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -1,0 +1,107 @@
+{
+  "class": "EntityTeleportPacket",
+  "module": "server/play/entity_teleport_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityTeleportPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityTeleportPacket(int entityId, Pos position, Point delta,",
+      "int flags, boolean onGround)`.",
+      "",
+      "The `flags` field is Java's `@MagicConstant(flagsFromClass =",
+      "RelativeFlags.class) int`; the bit constants themselves belong to",
+      "`entity::relative_flags`, which this packet only carries opaquely."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "position",
+      "type": "Pos",
+      "docs": [
+        "Java: `position()` \u2014 absolute coordinates plus the view."
+      ],
+      "wire": [
+        "x",
+        "y",
+        "z",
+        "yaw",
+        "pitch"
+      ]
+    },
+    {
+      "name": "delta",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `delta()` \u2014 the motion applied by the teleport."
+      ],
+      "wire": [
+        "delta_x",
+        "delta_y",
+        "delta_z"
+      ]
+    },
+    {
+      "name": "flags",
+      "type": "i32",
+      "docs": [
+        "Java: `flags()` \u2014 `RelativeFlags` bits."
+      ]
+    },
+    {
+      "name": "on_ground",
+      "type": "bool",
+      "docs": [
+        "Java: `onGround()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityTeleportPacket(int, Pos, Point, int, boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityTeleportPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityTeleportSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, VECTOR3D, VECTOR3D,",
+      "FLOAT, FLOAT, INT, BOOLEAN)` template. Java writes the position's `yaw` and",
+      "`pitch` as two separate floats and re-attaches them on read with",
+      "`absPosition.asPos().withView(yaw, pitch)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::coordinate::Pos;"
+  ],
+  "tests": "entity_teleport_packet.tests.rs",
+  "bound": true
+}

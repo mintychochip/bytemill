@@ -1,0 +1,98 @@
+{
+  "class": "EntityEquipmentPacket",
+  "module": "server/play/entity_equipment_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.EntityEquipmentPacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "**None.** Each stack goes out with the ported",
+    "`crate::item::ItemStack::network_type()` \u2014 `ItemStackImpl.networkType`,",
+    "which writes the air stack as a single `0` and otherwise the **amount",
+    "first**, then the material id, then the component patch through",
+    "`crate::component::codecs::MapNetworkType`. Note that Minestom's *other*",
+    "item-stack type, `ItemStackTemplate.NETWORK_TYPE`, writes the material id",
+    "first instead; `probes/expected/itemstackwireprobe.json` pins both orders,",
+    "and this packet uses the `ItemStack` one, as Java does.",
+    "",
+    "`components()` and `copyWithOperator` are ported through",
+    "`ItemStack::text_components` and `ItemStack::copy_with_components`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityEquipmentPacket(int entityId, Map<EquipmentSlot,",
+      "ItemStack> equipments)`.",
+      "",
+      "`ItemStack` has no `PartialEq` in the port (Java's is identity-based), so",
+      "this record derives only `Clone` and `Debug`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "equipments",
+      "type": "Vec<(EquipmentSlot, ItemStack)>",
+      "docs": [
+        "Java: `equipments()` \u2014 insertion-ordered, as Java's `EnumMap` is."
+      ],
+      "wire": "entries",
+      "put": "write_equipments(buffer, &$);",
+      "take": "read_equipments(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityEquipmentPacket(int, Map)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics on an empty table, as Java's `IllegalArgumentException` does."
+    ],
+    "body": [
+      "        assert!(!equipments.is_empty(), \"Equipments cannot be empty\");",
+      "        Self {",
+      "            entity_id,",
+      "            equipments,",
+      "        }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityEquipmentPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityEquipmentSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the hand-written `SERIALIZER` of `EntityEquipmentPacket` \u2014 each slot",
+      "is a byte whose top bit marks \"more entries follow\"."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_equipment_packet.ext.rs",
+  "imports": [
+    "use crate::entity::equipment_slot::EquipmentSlot;",
+    "use crate::item::item_stack::ItemStack;"
+  ],
+  "tests": "entity_equipment_packet.tests.rs",
+  "bound": true
+}

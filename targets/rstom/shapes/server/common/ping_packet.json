@@ -1,0 +1,55 @@
+{
+  "class": "PingPacket",
+  "module": "server/common/ping_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.PingPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PingPacket(int id) implements ServerPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "i32",
+      "docs": [
+        "Java: `id()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PingPacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PingPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PingSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(INT, PingPacket::id, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -1,0 +1,147 @@
+{
+  "class": "SoundEffectPacket",
+  "module": "server/play/sound_effect_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SoundEffectPacket`.",
+    "",
+    "# Local stubs",
+    "",
+    "- The playback source is the canonical",
+    "  [`crate::adventure::adventure_packet_convertor::SoundSource`]",
+    "  (`net.kyori.adventure.sound.Sound.Source`): Java writes the enum",
+    "  *ordinal* (`AdventurePacketConvertor.getSoundSourceValue` returns",
+    "  `source.ordinal()`) and reads it back through",
+    "  `NetworkBuffer.Enum(Source.class)`, so the declaration order in the",
+    "  convertor is the wire contract.",
+    "- [`SoundEventRef`] replaces the packet's `SoundEvent` field. The ported",
+    "  `crate::sound::SoundEvent` holds its custom key as `&'static str`",
+    "  (`CustomSoundEvent::new`), and this port does not leak memory to",
+    "  manufacture that lifetime, so a decoded custom sound keeps an owned",
+    "  `String`. Built-in events are the ported `BuiltinSoundEvent` unchanged.",
+    "- The ported `coordinate::Vec` stands in for Java's `Point` (Java's own",
+    "  reader builds a `Vec`).",
+    "",
+    "`SoundEvent.NETWORK_TYPE` itself is ported here as",
+    "[`write_sound_event`] / [`read_sound_event`], because the ported `sound`",
+    "module has no buffer serializer."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SoundEffectPacket(SoundEvent soundEvent, Source source, Point",
+      "origin, float volume, float pitch, long seed) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "sound_event",
+      "type": "SoundEventRef",
+      "docs": [
+        "Java: `soundEvent()` \u2014 see [`SoundEventRef`] for the local stand-in."
+      ],
+      "wire": "id..fixed_range",
+      "put": "write_sound_event(buffer, &$);",
+      "take": "read_sound_event(buffer)"
+    },
+    {
+      "name": "source",
+      "type": "SoundSource",
+      "docs": [
+        "Java: `source()`."
+      ],
+      "wire": "category",
+      "write": "$.ordinal()",
+      "read": "SoundSource::from_ordinal($).unwrap_or_else(|| panic!(\"unknown sound source ordinal\"))"
+    },
+    {
+      "name": "origin",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `origin()` \u2014 the ported `coordinate::Vec` stands in for `Point`."
+      ],
+      "wire": [
+        "effect_position_x",
+        "effect_position_y",
+        "effect_position_z"
+      ],
+      "write": [
+        "($.x * 8.0) as i32",
+        "($.y * 8.0) as i32",
+        "($.z * 8.0) as i32"
+      ],
+      "read": "CoordVec::new(f64::from($0) / 8.0, f64::from($1) / 8.0, f64::from($2) / 8.0)"
+    },
+    {
+      "name": "volume",
+      "type": "f32",
+      "docs": [
+        "Java: `volume()`."
+      ]
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()`."
+      ]
+    },
+    {
+      "name": "seed",
+      "type": "i64",
+      "docs": [
+        "Java: `seed()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SoundEffectPacket(SoundEvent, Source, Point, float, float,",
+      "long)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SoundEffectPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SoundEffectSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the anonymous `NetworkBuffer.Type<SoundEffectPacket>` of",
+      "`SoundEffectPacket`."
+    ],
+    "read_via_new": true
+  },
+  "extras": "sound_effect_packet.ext.rs",
+  "imports": [
+    "/// The packet's playback source: the one canonical\n/// [`crate::adventure::adventure_packet_convertor::SoundSource`], re-exported\n/// here so downstream users keep their existing import path.\npub use crate::adventure::adventure_packet_convertor::SoundSource;"
+  ],
+  "tests": "sound_effect_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".unwrap_or",
+      "reason": "the read looks the source up and panics, as the hand read did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the read looks the source up and panics, as the hand read did"
+    }
+  ],
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_truncation)]"
+  ]
+}

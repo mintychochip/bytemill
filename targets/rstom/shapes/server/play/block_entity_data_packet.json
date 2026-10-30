@@ -1,0 +1,92 @@
+{
+  "class": "BlockEntityDataPacket",
+  "module": "server/play/block_entity_data_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.BlockEntityDataPacket`.",
+    "",
+    "Java's `BlockEntityType` is a `StaticProtocolObject` written as a var int",
+    "protocol id; the `instance` block registry is not ported, so the port",
+    "carries the id itself. Java's `data` is an adventure `CompoundBinaryTag`;",
+    "the port uses the `nbt` module's [`CompoundBinaryTag`], and an absent tag is",
+    "written as a bare `TAG_End` exactly as Java does.",
+    "",
+    "Java's deprecated `(Point, int action, CompoundBinaryTag)` constructor is",
+    "replaced by [`BlockEntityDataPacket::from_action`], which panics where",
+    "Java's `Objects.requireNonNull(BlockEntityType.fromId(action), \u2026)` throws."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record BlockEntityDataPacket(Point blockPosition, BlockEntityType type,",
+      "@Nullable CompoundBinaryTag data) implements ServerPacket.Play`.",
+      "",
+      "Java's `blockPosition` is a `Point`; the port carries the decoded",
+      "[`CoordVec`], as [`BLOCK_POSITION`] reads it back."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "block_entity_type_id",
+      "type": "i32",
+      "docs": [
+        "Java: `type()` \u2014 `BlockEntityType.NETWORK_TYPE`, a var int protocol id."
+      ],
+      "wire": "type"
+    },
+    {
+      "name": "data",
+      "type": "Option<CompoundBinaryTag>",
+      "docs": [
+        "Java: `data()`."
+      ],
+      "wire": "nbt_data",
+      "put": "match &$ { Some(data) => write_nbt_compound(buffer, data), None => buffer.write(BYTE, 0) }",
+      "take": "Some(read_nbt_compound(buffer))"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new BlockEntityDataPacket(Point, BlockEntityType, CompoundBinaryTag)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `BlockEntityDataPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "BlockEntityDataSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the anonymous `NetworkBuffer.Type<BlockEntityDataPacket>`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "block_entity_data_packet.ext.rs",
+  "imports": [
+    "use crate::nbt::CompoundBinaryTag;"
+  ],
+  "tests": "block_entity_data_packet.tests.rs",
+  "bound": true
+}

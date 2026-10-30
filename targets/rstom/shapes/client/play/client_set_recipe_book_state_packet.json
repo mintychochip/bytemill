@@ -1,0 +1,74 @@
+{
+  "class": "ClientSetRecipeBookStatePacket",
+  "module": "client/play/client_set_recipe_book_state_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientSetRecipeBookStatePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSetRecipeBookStatePacket(BookType bookType, boolean",
+      "bookOpen, boolean filterActive) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "book_type",
+      "type": "BookType",
+      "docs": [
+        "Java: `bookType()`."
+      ],
+      "wire": "book_id",
+      "write": "$.ordinal()",
+      "read": "BookType::from_ordinal($)"
+    },
+    {
+      "name": "book_open",
+      "type": "bool",
+      "docs": [
+        "Java: `bookOpen()`."
+      ]
+    },
+    {
+      "name": "filter_active",
+      "type": "bool",
+      "docs": [
+        "Java: `filterActive()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSetRecipeBookStatePacket(bookType, bookOpen, filterActive)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSetRecipeBookStatePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSetRecipeBookStateSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(Enum(BookType.class), ..., BOOLEAN, ..., BOOLEAN, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_set_recipe_book_state_packet.ext.rs",
+  "bound": true
+}

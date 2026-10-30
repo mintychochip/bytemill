@@ -1,0 +1,208 @@
+{
+  "class": "ClientUpdateStructureBlockPacket",
+  "module": "client/play/client_update_structure_block_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientUpdateStructureBlockPacket`.",
+    "",
+    "`Rotation` comes from the ported `utils` package."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientUpdateStructureBlockPacket(Point location, Action",
+      "action, Mode mode, String name, Point offset, Point size, Mirror mirror,",
+      "Rotation rotation, String metadata, float integrity, long seed, byte flags)",
+      "implements ClientPacket.Play`.",
+      "",
+      "The compact constructor's `Check.argCondition(name.length() >",
+      "Short.MAX_VALUE, ...)` and `metadata.length() > 128` validations are left",
+      "to the caller in Rust; `probes/expected/client3probe.json` pins the Java",
+      "outcome at each boundary.",
+      "",
+      "`offset` and `size` are `VECTOR3B`, so the port stores the three bytes as",
+      "the coordinate vector Java reads back.",
+      "",
+      "`seed` is a var long on the wire, as in vanilla's `ServerboundSetStructureBlockPacket`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "location",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `location()`."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "action",
+      "type": "Action",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "wire": "action",
+      "write": "$.ordinal()",
+      "read": "Action::from_ordinal($)"
+    },
+    {
+      "name": "mode",
+      "type": "Mode",
+      "docs": [
+        "Java: `mode()`."
+      ],
+      "wire": "mode",
+      "write": "$.ordinal()",
+      "read": "Mode::from_ordinal($)"
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "docs": [
+        "Java: `name()`."
+      ]
+    },
+    {
+      "name": "offset",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `offset()`."
+      ],
+      "wire": [
+        "offset_x",
+        "offset_y",
+        "offset_z"
+      ],
+      "put": "write_vector3b(buffer, $);",
+      "take": "read_vector3b(buffer)"
+    },
+    {
+      "name": "size",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `size()`."
+      ],
+      "wire": [
+        "size_x",
+        "size_y",
+        "size_z"
+      ],
+      "put": "write_vector3b(buffer, $);",
+      "take": "read_vector3b(buffer)"
+    },
+    {
+      "name": "mirror",
+      "type": "Mirror",
+      "docs": [
+        "Java: `mirror()`."
+      ],
+      "wire": "mirror",
+      "write": "$.ordinal()",
+      "read": "Mirror::from_ordinal($)"
+    },
+    {
+      "name": "rotation",
+      "type": "Rotation",
+      "docs": [
+        "Java: `rotation()`."
+      ],
+      "wire": "rotation",
+      "write": "to_restricted_rotation($)",
+      "read": "from_restricted_rotation($)"
+    },
+    {
+      "name": "metadata",
+      "type": "String",
+      "docs": [
+        "Java: `metadata()`."
+      ]
+    },
+    {
+      "name": "integrity",
+      "type": "f32",
+      "docs": [
+        "Java: `integrity()`."
+      ]
+    },
+    {
+      "name": "seed",
+      "type": "i64",
+      "docs": [
+        "Java: `seed()` \u2014 a var long on the wire."
+      ]
+    },
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)]"
+    ],
+    "docs": [
+      "Java: `new ClientUpdateStructureBlockPacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientUpdateStructureBlockPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientUpdateStructureBlockSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BLOCK_POSITION, ..., Enum(Action.class), ..., Enum(Mode),",
+      "..., STRING, ..., VECTOR3B x2, ..., Enum(Mirror), ..., VAR_INT.transform(",
+      "toRestrictedRotation, fromRestrictedRotation), ..., STRING, ..., FLOAT,",
+      "..., VAR_LONG, ..., BYTE, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_update_structure_block_packet.ext.rs",
+  "imports": [
+    "use crate::utils::Rotation;"
+  ],
+  "tests": "client_update_structure_block_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": "write_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which packs the block position the same way"
+    },
+    {
+      "construct": "read_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which unpacks the block position the same way"
+    },
+    {
+      "construct": "write_vector3b",
+      "reason": "carried by the span over the three offset or size bytes"
+    },
+    {
+      "construct": "read_vector3b",
+      "reason": "carried by the span over the three offset or size bytes"
+    },
+    {
+      "construct": "to_restricted_rotation",
+      "reason": "the rotation template calls it"
+    },
+    {
+      "construct": "from_restricted_rotation",
+      "reason": "the rotation template calls it"
+    }
+  ],
+  "bound": true
+}

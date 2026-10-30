@@ -1,0 +1,56 @@
+{
+  "class": "ClientLockDifficultyPacket",
+  "module": "client/play/client_lock_difficulty_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientLockDifficultyPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientLockDifficultyPacket(boolean locked) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "locked",
+      "type": "bool",
+      "docs": [
+        "Java: `locked()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientLockDifficultyPacket(boolean locked)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientLockDifficultyPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientLockDifficultySerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BOOLEAN, ClientLockDifficultyPacket::locked,",
+      "ClientLockDifficultyPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

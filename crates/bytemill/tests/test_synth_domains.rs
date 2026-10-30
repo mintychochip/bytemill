@@ -87,12 +87,25 @@ fn nbt_defaults_are_valid_for_vanilla() {
             m
         }))
     );
+    // A compound `{type: "text", text: "abc"}`: the form a component codec writes back.
+    let entry = |name: &str, text: &str| {
+        let mut e = OrderedMap::new();
+        e.insert("tag_type", Value::Int(8));
+        e.insert("name", Value::str(name));
+        e.insert("value", Value::str(text));
+        Value::map(e)
+    };
     assert_eq!(
         value.get("chat"),
         Some(&Value::map({
             let mut m = OrderedMap::new();
-            m.insert("tag_type", Value::Int(8));
-            m.insert("value", Value::str("abc"));
+            m.insert("tag_type", Value::Int(10));
+            let mut inner = OrderedMap::new();
+            inner.insert(
+                "entries",
+                Value::list(vec![entry("type", "text"), entry("text", "abc")]),
+            );
+            m.insert("value", Value::map(inner));
             m
         }))
     );

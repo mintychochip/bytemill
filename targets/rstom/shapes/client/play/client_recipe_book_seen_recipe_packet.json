@@ -1,0 +1,56 @@
+{
+  "class": "ClientRecipeBookSeenRecipePacket",
+  "module": "client/play/client_recipe_book_seen_recipe_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientRecipeBookSeenRecipePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientRecipeBookSeenRecipePacket(int index) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "index",
+      "type": "i32",
+      "docs": [
+        "Java: `index()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientRecipeBookSeenRecipePacket(index)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientRecipeBookSeenRecipePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientRecipeBookSeenRecipeSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -1,0 +1,114 @@
+{
+  "class": "RecipeBookSettingsPacket",
+  "module": "server/play/recipe_book_settings_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.RecipeBookSettingsPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record RecipeBookSettingsPacket(boolean craftingRecipeBookOpen,",
+      "boolean craftingRecipeBookFilterActive, boolean smeltingRecipeBookOpen,",
+      "boolean smeltingRecipeBookFilterActive, boolean",
+      "blastFurnaceRecipeBookOpen, boolean blastFurnaceRecipeBookFilterActive,",
+      "boolean smokerRecipeBookOpen, boolean smokerRecipeBookFilterActive)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "crafting_recipe_book_open",
+      "type": "bool",
+      "docs": [
+        "Java: `craftingRecipeBookOpen()`."
+      ]
+    },
+    {
+      "name": "crafting_recipe_book_filter_active",
+      "type": "bool",
+      "docs": [
+        "Java: `craftingRecipeBookFilterActive()`."
+      ]
+    },
+    {
+      "name": "smelting_recipe_book_open",
+      "type": "bool",
+      "docs": [
+        "Java: `smeltingRecipeBookOpen()`."
+      ]
+    },
+    {
+      "name": "smelting_recipe_book_filter_active",
+      "type": "bool",
+      "docs": [
+        "Java: `smeltingRecipeBookFilterActive()`."
+      ]
+    },
+    {
+      "name": "blast_furnace_recipe_book_open",
+      "type": "bool",
+      "docs": [
+        "Java: `blastFurnaceRecipeBookOpen()`."
+      ]
+    },
+    {
+      "name": "blast_furnace_recipe_book_filter_active",
+      "type": "bool",
+      "docs": [
+        "Java: `blastFurnaceRecipeBookFilterActive()`."
+      ]
+    },
+    {
+      "name": "smoker_recipe_book_open",
+      "type": "bool",
+      "docs": [
+        "Java: `smokerRecipeBookOpen()`."
+      ]
+    },
+    {
+      "name": "smoker_recipe_book_filter_active",
+      "type": "bool",
+      "docs": [
+        "Java: `smokerRecipeBookFilterActive()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::fn_params_excessive_bools)]",
+      "#[allow(\n        clippy::too_many_arguments,\n        reason = \"1:1 port of Java's RecipeBookSettingsPacket(boolean x 8)\"\n    )]"
+    ],
+    "docs": [
+      "Java: `new RecipeBookSettingsPacket(boolean \u00d7 8)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `RecipeBookSettingsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "RecipeBookSettingsSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the eight-`BOOLEAN` `NetworkBufferTemplate` of",
+      "`RecipeBookSettingsPacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

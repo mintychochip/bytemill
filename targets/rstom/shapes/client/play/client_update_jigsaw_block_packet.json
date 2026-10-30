@@ -1,0 +1,110 @@
+{
+  "class": "ClientUpdateJigsawBlockPacket",
+  "module": "client/play/client_update_jigsaw_block_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientUpdateJigsawBlockPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientUpdateJigsawBlockPacket(Point location, String name,",
+      "String target, String pool, String finalState, String jointType, int",
+      "selectionPriority, int placementPriority) implements ClientPacket.Play`.",
+      "",
+      "The compact constructor's five `Check.argCondition(string.length() >",
+      "Short.MAX_VALUE, ...)` validations are left to the caller in Rust."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "location",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `location()`."
+      ]
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "docs": [
+        "Java: `name()`."
+      ]
+    },
+    {
+      "name": "target",
+      "type": "String",
+      "docs": [
+        "Java: `target()`."
+      ]
+    },
+    {
+      "name": "pool",
+      "type": "String",
+      "docs": [
+        "Java: `pool()`."
+      ]
+    },
+    {
+      "name": "final_state",
+      "type": "String",
+      "docs": [
+        "Java: `finalState()`."
+      ]
+    },
+    {
+      "name": "joint_type",
+      "type": "String",
+      "docs": [
+        "Java: `jointType()`."
+      ]
+    },
+    {
+      "name": "selection_priority",
+      "type": "i32",
+      "docs": [
+        "Java: `selectionPriority()`."
+      ]
+    },
+    {
+      "name": "placement_priority",
+      "type": "i32",
+      "docs": [
+        "Java: `placementPriority()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)]"
+    ],
+    "docs": [
+      "Java: `new ClientUpdateJigsawBlockPacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientUpdateJigsawBlockPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientUpdateJigsawBlockSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BLOCK_POSITION, ..., STRING x5, ..., VAR_INT, ..., VAR_INT,",
+      "...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

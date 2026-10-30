@@ -1,0 +1,125 @@
+{
+  "class": "ScoreboardObjectivePacket",
+  "module": "server/play/scoreboard_objective_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.ScoreboardObjectivePacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "- `Sidebar.NumberFormat` lives in the `scoreboard` package, which has no",
+    "  ported `Sidebar`; its wire form (a `FormatType` ordinal plus a component",
+    "  for every type but `BLANK`) is declared here as [`NumberFormat`].",
+    "- Java's `components()` / `copyWithOperator` come from",
+    "  `ServerPacket.ComponentHolding`, ported as `ComponentHoldingServerPacket`",
+    "  (`super::super::server_packet`).",
+    "",
+    "Java's serializer is not a template: it writes the value/type/number-format",
+    "triple only for modes 0 and 2, so the port keeps that branch."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ScoreboardObjectivePacket(String objectiveName, byte mode,",
+      "@Nullable Component objectiveValue, @Nullable Type type, @Nullable",
+      "Sidebar.NumberFormat numberFormat) implements ServerPacket.Play,",
+      "ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "objective_name",
+      "type": "String",
+      "docs": [
+        "Java: `objectiveName()`."
+      ]
+    },
+    {
+      "name": "mode",
+      "type": "i32",
+      "docs": [
+        "Java: `mode()` \u2014 `0` create, `1` remove, `2` update."
+      ],
+      "write": "$ as i8",
+      "read": "i32::from($)"
+    },
+    {
+      "name": "objective_value",
+      "type": "Option<Component>",
+      "docs": [
+        "Java: `objectiveValue()` \u2014 written for modes 0 and 2 only."
+      ],
+      "wire": "objective_value"
+    },
+    {
+      "name": "objective_type",
+      "type": "Option<ObjectiveType>",
+      "docs": [
+        "Java: `type()` \u2014 written for modes 0 and 2 only."
+      ],
+      "wire": "type",
+      "write": "$.ordinal()",
+      "read": "ObjectiveType::from_ordinal($).expect(\"unknown objective type\")"
+    },
+    {
+      "name": "number_format",
+      "type": "Option<NumberFormat>",
+      "docs": [
+        "Java: `numberFormat()` \u2014 written for modes 0 and 2 only."
+      ],
+      "wire": "has_number_format..content",
+      "put": "write_number_format_optional(buffer, $.as_ref());",
+      "take": "read_number_format_optional(buffer)",
+      "write_whole": true,
+      "read_flat": true
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ScoreboardObjectivePacket(String, byte, Component, Type,",
+      "Sidebar.NumberFormat)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ScoreboardObjectivePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ScoreboardObjectiveSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the anonymous `NetworkBuffer.Type` on `ScoreboardObjectivePacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "scoreboard_objective_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "hooks": {
+    "write.start": [
+      "if value.mode == 0 || value.mode == 2 {",
+      "    let _ = value.objective_value.as_ref().expect(\"objective value for mode 0/2\");",
+      "    let _ = value.objective_type.expect(\"objective type for mode 0/2\");",
+      "}"
+    ]
+  },
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_wrap)]"
+  ]
+}

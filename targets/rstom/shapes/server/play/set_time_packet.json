@@ -1,0 +1,95 @@
+{
+  "class": "SetTimePacket",
+  "module": "server/play/set_time_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetTimePacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "Java's map key is `RegistryKey<WorldClock>`, written through",
+    "`RegistryNetworkTypes.RegistryKeyImpl`, which resolves the key against the",
+    "live registries carried by the buffer (`buffer.registries()`) and writes its",
+    "numeric id. The port's buffer has no registry table, so a clock entry is",
+    "carried as that numeric id; a server binds the id back to a key when it",
+    "builds the packet."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetTimePacket(long gameTime, Map<RegistryKey<WorldClock>,",
+      "ClockState> clocks) implements ServerPacket.Play`.",
+      "",
+      "Java's compact constructor copies the map into an immutable one; a `Vec`",
+      "needs no equivalent, so the entries keep the order they were built in."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "game_time",
+      "type": "i64",
+      "docs": [
+        "Java: `gameTime()`."
+      ],
+      "wire": "world_age"
+    },
+    {
+      "name": "clocks",
+      "type": "Vec<ClockEntry>",
+      "docs": [
+        "Java: `clocks()`."
+      ],
+      "wire": "clocks",
+      "item": {
+        "fields": [
+          {
+            "name": "clock_id",
+            "type": "i32",
+            "docs": []
+          },
+          {
+            "name": "state",
+            "type": "ClockState",
+            "docs": [],
+            "wire": "time..rate",
+            "put": "$.write(buffer);",
+            "take": "ClockState::read(buffer)"
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetTimePacket(long, Map)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetTimePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetTimeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(LONG, SetTimePacket::gameTime,",
+      "WorldClock.NETWORK_TYPE.mapValue(ClockState.NETWORK_TYPE),",
+      "SetTimePacket::clocks, SetTimePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "set_time_packet.ext.rs",
+  "bound": true
+}

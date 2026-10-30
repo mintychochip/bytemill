@@ -93,6 +93,15 @@ fn raw_bytes() -> Value {
     Value::bytes(vec![0x01, 0x02, 0x03])
 }
 
+/// A compound entry naming a string tag.
+fn nbt_string_entry(name: &str, value: &str) -> Value {
+    obj(vec![
+        ("tag_type", Value::Int(8)),
+        ("name", Value::str(name)),
+        ("value", Value::str(value)),
+    ])
+}
+
 /// `_PRIM[name]`: the value per primitive, small enough to satisfy the schema.
 fn prim(name: &str) -> Option<Value> {
     let uuid = || obj(vec![("msb", Value::Int(1)), ("lsb", Value::Int(2))]);
@@ -117,10 +126,23 @@ fn prim(name: &str) -> Option<Value> {
             ("tag_type", Value::Int(10)),
             ("value", obj(vec![("entries", Value::list(vec![]))])),
         ]),
+        // The compound form of a plain text component: the one that a component codec writing
+        // `{type, text}` reproduces byte for byte, as vanilla's decoder accepts it too.
         "text_component" => obj(vec![
-            ("tag_type", Value::Int(8)),
-            ("value", Value::str("abc")),
+            ("tag_type", Value::Int(10)),
+            (
+                "value",
+                obj(vec![(
+                    "entries",
+                    Value::list(vec![
+                        nbt_string_entry("type", "text"),
+                        nbt_string_entry("text", "abc"),
+                    ]),
+                )]),
+            ),
         ]),
+        // The blank number format: no style or content to round-trip.
+        "number_format" => obj(vec![("format_type", Value::Int(0))]),
         "slot" => obj(vec![("item_count", Value::Int(0))]),
         "hashed_slot" => obj(vec![("has_item", Value::Bool(false))]),
         "id_or_sound_event" => obj(vec![("id", Value::Int(1))]),

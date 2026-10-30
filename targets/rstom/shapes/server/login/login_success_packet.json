@@ -1,0 +1,68 @@
+{
+  "class": "LoginSuccessPacket",
+  "module": "server/login/login_success_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.login.LoginSuccessPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record LoginSuccessPacket(GameProfile gameProfile, UUID sessionId)",
+      "implements ServerPacket.Login`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "game_profile",
+      "type": "GameProfile",
+      "docs": [
+        "Java: `gameProfile()`."
+      ],
+      "wire": "@profile"
+    },
+    {
+      "name": "session_id",
+      "type": "Uuid",
+      "docs": [
+        "Java: `sessionId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `LoginSuccessPacket(GameProfile, UUID)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `LoginSuccessPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "LoginSuccessSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(GameProfile.SERIALIZER, \u2026, NetworkBuffer.UUID, \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::network::player::GameProfile;"
+  ],
+  "bound": true
+}

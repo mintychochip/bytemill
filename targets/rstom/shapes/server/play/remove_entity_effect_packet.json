@@ -1,0 +1,86 @@
+{
+  "class": "RemoveEntityEffectPacket",
+  "module": "server/play/remove_entity_effect_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.RemoveEntityEffectPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record RemoveEntityEffectPacket(int entityId, PotionEffect potionEffect)",
+      "implements ServerPacket.Play`.",
+      "",
+      "`PotionEffect.NETWORK_TYPE` is `VAR_INT.transform(PotionEffect::fromId,",
+      "PotionEffect::id)`, so the effect is carried by its numeric id."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "potion_effect",
+      "type": "PotionEffect",
+      "docs": [
+        "Java: `potionEffect()`."
+      ],
+      "wire": "effect_id",
+      "write": "$.id() as i32",
+      "read": "PotionEffect::from_id(i64::from($)).unwrap_or_else(|| panic!(\"unknown potion effect id {}\", $))"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new RemoveEntityEffectPacket(int, PotionEffect)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `RemoveEntityEffectPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "RemoveEntityEffectSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "RemoveEntityEffectPacket::entityId, PotionEffect.NETWORK_TYPE,",
+      "RemoveEntityEffectPacket::potionEffect, RemoveEntityEffectPacket::new)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::potion::PotionEffect;"
+  ],
+  "accepted": [
+    {
+      "construct": ".unwrap_or",
+      "reason": "the read looks the id up and panics naming it, as the hand read did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the read looks the id up and panics naming it, as the hand read did"
+    }
+  ],
+  "bound": true
+}

@@ -1,0 +1,107 @@
+{
+  "class": "ClientSelectKnownPacksPacket",
+  "module": "client/configuration/client_select_known_packs_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.configuration.ClientSelectKnownPacksPacket`.",
+    "",
+    "The entries are the very",
+    "[`SelectKnownPacksPacket::Entry`](crate::network::packet::server::configuration::select_known_packs_packet::Entry)",
+    "records Java reuses here."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSelectKnownPacksPacket(List<SelectKnownPacksPacket.Entry>",
+      "entries) implements ClientPacket.Configuration`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entries",
+      "type": "Vec<Entry>",
+      "docs": [
+        "Java: `entries()`."
+      ],
+      "wire": "known_packs",
+      "item": {
+        "fields": [
+          {
+            "name": "namespace",
+            "type": "String",
+            "docs": []
+          },
+          {
+            "name": "id",
+            "type": "String",
+            "docs": []
+          },
+          {
+            "name": "version",
+            "type": "String",
+            "docs": []
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSelectKnownPacksPacket(List<Entry>)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics above [`MAX_ENTRIES`] entries, matching Java's `Check.argCondition`."
+    ],
+    "body": [
+      "        assert!(",
+      "            entries.len() <= MAX_ENTRIES,",
+      "            \"Too many known packs: {} > {}\",",
+      "            entries.len(),",
+      "            MAX_ENTRIES",
+      "        );",
+      "        Self { entries }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSelectKnownPacksPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSelectKnownPacksSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `SelectKnownPacksPacket.Entry.SERIALIZER.list(MAX_ENTRIES)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::network::packet::server::configuration::select_known_packs_packet::{Entry, MAX_ENTRIES};"
+  ],
+  "tests": "client_select_known_packs_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "the generated read loops 0..count, which is empty for a negative count just as size.max(0) is"
+    },
+    {
+      "construct": ".expect(",
+      "reason": "the generated read builds each entry itself, so there is no downcast of an erased packet value to unwrap"
+    }
+  ],
+  "bound": true
+}

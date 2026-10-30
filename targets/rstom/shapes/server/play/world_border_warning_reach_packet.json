@@ -1,0 +1,59 @@
+{
+  "class": "WorldBorderWarningReachPacket",
+  "module": "server/play/world_border_warning_reach_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.WorldBorderWarningReachPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WorldBorderWarningReachPacket(int warningBlocks) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "warning_blocks",
+      "type": "i32",
+      "docs": [
+        "Java: `warningBlocks()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WorldBorderWarningReachPacket(int warningBlocks)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WorldBorderWarningReachPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WorldBorderWarningReachSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "WorldBorderWarningReachPacket::warningBlocks,",
+      "WorldBorderWarningReachPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

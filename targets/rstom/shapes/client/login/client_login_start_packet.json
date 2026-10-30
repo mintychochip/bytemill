@@ -1,0 +1,63 @@
+{
+  "class": "ClientLoginStartPacket",
+  "module": "client/login/client_login_start_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.login.ClientLoginStartPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientLoginStartPacket(String username, UUID profileId)",
+      "implements ClientPacket.Login`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "username",
+      "type": "String",
+      "docs": [
+        "Java: `username()`."
+      ]
+    },
+    {
+      "name": "profile_id",
+      "type": "Uuid",
+      "docs": [
+        "Java: `profileId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientLoginStartPacket(String, UUID)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientLoginStartPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientLoginStartSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, \u2026, UUID, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "client_login_start_packet.tests.rs"
+}

@@ -1,0 +1,111 @@
+{
+  "class": "ClientEditBookPacket",
+  "module": "client/play/client_edit_book_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientEditBookPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientEditBookPacket(int slot, List<String> pages, @Nullable",
+      "String title) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "slot",
+      "type": "i32",
+      "docs": [
+        "Java: `slot()`."
+      ]
+    },
+    {
+      "name": "pages",
+      "type": "Vec<String>",
+      "docs": [
+        "Java: `pages()`."
+      ]
+    },
+    {
+      "name": "title",
+      "type": "Option<String>",
+      "docs": [
+        "Java: `title()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientEditBookPacket(int slot, List<String> pages, @Nullable String",
+      "title)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics with Java's `IllegalArgumentException` message when a page is",
+      "longer than [`MAX_PAGE_LENGTH`] or the title longer than",
+      "[`MAX_TITLE_LENGTH`]."
+    ],
+    "body": [
+      "        for page in &pages {",
+      "            if page.chars().count() > MAX_PAGE_LENGTH as usize {",
+      "                panic!(\"Page length cannot be greater than {MAX_PAGE_LENGTH}\");",
+      "            }",
+      "        }",
+      "        if let Some(value) = &title",
+      "            && value.chars().count() > MAX_TITLE_LENGTH as usize",
+      "        {",
+      "            panic!(\"Title length cannot be greater than {MAX_TITLE_LENGTH}\");",
+      "        }",
+      "        Self { slot, pages, title }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientEditBookPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientEditBookSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, slot, STRING.list(MAX_PAGES), pages,",
+      "STRING.optional(), title, ClientEditBookPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_edit_book_packet.ext.rs",
+  "tests": "client_edit_book_packet.tests.rs",
+  "hooks": {
+    "read.after:entries_count": [
+      "if !(0..=MAX_PAGES).contains(&entries_count) {",
+      "    panic!(\"List size ({entries_count}) is outside the allowed range (0-{MAX_PAGES})\");",
+      "}"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "Capacity hint only: the hand read reserved size.max(0) entries up front; the generated loop reserves nothing."
+    },
+    {
+      "construct": "write_string_list",
+      "reason": "Wire-equivalent to the derived entry count followed by one STRING per page; its max_size argument was unused (Java validates the declared size on read only)."
+    },
+    {
+      "construct": "write_optional_string",
+      "reason": "Wire-equivalent to the derived presence flag followed by the STRING."
+    }
+  ]
+}

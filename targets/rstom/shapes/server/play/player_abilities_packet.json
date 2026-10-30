@@ -1,0 +1,80 @@
+{
+  "class": "PlayerAbilitiesPacket",
+  "module": "server/play/player_abilities_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.PlayerAbilitiesPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PlayerAbilitiesPacket(byte flags, float flyingSpeed, float",
+      "walkingSpeed) implements ServerPacket.Play`.",
+      "",
+      "`flags` is a `byte` in Java; it is a `u8` here because the wire form is one",
+      "raw byte and the flag constants are bit masks."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "flags",
+      "type": "u8",
+      "docs": [
+        "Java: `flags()`."
+      ],
+      "write": "$ as i8",
+      "read": "$ as u8"
+    },
+    {
+      "name": "flying_speed",
+      "type": "f32",
+      "docs": [
+        "Java: `flyingSpeed()`."
+      ]
+    },
+    {
+      "name": "walking_speed",
+      "type": "f32",
+      "docs": [
+        "Java: `walkingSpeed()`."
+      ],
+      "wire": "field_of_view_modifier"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PlayerAbilitiesPacket(byte, float, float)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PlayerAbilitiesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PlayerAbilitiesSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BYTE, \u2026flags, FLOAT, \u2026flyingSpeed,",
+      "FLOAT, \u2026walkingSpeed, PlayerAbilitiesPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "player_abilities_packet.ext.rs",
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_wrap)]",
+    "#[allow(clippy::cast_sign_loss)]"
+  ]
+}

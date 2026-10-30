@@ -1,0 +1,75 @@
+{
+  "class": "BlockBreakAnimationPacket",
+  "module": "server/play/block_break_animation_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.BlockBreakAnimationPacket`.",
+    "",
+    "Java's `blockPosition` is a `Point`; the port carries the decoded",
+    "[`Vec`](crate::coordinate::Vec), as [`BLOCK_POSITION`] reads it back."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record BlockBreakAnimationPacket(int entityId, Point blockPosition,",
+      "byte destroyStage) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ]
+    },
+    {
+      "name": "destroy_stage",
+      "type": "i8",
+      "docs": [
+        "Java: `destroyStage()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new BlockBreakAnimationPacket(int, Point, byte)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `BlockBreakAnimationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "BlockBreakAnimationSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, BLOCK_POSITION, BYTE, \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "block_break_animation_packet.tests.rs"
+}

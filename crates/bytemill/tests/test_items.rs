@@ -200,7 +200,7 @@ fn members_are_fn_const_and_type_with_absolute_offsets() {
 #[test]
 fn items_tile_every_packet_file_apart_from_comments() {
     let packet_root =
-        common::rstom_tables::rstom_dir().join("crates/rstom/src/network/packet");
+        bytemill::shapes::packet_root(&common::rstom_tables::rstom_dir());
     if !packet_root.is_dir() {
         eprintln!("rstom worktree absent; skipping");
         return;

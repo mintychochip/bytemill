@@ -1,0 +1,70 @@
+{
+  "class": "EntityEffectPacket",
+  "module": "server/play/entity_effect_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityEffectPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityEffectPacket(int entityId, Potion potion)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "potion",
+      "type": "Potion",
+      "docs": [
+        "Java: `potion()`."
+      ],
+      "wire": "effect_id..flags",
+      "codec": "PotionNetworkType"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityEffectPacket(int, Potion)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityEffectPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityEffectSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, Potion.NETWORK_TYPE)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_effect_packet.ext.rs",
+  "imports": [
+    "use crate::potion::Potion;"
+  ],
+  "tests": "entity_effect_packet.tests.rs",
+  "bound": true
+}

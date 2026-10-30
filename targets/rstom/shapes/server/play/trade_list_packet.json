@@ -1,0 +1,123 @@
+{
+  "class": "TradeListPacket",
+  "module": "server/play/trade_list_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.TradeListPacket`",
+    "and every record nested in it (`Trade`, `ItemCost`).",
+    "",
+    "# Item wire types",
+    "",
+    "[`ItemStackStub`] keeps the packet-layer constructors (`air`, `of`) that",
+    "inventories and probes already call, and its read/write delegate to",
+    "[`crate::item::ItemStack::network_type`]. [`ItemCost`] writes its component",
+    "map with `DataComponent.MAP_NETWORK_TYPE` (added entries only, no removal",
+    "count). Java's component map iteration order is not stable between JVM",
+    "runs (see `probes/java/probe/ServerPlayWorldProbe.java`)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TradeListPacket(int windowId, List<Trade> trades, int",
+      "villagerLevel, int experience, boolean regularVillager, boolean canRestock)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "trades",
+      "type": "Vec<Trade>",
+      "docs": [
+        "Java: `trades()` \u2014 Java's compact constructor copies the list."
+      ],
+      "wire": "trades"
+    },
+    {
+      "name": "villager_level",
+      "type": "i32",
+      "docs": [
+        "Java: `villagerLevel()`."
+      ]
+    },
+    {
+      "name": "experience",
+      "type": "i32",
+      "docs": [
+        "Java: `experience()`."
+      ]
+    },
+    {
+      "name": "regular_villager",
+      "type": "bool",
+      "docs": [
+        "Java: `regularVillager()`."
+      ],
+      "wire": "is_regular_villager"
+    },
+    {
+      "name": "can_restock",
+      "type": "bool",
+      "docs": [
+        "Java: `canRestock()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TradeListPacket(int, List<Trade>, int, int, boolean,",
+      "boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TradeListPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TradeListSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "TradeListPacket::windowId, Trade.SERIALIZER.list(MAX_TRADES),",
+      "TradeListPacket::trades, VAR_INT, TradeListPacket::villagerLevel, VAR_INT,",
+      "TradeListPacket::experience, BOOLEAN, TradeListPacket::regularVillager,",
+      "BOOLEAN, TradeListPacket::canRestock, TradeListPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "trade_list_packet.ext.rs",
+  "tests": "trade_list_packet.tests.rs",
+  "hooks": {
+    "read.after:trades_count": [
+      "check_size(trades_count, MAX_TRADES);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "the generated read takes the count itself and checks it against the same limit with check_size, which read_size applies"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use super::advancements_packet::check_size;"
+  ]
+}

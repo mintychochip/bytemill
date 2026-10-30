@@ -1,0 +1,90 @@
+{
+  "class": "RecipeBookAddPacket",
+  "module": "server/play/recipe_book_add_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.RecipeBookAddPacket`",
+    "(with its nested `Entry` record).",
+    "",
+    "The `RecipeDisplay` payload codec and the `Ingredient` stub are shared with",
+    "the sibling packets of this slice and live in",
+    "[`super::declare_recipes_packet`]."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record RecipeBookAddPacket(List<Entry> entries, boolean replace)",
+      "implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entries",
+      "type": "Vec<Entry>",
+      "docs": [
+        "Java: `entries()`."
+      ],
+      "wire": "recipes"
+    },
+    {
+      "name": "replace",
+      "type": "bool",
+      "docs": [
+        "Java: `replace()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new RecipeBookAddPacket(List<Entry>, boolean)` (the compact",
+      "constructor copies)."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `RecipeBookAddPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "RecipeBookAddSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(Entry.SERIALIZER.list(),",
+      "RecipeBookAddPacket::entries, BOOLEAN, RecipeBookAddPacket::replace,",
+      "RecipeBookAddPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "recipe_book_add_packet.ext.rs",
+  "tests": "recipe_book_add_packet.tests.rs",
+  "hooks": {
+    "read.after:recipes_count": [
+      "check_size(recipes_count, i32::MAX);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "the generated read takes the count itself and checks it against the same limit with check_size, which read_size applies"
+    },
+    {
+      "construct": ".min(",
+      "reason": "the generated read does not reserve capacity up front, so there is no capacity bound to apply"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use super::advancements_packet::check_size;"
+  ]
+}

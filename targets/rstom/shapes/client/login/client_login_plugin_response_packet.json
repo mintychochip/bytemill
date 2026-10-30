@@ -1,0 +1,64 @@
+{
+  "class": "ClientLoginPluginResponsePacket",
+  "module": "client/login/client_login_plugin_response_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.login.ClientLoginPluginResponsePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientLoginPluginResponsePacket(int messageId, byte @Nullable []",
+      "data) implements ClientPacket.Login` \u2014 the answer to",
+      "[`LoginPluginRequestPacket`](crate::network::packet::server::login::login_plugin_request_packet::LoginPluginRequestPacket)."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "message_id",
+      "type": "i32",
+      "docs": [
+        "Java: `messageId()`."
+      ]
+    },
+    {
+      "name": "data",
+      "type": "Option<Vec<u8>>",
+      "docs": [
+        "Java: `data()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientLoginPluginResponsePacket(int, @Nullable byte[])`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientLoginPluginResponsePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientLoginPluginResponseSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(VAR_INT, \u2026, RAW_BYTES.optional(), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "client_login_plugin_response_packet.tests.rs"
+}

@@ -1,0 +1,65 @@
+{
+  "class": "ClientPickItemFromEntityPacket",
+  "module": "client/play/client_pick_item_from_entity_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientPickItemFromEntityPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPickItemFromEntityPacket(int entityId, boolean",
+      "includeData) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "include_data",
+      "type": "bool",
+      "docs": [
+        "Java: `includeData()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPickItemFromEntityPacket(int entityId, boolean includeData)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPickItemFromEntityPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPickItemFromEntitySerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, entityId, BOOLEAN, includeData,",
+      "ClientPickItemFromEntityPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

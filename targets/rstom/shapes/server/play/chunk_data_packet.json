@@ -1,0 +1,92 @@
+{
+  "class": "ChunkDataPacket",
+  "module": "server/play/chunk_data_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.ChunkDataPacket`.",
+    "",
+    "`ChunkData` and `LightData` live in Java's `...server.play.data` package,",
+    "which another partition owns; this packet references them through",
+    "`crate::network::packet::server::play::data`.",
+    "",
+    "Note on equality: Java's `LightData` is a record over `List<byte[]>`, and a",
+    "record's generated `equals` compares the list elements by identity, so a",
+    "decoded light payload never compares equal to the one that was written. That",
+    "is Java's behaviour and the probe records it; the port does not \"fix\" it."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ChunkDataPacket(int chunkX, int chunkZ, ChunkData chunkData,",
+      "LightData lightData) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chunk_x",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkX()`."
+      ]
+    },
+    {
+      "name": "chunk_z",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkZ()`."
+      ]
+    },
+    {
+      "name": "chunk_data",
+      "type": "ChunkData",
+      "docs": [
+        "Java: `chunkData()`."
+      ],
+      "wire": "heightmaps_count..block_entities"
+    },
+    {
+      "name": "light_data",
+      "type": "LightData",
+      "docs": [
+        "Java: `lightData()`."
+      ],
+      "wire": "@light"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ChunkDataPacket(int, int, ChunkData, LightData)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ChunkDataPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ChunkDataSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(INT, INT, ChunkData.NETWORK_TYPE,",
+      "LightData.NETWORK_TYPE, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::network::packet::server::play::data::{ChunkData, LightData};"
+  ],
+  "bound": true
+}

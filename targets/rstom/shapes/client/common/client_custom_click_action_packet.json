@@ -1,0 +1,84 @@
+{
+  "class": "ClientCustomClickActionPacket",
+  "module": "client/common/client_custom_click_action_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientCustomClickActionPacket`.",
+    "",
+    "# Local stub",
+    "",
+    "`text::Key` is ported and so is `NetworkBuffer.KEY`",
+    "(`STRING.transform(Key::key, Key::asString)`), but the key the wire holds is",
+    "only its `namespace:value` spelling, so the field is a `String`. The payload is a `BinaryTag` written as",
+    "`UNTRUSTED_NBT.lengthPrefixed(65536)` \u2014 a var-int length, then the nameless",
+    "binary NBT tag."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientCustomClickActionPacket(Key key, BinaryTag payload)",
+      "implements ClientPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "key",
+      "type": "String",
+      "docs": [
+        "Java: `key()`, as `Key.asString()`."
+      ],
+      "wire": "id"
+    },
+    {
+      "name": "payload",
+      "type": "BinaryTag",
+      "docs": [
+        "Java: `payload()`."
+      ],
+      "put": "write_nbt(buffer, &$);",
+      "take": "read_nbt(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientCustomClickActionPacket(Key, BinaryTag)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientCustomClickActionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientCustomClickActionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(KEY, \u2026, UNTRUSTED_NBT.lengthPrefixed(65536), \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_custom_click_action_packet.ext.rs",
+  "imports": [
+    "use crate::nbt::BinaryTag;"
+  ],
+  "tests": "client_custom_click_action_packet.tests.rs",
+  "constants": {
+    "payload_size": "NetworkBuffer::make_array(|inner| write_nbt(inner, &value.payload)).len() as i32"
+  },
+  "bound": true,
+  "uses": [
+    "use crate::network::packet::server::configuration::registry_data_packet::{read_nbt, write_nbt};"
+  ]
+}

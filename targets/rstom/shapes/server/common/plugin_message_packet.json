@@ -1,0 +1,62 @@
+{
+  "class": "PluginMessagePacket",
+  "module": "server/common/plugin_message_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.PluginMessagePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PluginMessagePacket(String channel, byte[] data) implements",
+      "ServerPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "channel",
+      "type": "String",
+      "docs": [
+        "Java: `channel()`."
+      ]
+    },
+    {
+      "name": "data",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `data()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PluginMessagePacket(String, byte[])`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PluginMessagePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PluginMessageSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, \u2026, RAW_BYTES, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "plugin_message_packet.ext.rs"
+}

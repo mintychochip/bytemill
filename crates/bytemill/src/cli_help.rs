@@ -254,7 +254,14 @@ pub const COMMANDS: &[Command] = &[
                 take a standard, written `go:1.23` or `--std 1.23`; `bml targets` lists what \
                 each accepts. `rstom` writes a drop-in mirror of rstom's `rstom-packets` crate, \
                 and `rstom-tree` writes shaped packets and the wire-pin gate into an rstom \
-                workspace.",
+                workspace. A shaped packet that is still hand-written is swapped: the \
+                `.ext.rs` and `.tests.rs` siblings are created from the hand file when absent, \
+                and the swap is refused, writing nothing, if it would lose a hand item, a \
+                serializer behaviour the shape neither hooks nor accepts, or a packet listed in \
+                wire_pins_known.json (a `domain-limit` entry records a limit of the hand type \
+                and does not refuse it). A bound shape binds the hand fields to the wire \
+                fields instead of mirroring them; the conversions shared by every packet are \
+                read from bindings.json beside the shapes directory.",
         options: &[
             (
                 "--out <dir>",
@@ -271,9 +278,9 @@ pub const COMMANDS: &[Command] = &[
             ),
             (
                 "--shapes <dir>",
-                "rstom-tree: the shape ledgers `bml shapes extract` writes. Default: \
-                 targets/rstom/shapes in the source tree this bml was built from, which is not \
-                 tracked by git.",
+                "rstom-tree: the shape ledger, one JSON file per packet, with bindings.json \
+                 beside the directory. Default: targets/rstom/shapes in the source tree this \
+                 bml was built from, which is tracked by git.",
             ),
             (
                 "--packets-json <file>",
@@ -322,30 +329,48 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: "shapes",
         group: GENERATE,
-        synopsis: "extract|report <schema>...",
+        synopsis: "<action> <schema>...",
         summary: "Compare packets with an rstom workspace",
         usage: &[
             "shapes extract <schema>... --rstom <workspace> --out <dir>\n\
              [--eligible] [--class <name>]... [--packets-json <file>]",
             "shapes report <schema>... --rstom <workspace> [--packets-json <file>]",
+            "shapes wires <schema>... --rstom <workspace> --class <name>...\n\
+             [--packets-json <file>]",
+            "shapes render <schema>... --rstom <workspace> --class <name>...\n\
+             [--shapes <dir>] [--packets-json <file>]",
+            "shapes fmt [--shapes <dir>]",
         ],
-        about: "Works with the hand-written packet classes of an rstom workspace. `extract` \
-                reads each class's source file and writes its shape (its fields, as JSON) to \
-                --out, one file per class, in the layout `bml emit rstom-tree --shapes` reads; \
-                a class with no source file, or whose shape can't be extracted, is skipped. \
-                `report` prints one line per class: its name, a tab, and its status, which is \
-                `eligible` when its fields match the schema and otherwise says what is missing \
-                or different.",
+        about: "Works with the packet classes of an rstom workspace and the shape ledger. \
+                `extract` reads each class's source file and writes its shape (its fields, as \
+                JSON) to --out, one file per class, in the layout `bml emit rstom-tree \
+                --shapes` reads; a class with no source file, or whose shape can't be \
+                extracted, is skipped. `report` prints one line per class: its name, a tab, \
+                and its status, which is `generated` when the class's file is already \
+                generated, `eligible` when its fields match the schema and it is not a known \
+                wire deviation, and otherwise says what is missing or different. `wires` \
+                prints the wire fields a class flattens to, one per line, which are the idents \
+                a bound shape's `wire` keys name. `render` prints the source `emit rstom-tree` \
+                would write for a class from its shape, without the swap checks, to author a \
+                shape against. `fmt` rewrites each file of the ledger in the canonical form \
+                `extract` writes, for shapes authored by hand or by script.",
         options: &[
             ("--rstom <workspace>", "The rstom workspace (required)."),
             ("--out <dir>", "extract: where the ledgers go (required)."),
             (
                 "--eligible",
-                "extract: keep only classes whose fields match the schema.",
+                "extract: keep only classes whose fields match the schema and that are not known \
+                 wire deviations.",
             ),
             (
                 "--class <name>",
-                "extract: only this class; repeat for several.",
+                "extract: only this class; repeat for several. wires, render: the class to show \
+                 (required).",
+            ),
+            (
+                "--shapes <dir>",
+                "render, fmt: the shape ledger. Default: targets/rstom/shapes in the source \
+                 tree this bml was built from.",
             ),
             (
                 "--packets-json <file>",
@@ -357,6 +382,10 @@ pub const COMMANDS: &[Command] = &[
             "bml shapes extract schemas/minecraft_26_3_wiki.bml --rstom ../rstom --eligible \\\n\
              --out targets/rstom/shapes",
             "bml shapes report schemas/minecraft_26_3_wiki.bml --rstom ../rstom",
+            "bml shapes wires schemas/minecraft_26_3_wiki.bml --rstom ../rstom --class SetSlotPacket",
+            "bml shapes render schemas/minecraft_26_3_wiki.bml --rstom ../rstom \\\n\
+             --class SetSlotPacket",
+            "bml shapes fmt --shapes targets/rstom/shapes",
         ],
     },
     Command {
@@ -662,7 +691,10 @@ pub fn run_help(args: &[String]) -> Result<i32, String> {
             None => Err(unknown_command(topic)),
         },
         // `bml help shapes extract` is the shapes page, which covers both.
-        [topic, sub] if topic == "shapes" && (sub == "extract" || sub == "report") => {
+        [topic, sub]
+            if topic == "shapes"
+                && matches!(sub.as_str(), "extract" | "report" | "wires" | "render" | "fmt") =>
+        {
             page_of(find("shapes").expect("shapes is in COMMANDS"))
         }
         [_, extra, ..] => Err(format!(

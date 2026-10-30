@@ -1,0 +1,57 @@
+{
+  "class": "ClientPongPacket",
+  "module": "client/common/client_pong_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientPongPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPongPacket(int id) implements ClientPacket.Configuration,",
+      "Play` \u2014 the answer to",
+      "[`PingPacket`](crate::network::packet::server::common::ping_packet::PingPacket)."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "i32",
+      "docs": [
+        "Java: `id()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientPongPacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPongPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPongSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(INT, ClientPongPacket::id, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

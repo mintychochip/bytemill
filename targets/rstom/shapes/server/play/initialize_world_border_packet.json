@@ -1,0 +1,114 @@
+{
+  "class": "InitializeWorldBorderPacket",
+  "module": "server/play/initialize_world_border_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.InitializeWorldBorderPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record InitializeWorldBorderPacket(double x, double z, double",
+      "oldDiameter, double newDiameter, long speed, int portalTeleportBoundary,",
+      "int warningTime, int warningBlocks)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "x",
+      "type": "f64",
+      "docs": [
+        "Java: `x()` \u2014 the centre of the border."
+      ],
+      "wire": "center_x"
+    },
+    {
+      "name": "z",
+      "type": "f64",
+      "docs": [
+        "Java: `z()`."
+      ],
+      "wire": "center_z"
+    },
+    {
+      "name": "old_diameter",
+      "type": "f64",
+      "docs": [
+        "Java: `oldDiameter()`."
+      ]
+    },
+    {
+      "name": "new_diameter",
+      "type": "f64",
+      "docs": [
+        "Java: `newDiameter()`."
+      ]
+    },
+    {
+      "name": "speed",
+      "type": "i64",
+      "docs": [
+        "Java: `speed()` \u2014 the lerp speed, as a fixed-point value."
+      ]
+    },
+    {
+      "name": "portal_teleport_boundary",
+      "type": "i32",
+      "docs": [
+        "Java: `portalTeleportBoundary()`."
+      ]
+    },
+    {
+      "name": "warning_time",
+      "type": "i32",
+      "docs": [
+        "Java: `warningTime()`."
+      ]
+    },
+    {
+      "name": "warning_blocks",
+      "type": "i32",
+      "docs": [
+        "Java: `warningBlocks()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)] // Java's eight-field canonical constructor"
+    ],
+    "docs": [
+      "Java: `new InitializeWorldBorderPacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `InitializeWorldBorderPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "InitializeWorldBorderSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(DOUBLE, \u2026)` template. Vanilla's",
+      "`ClientboundInitializeBorderPacket` writes `warningBlocks` before `warningTime`, and so",
+      "does this packet; Minestom wrote the two the other way round."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "initialize_world_border_packet.tests.rs",
+  "bound": true
+}

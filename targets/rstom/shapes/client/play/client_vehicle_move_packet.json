@@ -1,0 +1,73 @@
+{
+  "class": "ClientVehicleMovePacket",
+  "module": "client/play/client_vehicle_move_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientVehicleMovePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientVehicleMovePacket(Pos position, boolean onGround)",
+      "implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "position",
+      "type": "Pos",
+      "docs": [
+        "Java: `position()`."
+      ],
+      "wire": [
+        "x",
+        "y",
+        "z",
+        "yaw",
+        "pitch"
+      ]
+    },
+    {
+      "name": "on_ground",
+      "type": "bool",
+      "docs": [
+        "Java: `onGround()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientVehicleMovePacket(Pos position, boolean onGround)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientVehicleMovePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientVehicleMoveSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(POS, \u2026, BOOLEAN, \u2026)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::coordinate::Pos;"
+  ],
+  "bound": true
+}

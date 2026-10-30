@@ -1,0 +1,74 @@
+{
+  "class": "ClientTeleportConfirmPacket",
+  "module": "client/play/client_teleport_confirm_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientTeleportConfirmPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientTeleportConfirmPacket(int teleportId, Pos position)",
+      "implements ClientPacket.Play` \u2014 acknowledges a teleport and reports where",
+      "the client ended up."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "teleport_id",
+      "type": "i32",
+      "docs": [
+        "Java: `teleportId()`."
+      ]
+    },
+    {
+      "name": "position",
+      "type": "Pos",
+      "docs": [
+        "Java: `position()`."
+      ],
+      "wire": [
+        "x",
+        "y",
+        "z",
+        "yaw",
+        "pitch"
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientTeleportConfirmPacket(teleportId, position)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientTeleportConfirmPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientTeleportConfirmSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ..., POS, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::coordinate::Pos;"
+  ],
+  "bound": true
+}

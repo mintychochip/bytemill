@@ -1,0 +1,90 @@
+{
+  "class": "EntityPositionPacket",
+  "module": "server/play/entity_position_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityPositionPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityPositionPacket(int entityId, VecDelta delta, boolean",
+      "onGround)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "delta",
+      "type": "VecDelta",
+      "docs": [
+        "Java: `delta()` \u2014 the movement, either linear or stepped."
+      ],
+      "wire": [
+        "delta_x",
+        "delta_y",
+        "delta_z",
+        "steps"
+      ],
+      "put": "$.write(buffer);",
+      "take": "VecDelta::read(buffer, movement_properties::step_count(properties))",
+      "whole_span": true
+    },
+    {
+      "name": "on_ground",
+      "type": "bool",
+      "docs": [
+        "Java: `onGround()`."
+      ],
+      "wire": [],
+      "read": "movement_properties::on_ground(properties)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityPositionPacket(int, VecDelta, boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityPositionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityPositionSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the hand-written `SERIALIZER` of `EntityPositionPacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_position_packet.ext.rs",
+  "imports": [
+    "use super::data::vec_delta::VecDelta;"
+  ],
+  "tests": "entity_position_packet.tests.rs",
+  "constants": {
+    "properties": "movement_properties::pack(value.on_ground, value.delta.step_count())"
+  },
+  "bound": true,
+  "uses": [
+    "use super::movement_properties;"
+  ]
+}

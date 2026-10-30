@@ -1,0 +1,59 @@
+{
+  "class": "ClientPingRequestPacket",
+  "module": "client/common/client_ping_request_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientPingRequestPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPingRequestPacket(long number) implements",
+      "ClientPacket.Status, ClientPacket.Play`.",
+      "",
+      "The same serializer is registered under the status id `0x01` and the play",
+      "id `0x2a`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "number",
+      "type": "i64",
+      "docs": [
+        "Java: `number()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPingRequestPacket(long number)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPingRequestPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPingRequestSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(LONG, ClientPingRequestPacket::number, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

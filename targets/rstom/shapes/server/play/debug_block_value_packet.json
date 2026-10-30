@@ -1,0 +1,81 @@
+{
+  "class": "DebugBlockValuePacket",
+  "module": "server/play/debug_block_value_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.DebugBlockValuePacket`, plus",
+    "the shared `net.minestom.server.network.debug.DebugSubscription` model the",
+    "four debug packets use.",
+    "",
+    "# Value types",
+    "",
+    "Java registers sixteen debug subscriptions. [`ValueKind::Unit`] and",
+    "[`ValueKind::VarInt`] are the two primitives. The other fourteen are",
+    "[`ValueKind::Raw`]: that marker means the payload is a `debug.info` record",
+    "(or a list of them), written and read through",
+    "[`crate::network::debug::DebugSubscription::write_value`] /",
+    "[`read_value`](crate::network::debug::DebugSubscription::read_value). The",
+    "wire form (subscription id, then the presence boolean and the value) is",
+    "unchanged."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DebugBlockValuePacket(Point blockPosition,",
+      "DebugSubscription.Update<?> update) implements ServerPacket.Play`.",
+      "",
+      "Java's `blockPosition` is a `Point`; the port carries the decoded",
+      "[`CoordVec`], as [`BLOCK_POSITION`] reads it back."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ]
+    },
+    {
+      "name": "update",
+      "type": "DebugUpdate",
+      "docs": [
+        "Java: `update()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DebugBlockValuePacket(Point, DebugSubscription.Update)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DebugBlockValuePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DebugBlockValueSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BLOCK_POSITION,",
+      "DebugSubscription.Update.NETWORK_TYPE, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "debug_block_value_packet.ext.rs",
+  "tests": "debug_block_value_packet.tests.rs",
+  "bound": true
+}

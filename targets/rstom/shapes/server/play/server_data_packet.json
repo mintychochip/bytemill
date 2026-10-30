@@ -1,0 +1,78 @@
+{
+  "class": "ServerDataPacket",
+  "module": "server/play/server_data_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ServerDataPacket`.",
+    "",
+    "Java also implements `ServerPacket.ComponentHolding`; that marker has no",
+    "ported trait in this workspace (see `advancements_packet.rs`), so",
+    "`components()` / `copyWithOperator` are not part of the port. The wire form",
+    "is unaffected.",
+    "",
+    "Java overrides `equals`/`hashCode` so the optional `byte[]` compares by",
+    "content; Rust's derived `PartialEq`/`Eq` on `Option<Vec<u8>>` already does,",
+    "so no override is needed."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ServerDataPacket(Component motd, byte @Nullable [] iconBase64)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "motd",
+      "type": "Component",
+      "docs": [
+        "Java: `motd()`."
+      ]
+    },
+    {
+      "name": "icon_base64",
+      "type": "Option<Vec<u8>>",
+      "docs": [
+        "Java: `iconBase64()` \u2014 the raw decoded PNG bytes."
+      ],
+      "wire": "icon"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ServerDataPacket(Component, byte[])`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ServerDataPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ServerDataSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(COMPONENT, ServerDataPacket::motd,",
+      "BYTE_ARRAY.optional(), ServerDataPacket::iconBase64, ServerDataPacket::new)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "bound": true
+}

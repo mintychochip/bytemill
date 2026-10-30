@@ -5,47 +5,33 @@
 //! name the hand fields. Public hand APIs never change.
 
 use crate::emit_rstom::PacketBody;
-use crate::shapes::ledger::{mapped_pair_rtype, pair_fields};
+use crate::shapes::ledger::{DerivedField, DerivedKind, pair_body_fields};
 use crate::shapes::model::Shape;
 
-/// BML (ident, rtype) pairs from a packet body. Applies the same wrapping as
-/// `bml_field_pairs` (via `mapped_pair_rtype`) so both pair sources agree.
-pub fn body_pairs(body: &PacketBody) -> Vec<(String, String)> {
-    body.fields
-        .iter()
-        .map(|f| {
-            (
-                f.ident.clone(),
-                mapped_pair_rtype(&f.rtype, f.repeat_mode.is_some(), f.guard.is_some()),
-            )
-        })
-        .collect()
+/// The renames and derived accesses a generated packet body needs to name the
+/// hand struct's fields.
+#[derive(Debug, Clone, Default)]
+pub struct RemapPlan {
+    pub renames: Vec<(String, String)>,
+    pub derived: Vec<DerivedField>,
 }
 
-/// BML-ident to hand-name renames for this shape and body, or `None` when the
-/// fields do not pair (the caller must refuse the swap, like `mismatch`).
-pub fn remap_plan(shape: &Shape, body: &PacketBody) -> Option<Vec<(String, String)>> {
-    let hand: Vec<(&str, &str)> = shape
-        .fields
-        .iter()
-        .map(|f| (f.name.as_str(), f.type_.as_str()))
-        .collect();
-    let bml = body_pairs(body);
-    let map = pair_fields(&hand, &bml)?;
-    Some(
-        map.iter()
-            .enumerate()
-            .filter_map(|(i, &j)| {
-                let (b, _) = &bml[j];
-                let h = hand[i].0;
-                if b != h {
-                    Some((b.clone(), h.to_string()))
-                } else {
-                    None
-                }
-            })
-            .collect(),
-    )
+/// Build the remap plan for `shape` over `body`, or `None` when the fields do
+/// not pair (the caller must refuse the swap, like `mismatch`).
+pub fn remap_plan(shape: &Shape, body: &PacketBody) -> Option<RemapPlan> {
+    let pair = pair_body_fields(shape, body.fields.as_slice())?;
+    let mut renames = Vec::new();
+    for (i, &j) in pair.hand_to_bml.iter().enumerate() {
+        let b = &body.fields[j].ident;
+        let h = &shape.fields[i].name;
+        if b != h {
+            renames.push((b.clone(), h.clone()));
+        }
+    }
+    Some(RemapPlan {
+        renames,
+        derived: pair.derived,
+    })
 }
 
 fn is_ident_char(c: char) -> bool {
@@ -85,6 +71,49 @@ pub fn remap_idents(text: &str, plan: &[(String, String)]) -> String {
             out.push(chars[i]);
             i += 1;
         }
+    }
+    out
+}
+
+/// Replace each derived wire access (`value.<count>`, `value.<flag>`, with any
+/// trailing `.clone()`) by the hand expression that produces it.
+pub fn apply_derived_writes(text: &str, derived: &[DerivedField]) -> String {
+    let mut out = text.to_string();
+    for d in derived {
+        let expr = match d.kind {
+            DerivedKind::Count => format!("value.{}.len() as {}", d.hand, d.rtype),
+            DerivedKind::Flag => format!("value.{}.is_some()", d.hand),
+        };
+        out = replace_value_access(&out, &d.bml, &expr);
+    }
+    out
+}
+
+/// Replace whole-word `value.<ident>` accesses. A directly following
+/// `.clone()` is consumed with the access, so the generated write does not
+/// clone the derived expression.
+fn replace_value_access(text: &str, ident: &str, expr: &str) -> String {
+    let needle = format!("value.{ident}");
+    let chars: Vec<char> = text.chars().collect();
+    let needle: Vec<char> = needle.chars().collect();
+    let clone: Vec<char> = ".clone()".chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i..].starts_with(&needle) {
+            let end = i + needle.len();
+            let right_ok = end == chars.len() || !is_ident_char(chars[end]);
+            if right_ok {
+                out.push_str(expr);
+                i = end;
+                if chars[i..].starts_with(&clone) {
+                    i += clone.len();
+                }
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
     }
     out
 }

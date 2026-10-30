@@ -4,12 +4,15 @@
 use crate::emit_rstom::PacketBody;
 use crate::errors::{BmlResult, emit, py_repr_str};
 use crate::minestom::Unit;
+use crate::shapes::ledger::DerivedKind;
 use crate::shapes::model::{FieldShape, Shape};
-use crate::tree_mapping::{remap_idents, remap_plan};
+use crate::shapes::scan::skip_rust_string;
+use crate::tree_bound::BoundBody;
+use crate::tree_mapping::{RemapPlan, apply_derived_writes, remap_idents, remap_plan};
+use std::collections::BTreeSet;
 
 const COPY_TYPES: &[&str] = &[
-    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "Uuid",
-    "CoordVec",
+    "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "Uuid", "CoordVec",
 ];
 
 const MAX_LINES: usize = 400;
@@ -160,7 +163,27 @@ fn marker_imports(unit: &Unit) -> (&'static str, String) {
     }
 }
 
-fn use_block(unit: &Unit, shape: &Shape, body: &PacketBody) -> String {
+/// What the rendered bodies need the module to import.
+struct Needs<'a> {
+    used_wires: &'a [String],
+    fixed_raw_bytes: bool,
+    rtypes: BTreeSet<String>,
+    /// `use` lines the conversions need.
+    imports: &'a [String],
+}
+
+impl<'a> Needs<'a> {
+    fn of(body: &'a PacketBody) -> Needs<'a> {
+        Needs {
+            used_wires: &body.used_wires,
+            fixed_raw_bytes: body.needs_fixed_raw_bytes,
+            rtypes: body.rtypes.clone(),
+            imports: &[],
+        }
+    }
+}
+
+fn use_block(unit: &Unit, shape: &Shape, needs: &Needs) -> String {
     let mut lines: Vec<String> = vec!["use std::sync::Arc;\n".into(), "\n".into()];
     let (marker_import, _) = marker_imports(unit);
     if shape.serializer.style == "struct" {
@@ -179,25 +202,35 @@ fn use_block(unit: &Unit, shape: &Shape, body: &PacketBody) -> String {
                 .into(),
         );
     }
-    if body.used_wires.len() == 1 {
+    if needs.used_wires.len() == 1 {
         lines.push(format!(
             "use crate::network::types::{};\n",
-            body.used_wires[0]
+            needs.used_wires[0]
         ));
-    } else if !body.used_wires.is_empty() {
+    } else if !needs.used_wires.is_empty() {
         lines.push(format!(
             "use crate::network::types::{{{}}};\n",
-            body.used_wires.join(", ")
+            needs.used_wires.join(", ")
         ));
     }
-    if body.needs_fixed_raw_bytes {
+    if needs.fixed_raw_bytes {
         lines.push("use crate::network::types::fixed_raw_bytes;\n".into());
     }
-    if body.rtypes.iter().any(|t| t == "Uuid") {
+    if needs.rtypes.iter().any(|t| t == "Uuid") {
         lines.push("use crate::network::uuid::Uuid;\n".into());
     }
-    if body.rtypes.iter().any(|t| t == "CoordVec") {
+    if needs.rtypes.iter().any(|t| t == "CoordVec") {
         lines.push("use crate::coordinate::Vec as CoordVec;\n".into());
+    }
+    let mut extra: BTreeSet<&str> = BTreeSet::new();
+    extra.extend(shape.imports.iter().map(String::as_str));
+    extra.extend(shape.uses.iter().map(String::as_str));
+    extra.extend(needs.imports.iter().map(String::as_str));
+    for line in extra {
+        let line = line.trim();
+        if !lines.iter().any(|l| l.trim() == line) {
+            lines.push(format!("{line}\n"));
+        }
     }
     lines.concat()
 }
@@ -242,12 +275,15 @@ fn new_fn(shape: &Shape) -> String {
     for attr in &shape.new.attrs {
         lines.push(format!("    {attr}"));
     }
-    let params = shape
-        .fields
-        .iter()
-        .map(|f| format!("{}: {}", f.name, f.type_))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let params = match &shape.new.params {
+        Some(p) => p.clone(),
+        None => shape
+            .fields
+            .iter()
+            .map(|f| format!("{}: {}", f.name, f.type_))
+            .collect::<Vec<_>>()
+            .join(", "),
+    };
     let const_kw = if shape.new.const_ { "const " } else { "" };
     let body = if shape.form == "unit" {
         "        Self".to_string()
@@ -301,15 +337,109 @@ fn inherent_impl(shape: &Shape) -> String {
     format!("impl {} {{\n{body}\n}}\n\n", shape.cls)
 }
 
-fn serializer_impl(shape: &Shape, body: &PacketBody, plan: &[(String, String)]) -> String {
+/// The offset just past the `;` that ends the statement starting at `start`.
+fn statement_end(text: &str, start: usize) -> Option<usize> {
+    let b = text.as_bytes();
+    let mut depth: i32 = 0;
+    let mut i = start;
+    while i < b.len() {
+        match b[i] {
+            b'"' | b'\'' => {
+                i = skip_rust_string(text, i);
+                continue;
+            }
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b';' if depth == 0 => return Some(i + 1),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `lines` inserted after the statement that defines the local `ident`.
+fn insert_after_statement(reads: &str, ident: &str, lines: &[String]) -> Option<String> {
+    let mut offset = 0;
+    for line in reads.split_inclusive('\n') {
+        let t = line.trim_start();
+        if let Some(rest) = t.strip_prefix("let ") {
+            let rest = rest.strip_prefix("mut ").unwrap_or(rest);
+            if let Some(after) = rest.strip_prefix(ident)
+                && !after.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            {
+                let start = offset + (line.len() - t.len());
+                let end = statement_end(reads, start)?;
+                let eol = reads[end..].find('\n').map_or(reads.len(), |p| end + p + 1);
+                let mut out = reads[..eol].to_string();
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                out.push_str(&hook_lines(lines));
+                out.push_str(&reads[eol..]);
+                return Some(out);
+            }
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// Hook lines as body statements, one per line.
+fn hook_lines(lines: &[String]) -> String {
+    lines.iter().map(|l| format!("        {l}\n")).collect()
+}
+
+/// Apply the shape's hooks to the generated write and read bodies. Hooks are hand-reviewed
+/// statements for behaviour the wire layout does not carry (limits, assertions): `write.start`
+/// runs right after the value is downcast, `read.after:<local>` after the statement that defines
+/// that local of the generated read, `read.end` before the packet is built.
+fn apply_hooks(shape: &Shape, writes: &str, reads: &str) -> BmlResult<(String, String)> {
+    let mut writes = writes.to_string();
+    let mut reads = reads.to_string();
+    for (key, lines) in shape.hooks.iter() {
+        if key == "write.start" {
+            writes = format!("{}{writes}", hook_lines(lines));
+        } else if key == "read.end" {
+            if !reads.is_empty() && !reads.ends_with('\n') {
+                reads.push('\n');
+            }
+            reads.push_str(&hook_lines(lines));
+        } else if let Some(ident) = key.strip_prefix("read.after:") {
+            reads = insert_after_statement(&reads, ident, lines).ok_or_else(|| {
+                emit(format!(
+                    "{}: hook {key} names no statement of the generated read",
+                    shape.module
+                ))
+            })?;
+        } else {
+            return Err(emit(format!(
+                "{}: unknown hook {}; use write.start, read.after:<local> or read.end",
+                shape.module,
+                py_repr_str(key)
+            )));
+        }
+    }
+    Ok((writes, reads.trim_end_matches('\n').to_string()))
+}
+
+fn serializer_impl(shape: &Shape, body: &PacketBody, plan: &RemapPlan) -> BmlResult<String> {
     if shape.serializer.style == "constant" {
-        return String::new();
+        if !shape.hooks.is_empty() {
+            return Err(emit(format!(
+                "{}: a constant serializer has nothing to hook",
+                shape.module
+            )));
+        }
+        return Ok(String::new());
     }
     let ser = &shape.serializer.name;
     let vis = if shape.serializer.public { "pub " } else { "" };
     let docs = doc_lines("/// ", &shape.serializer.docs);
-    let writes = adapt_tree_writes(&remap_idents(&body.writes, plan), &shape.fields);
-    let reads = remap_idents(&body.reads, plan);
+    let writes = apply_derived_writes(&remap_idents(&body.writes, &plan.renames), &plan.derived);
+    let writes = adapt_tree_writes(&writes, &shape.fields);
+    let reads = remap_idents(&body.reads, &plan.renames);
+    let (writes, reads) = apply_hooks(shape, &writes, &reads)?;
     let read_tail = if shape.serializer.read_via_new {
         if shape.form == "unit" {
             format!("        Box::new({}::new())", shape.cls)
@@ -325,9 +455,20 @@ fn serializer_impl(shape: &Shape, body: &PacketBody, plan: &[(String, String)]) 
     } else {
         read_box(&shape.cls, &shape.form, &shape.fields)
     };
-    format!(
+    let mut attrs = String::new();
+    if plan.derived.iter().any(|d| d.kind == DerivedKind::Flag) {
+        attrs.push_str("#[allow(clippy::collapsible_if)]\n");
+    }
+    if body
+        .fields
+        .iter()
+        .any(|f| (f.repeat_mode.is_some() || f.guard.is_some()) && is_copy_field(&f.rtype))
+    {
+        attrs.push_str("#[allow(clippy::clone_on_copy)]\n");
+    }
+    Ok(format!(
         "{docs}{vis}struct {ser};\n\n\
-         impl PacketSerializer for {ser} {{\n\
+         {attrs}impl PacketSerializer for {ser} {{\n\
          \x20   fn write(&self, buffer: &mut NetworkBuffer, value: &PacketValue) {{\n\
          \x20       let value = downcast::<{cls}>(value);\n\
          {writes}\n\
@@ -339,7 +480,71 @@ fn serializer_impl(shape: &Shape, body: &PacketBody, plan: &[(String, String)]) 
          }}\n",
         cls = shape.cls,
         reads = reads,
-    )
+    ))
+}
+
+/// The serializer of a bound packet: the bodies are already over the hand fields.
+fn bound_serializer_impl(shape: &Shape, body: &BoundBody) -> BmlResult<String> {
+    if shape.serializer.style == "constant" {
+        return Err(emit(format!(
+            "{}: a constant serializer has no fields to bind",
+            shape.module
+        )));
+    }
+    let ser = &shape.serializer.name;
+    let vis = if shape.serializer.public { "pub " } else { "" };
+    let docs = doc_lines("/// ", &shape.serializer.docs);
+    let (writes, reads) = apply_hooks(shape, &body.writes, &body.reads)?;
+    let read_tail = if shape.serializer.read_via_new {
+        if shape.form == "unit" {
+            format!("        Box::new({}::new())", shape.cls)
+        } else {
+            format!(
+                "        Box::new({}::new({}))",
+                shape.cls,
+                body.ctor.join(", ")
+            )
+        }
+    } else if shape.form == "unit" {
+        format!("        Box::new({})", shape.cls)
+    } else {
+        let init = shape
+            .fields
+            .iter()
+            .zip(&body.ctor)
+            .map(|(f, e)| {
+                if *e == f.name {
+                    f.name.clone()
+                } else {
+                    format!("{}: {e}", f.name)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",\n            ");
+        format!(
+            "        Box::new({} {{\n            {init},\n        }})",
+            shape.cls
+        )
+    };
+    let attrs: String = shape
+        .serializer_attrs
+        .iter()
+        .map(|a| format!("{a}\n"))
+        .collect();
+    Ok(format!(
+        "{docs}{vis}struct {ser};\n\n\
+         {attrs}impl PacketSerializer for {ser} {{\n\
+         \x20   fn write(&self, buffer: &mut NetworkBuffer, value: &PacketValue) {{\n\
+         \x20       let value = downcast::<{cls}>(value);\n\
+         {writes}\n\
+         \x20   }}\n\n\
+         \x20   fn read(&self, buffer: &mut NetworkBuffer) -> PacketValue {{\n\
+         {reads}\n\
+         {read_tail}\n\
+         \x20   }}\n\
+         }}\n",
+        cls = shape.cls,
+    ))
 }
 
 fn extras_tail(shape: &Shape) -> String {
@@ -377,6 +582,106 @@ pub fn tree_packet(unit: &Unit, shape: &Shape, body: &PacketBody) -> BmlResult<S
             shape.module
         ))
     })?;
+    let serializer = serializer_impl(shape, body, &plan)?;
+    assemble(unit, shape, &Needs::of(body), serializer)
+}
+
+/// `tree_packet` for a shape that binds its hand fields to the wire fields.
+pub fn tree_packet_bound(unit: &Unit, shape: &Shape, body: &BoundBody) -> BmlResult<String> {
+    validate_shape(shape)?;
+    let mut rtypes: BTreeSet<String> = BTreeSet::new();
+    let texts: Vec<&str> = shape
+        .fields
+        .iter()
+        .map(|f| f.type_.as_str())
+        .chain(body.imports.iter().map(String::as_str))
+        .collect();
+    let all = texts.join(" ");
+    let mut probe = String::new();
+    collect_types(&shape.fields, &mut probe);
+    for name in ["Uuid", "CoordVec"] {
+        if crate::emit_rstom::has_word(&all, name) || crate::emit_rstom::has_word(&probe, name) {
+            rtypes.insert(name.to_string());
+        }
+    }
+    let needs = Needs {
+        used_wires: &body.used_wires,
+        fixed_raw_bytes: body.needs_fixed_raw_bytes,
+        rtypes,
+        imports: &body.imports,
+    };
+    let serializer = bound_serializer_impl(shape, body)?;
+    if let Some(alias) = &shape.alias {
+        return assemble_alias(unit, shape, &needs, serializer, alias);
+    }
+    assemble(unit, shape, &needs, serializer)
+}
+
+/// A module that serializes a type another module defines: its imports, its serializer, and the
+/// inherent function that hands the serializer out.
+fn assemble_alias(
+    unit: &Unit,
+    shape: &Shape,
+    needs: &Needs,
+    serializer: String,
+    alias: &crate::shapes::model::AliasShape,
+) -> BmlResult<String> {
+    let mut parts: Vec<String> = vec![banner(unit), "//!\n".into()];
+    if !shape.module_docs.is_empty() {
+        parts.push(doc_lines("//! ", &shape.module_docs));
+    }
+    parts.push("\n".into());
+    let mut uses: BTreeSet<String> = BTreeSet::new();
+    uses.insert("use std::sync::Arc;".into());
+    uses.insert("use crate::network::buffer::NetworkBuffer;".into());
+    uses.insert(
+        "use crate::network::packet::serializer::{PacketSerializer, PacketValue, downcast};".into(),
+    );
+    uses.insert(format!("use {};", alias.path));
+    if !needs.used_wires.is_empty() {
+        uses.insert(format!(
+            "use crate::network::types::{{{}}};",
+            needs.used_wires.join(", ")
+        ));
+    }
+    for line in shape
+        .imports
+        .iter()
+        .chain(shape.uses.iter())
+        .chain(needs.imports)
+    {
+        uses.insert(line.trim().to_string());
+    }
+    parts.push(uses.into_iter().map(|u| format!("{u}\n")).collect());
+    parts.push("\n".into());
+    parts.push(format!(
+        "impl {} {{\n{}{}    pub fn {}() -> Arc<dyn PacketSerializer> {{\n        Arc::new({})\n    }}\n}}\n\n",
+        shape.cls,
+        doc_lines("    /// ", &shape.serializer_fn_docs),
+        if shape.serializer_fn_must_use { "    #[must_use]\n" } else { "" },
+        alias.serializer_fn,
+        shape.serializer.name,
+    ));
+    parts.push(serializer);
+    let mut text = parts.concat();
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    Ok(text)
+}
+
+/// Every hand type text under `fields`, element bindings included.
+fn collect_types(fields: &[FieldShape], out: &mut String) {
+    for f in fields {
+        out.push_str(&f.type_);
+        out.push(' ');
+        if let Some(item) = &f.bind.item {
+            collect_types(&item.fields, out);
+        }
+    }
+}
+
+fn assemble(unit: &Unit, shape: &Shape, needs: &Needs, serializer: String) -> BmlResult<String> {
     if shape.cls != unit.cls.name {
         return Err(emit(format!(
             "{}: shape class {} != unit {}",
@@ -391,7 +696,7 @@ pub fn tree_packet(unit: &Unit, shape: &Shape, body: &PacketBody) -> BmlResult<S
         parts.push(doc_lines("//! ", &shape.module_docs));
     }
     parts.push("\n".into());
-    parts.push(use_block(unit, shape, body));
+    parts.push(use_block(unit, shape, needs));
     parts.push("\n".into());
     parts.push(struct_decl(shape));
     parts.push("\n\n".into());
@@ -405,7 +710,7 @@ pub fn tree_packet(unit: &Unit, shape: &Shape, body: &PacketBody) -> BmlResult<S
     let (_, marker_impls) = marker_imports(unit);
     parts.push(marker_impls);
     parts.push("\n".into());
-    parts.push(serializer_impl(shape, body, &plan));
+    parts.push(serializer);
     parts.push(extras_tail(shape));
     parts.push(tests_tail(shape));
     let mut text = parts.concat();

@@ -1,0 +1,69 @@
+{
+  "class": "UnloadChunkPacket",
+  "module": "server/play/unload_chunk_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.UnloadChunkPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UnloadChunkPacket(int chunkX, int chunkZ) implements",
+      "ServerPacket.Play`.",
+      "",
+      "Java writes `chunkZ` first (\"the client reads this as a single long in big",
+      "endian, so we have to write it backwards\")."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chunk_x",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkX()`."
+      ]
+    },
+    {
+      "name": "chunk_z",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkZ()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UnloadChunkPacket(int chunkX, int chunkZ)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UnloadChunkPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UnloadChunkSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(INT, UnloadChunkPacket::chunkZ,",
+      "INT, UnloadChunkPacket::chunkX, (z, x) -> new UnloadChunkPacket(x, z))`",
+      "template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "tests": "unload_chunk_packet.tests.rs"
+}

@@ -1,0 +1,72 @@
+{
+  "class": "ClientPlayerPositionPacket",
+  "module": "client/play/client_player_position_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerPositionPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerPositionPacket(Point position, byte flags)",
+      "implements ClientPacket.Play`.",
+      "",
+      "The Java record component is a `Point`; the serializer reads back a `Vec`",
+      "(`NetworkBuffer.VECTOR3D` reads three doubles into a `Vec`), so the port",
+      "stores a `Vec`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `position()`."
+      ],
+      "wire": [
+        "x",
+        "feet_y",
+        "z"
+      ]
+    },
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPlayerPositionPacket(Point position, byte flags)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerPositionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlayerPositionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VECTOR3D, \u2026, BYTE, \u2026)` \u2014 three doubles then the flag byte."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_player_position_packet.ext.rs",
+  "bound": true
+}

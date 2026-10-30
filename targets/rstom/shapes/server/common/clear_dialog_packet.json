@@ -1,0 +1,44 @@
+{
+  "class": "ClearDialogPacket",
+  "module": "server/common/clear_dialog_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.ClearDialogPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClearDialogPacket() implements ServerPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClearDialogPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "ClearDialogPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

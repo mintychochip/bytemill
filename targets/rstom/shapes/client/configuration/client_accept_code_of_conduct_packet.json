@@ -1,0 +1,45 @@
+{
+  "class": "ClientAcceptCodeOfConductPacket",
+  "module": "client/configuration/client_accept_code_of_conduct_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.configuration.ClientAcceptCodeOfConductPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientAcceptCodeOfConductPacket() implements",
+      "ClientPacket.Configuration`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientAcceptCodeOfConductPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "ClientAcceptCodeOfConductPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

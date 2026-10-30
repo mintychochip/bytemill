@@ -1,0 +1,72 @@
+{
+  "class": "ClientUpdateCommandBlockMinecartPacket",
+  "module": "client/play/client_update_command_block_minecart_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientUpdateCommandBlockMinecartPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientUpdateCommandBlockMinecartPacket(int entityId, String",
+      "command, boolean trackOutput) implements ClientPacket.Play`.",
+      "",
+      "The compact constructor's `Check.argCondition(command.length() >",
+      "Short.MAX_VALUE, ...)` is a validation Rust leaves to the caller."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "command",
+      "type": "String",
+      "docs": [
+        "Java: `command()`."
+      ]
+    },
+    {
+      "name": "track_output",
+      "type": "bool",
+      "docs": [
+        "Java: `trackOutput()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientUpdateCommandBlockMinecartPacket(entityId, command, trackOutput)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientUpdateCommandBlockMinecartPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientUpdateCommandBlockMinecartSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ..., STRING, ..., BOOLEAN, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

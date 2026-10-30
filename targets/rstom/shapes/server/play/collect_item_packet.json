@@ -1,0 +1,71 @@
+{
+  "class": "CollectItemPacket",
+  "module": "server/play/collect_item_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.CollectItemPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CollectItemPacket(int collectedEntityId, int collectorEntityId,",
+      "int pickupItemCount) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "collected_entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `collectedEntityId()`."
+      ]
+    },
+    {
+      "name": "collector_entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `collectorEntityId()`."
+      ]
+    },
+    {
+      "name": "pickup_item_count",
+      "type": "i32",
+      "docs": [
+        "Java: `pickupItemCount()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new CollectItemPacket(int, int, int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CollectItemPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CollectItemSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, VAR_INT, VAR_INT, \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

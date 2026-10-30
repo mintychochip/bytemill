@@ -1,0 +1,63 @@
+{
+  "class": "EntityStatusPacket",
+  "module": "server/play/entity_status_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityStatusPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityStatusPacket(int entityId, byte status)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "status",
+      "type": "i8",
+      "docs": [
+        "Java: `status()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityStatusPacket(int, byte)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityStatusPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityStatusSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(INT, BYTE)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "entity_status_packet.tests.rs"
+}

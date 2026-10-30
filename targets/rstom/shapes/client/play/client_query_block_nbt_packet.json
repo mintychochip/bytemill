@@ -1,0 +1,64 @@
+{
+  "class": "ClientQueryBlockNbtPacket",
+  "module": "client/play/client_query_block_nbt_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientQueryBlockNbtPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientQueryBlockNbtPacket(int transactionId, Point",
+      "blockPosition) implements ClientPacket.Play`.",
+      "",
+      "The record component is a `Point`; `NetworkBuffer.BLOCK_POSITION` reads back",
+      "a `Vec`, so the port stores a [`Vec`]."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "i32",
+      "docs": [
+        "Java: `transactionId()`."
+      ]
+    },
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientQueryBlockNbtPacket(int transactionId, Point blockPosition)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientQueryBlockNbtPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientQueryBlockNbtSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ..., BLOCK_POSITION, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_query_block_nbt_packet.ext.rs"
+}

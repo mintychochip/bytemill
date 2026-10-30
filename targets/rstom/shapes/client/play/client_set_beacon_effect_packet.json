@@ -1,0 +1,94 @@
+{
+  "class": "ClientSetBeaconEffectPacket",
+  "module": "client/play/client_set_beacon_effect_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientSetBeaconEffectPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSetBeaconEffectPacket(@Nullable PotionType",
+      "primaryEffect, @Nullable PotionType secondaryEffect) implements",
+      "ClientPacket.Play`.",
+      "",
+      "`PotionType.NETWORK_TYPE` is `VAR_INT.transform(PotionType::fromId,",
+      "PotionType::id)`, so each effect is a presence boolean plus the numeric",
+      "registry id."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "primary_effect",
+      "type": "Option<PotionType>",
+      "docs": [
+        "Java: `primaryEffect()`."
+      ],
+      "wire": "primary_effect",
+      "write": "$.id() as i32",
+      "read": "PotionType::from_id(i64::from($))",
+      "read_flat": true
+    },
+    {
+      "name": "secondary_effect",
+      "type": "Option<PotionType>",
+      "docs": [
+        "Java: `secondaryEffect()`."
+      ],
+      "wire": "secondary_effect",
+      "write": "$.id() as i32",
+      "read": "PotionType::from_id(i64::from($))",
+      "read_flat": true
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSetBeaconEffectPacket(primaryEffect, secondaryEffect)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSetBeaconEffectPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSetBeaconEffectSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(PotionType.NETWORK_TYPE.optional(), ...,",
+      "PotionType.NETWORK_TYPE.optional(), ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_set_beacon_effect_packet.ext.rs",
+  "imports": [
+    "use crate::potion::PotionType;"
+  ],
+  "accepted": [
+    {
+      "construct": "write_optional_potion",
+      "reason": "the generated write writes the presence flag and the potion id, as write_optional_potion does"
+    },
+    {
+      "construct": "read_optional_potion",
+      "reason": "the generated read reads the presence flag and the potion id, as read_optional_potion does"
+    }
+  ],
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_truncation)]"
+  ]
+}

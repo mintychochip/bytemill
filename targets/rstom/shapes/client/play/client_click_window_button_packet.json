@@ -1,0 +1,65 @@
+{
+  "class": "ClientClickWindowButtonPacket",
+  "module": "client/play/client_click_window_button_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientClickWindowButtonPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientClickWindowButtonPacket(int windowId, int buttonId)",
+      "implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "button_id",
+      "type": "i32",
+      "docs": [
+        "Java: `buttonId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientClickWindowButtonPacket(int windowId, int buttonId)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientClickWindowButtonPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientClickWindowButtonSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, windowId, VAR_INT, buttonId,",
+      "ClientClickWindowButtonPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

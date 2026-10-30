@@ -1,0 +1,63 @@
+{
+  "class": "ClientQueryEntityNbtPacket",
+  "module": "client/play/client_query_entity_nbt_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientQueryEntityNbtPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientQueryEntityNbtPacket(int transactionId, int entityId)",
+      "implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "i32",
+      "docs": [
+        "Java: `transactionId()`."
+      ]
+    },
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientQueryEntityNbtPacket(int transactionId, int entityId)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientQueryEntityNbtPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientQueryEntityNbtSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ..., VAR_INT, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

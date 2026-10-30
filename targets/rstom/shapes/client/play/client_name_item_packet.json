@@ -1,0 +1,69 @@
+{
+  "class": "ClientNameItemPacket",
+  "module": "client/play/client_name_item_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientNameItemPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientNameItemPacket(String itemName) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "item_name",
+      "type": "String",
+      "docs": [
+        "Java: `itemName()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientNameItemPacket(String itemName)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics with Java's `IllegalArgumentException` message when the name is",
+      "longer than [`i16::MAX`], mirroring",
+      "`Check.argCondition(itemName.length() > Short.MAX_VALUE, \u2026)`."
+    ],
+    "body": [
+      "        // Java measures UTF-16 code units; a Rust `String` length is the UTF-8",
+      "        // code-point count, which never exceeds it for a shorter name.",
+      "        if item_name.chars().count() > i16::MAX as usize {",
+      "            panic!(\"Item name cannot be longer than Short.MAX_SIZE\");",
+      "        }",
+      "        Self { item_name }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientNameItemPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientNameItemSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(STRING, ClientNameItemPacket::itemName,",
+      "ClientNameItemPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

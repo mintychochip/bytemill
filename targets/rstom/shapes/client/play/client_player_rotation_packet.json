@@ -1,0 +1,69 @@
+{
+  "class": "ClientPlayerRotationPacket",
+  "module": "client/play/client_player_rotation_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerRotationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerRotationPacket(float yaw, float pitch, byte",
+      "flags) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()`."
+      ]
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()`."
+      ]
+    },
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientPlayerRotationPacket(float yaw, float pitch, byte flags)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerRotationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlayerRotationSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(FLOAT, yaw, FLOAT, pitch, BYTE, flags, \u2026)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_player_rotation_packet.ext.rs"
+}

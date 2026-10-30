@@ -1,0 +1,63 @@
+{
+  "class": "SetTitleTextPacket",
+  "module": "server/play/set_title_text_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetTitleTextPacket`.",
+    "",
+    "Java also implements `ServerPacket.ComponentHolding`; that marker has no",
+    "ported trait in this workspace (see `advancements_packet.rs`), so",
+    "`components()` / `copyWithOperator` are inherent methods here, exactly as",
+    "`ActionBarPacket` carries them. The wire form is unaffected."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetTitleTextPacket(Component title) implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "title",
+      "type": "Component",
+      "docs": [
+        "Java: `title()`."
+      ],
+      "wire": "title_text"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetTitleTextPacket(title: Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetTitleTextPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetTitleTextSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(COMPONENT, SetTitleTextPacket::title, SetTitleTextPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "set_title_text_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "bound": true
+}

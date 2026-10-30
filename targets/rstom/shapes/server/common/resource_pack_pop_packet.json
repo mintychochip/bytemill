@@ -1,0 +1,56 @@
+{
+  "class": "ResourcePackPopPacket",
+  "module": "server/common/resource_pack_pop_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.ResourcePackPopPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ResourcePackPopPacket(@Nullable UUID id) implements",
+      "ServerPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "Option<Uuid>",
+      "docs": [
+        "Java: `id()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ResourcePackPopPacket(@Nullable UUID)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ResourcePackPopPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ResourcePackPopSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(UUID.optional(), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "resource_pack_pop_packet.tests.rs"
+}

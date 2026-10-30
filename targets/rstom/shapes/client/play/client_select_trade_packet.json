@@ -1,0 +1,56 @@
+{
+  "class": "ClientSelectTradePacket",
+  "module": "client/play/client_select_trade_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientSelectTradePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSelectTradePacket(int selectedSlot) implements",
+      "ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "selected_slot",
+      "type": "i32",
+      "docs": [
+        "Java: `selectedSlot()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSelectTradePacket(selectedSlot)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSelectTradePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSelectTradeSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

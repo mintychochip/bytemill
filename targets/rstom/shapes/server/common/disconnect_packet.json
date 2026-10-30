@@ -1,0 +1,64 @@
+{
+  "class": "DisconnectPacket",
+  "module": "server/common/disconnect_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.DisconnectPacket`.",
+    "",
+    "The message is [`Component`](crate::text::Component), adventure's",
+    "component tree \u2014 the same type Java's record holds."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DisconnectPacket(Component message) implements",
+      "ServerPacket.Configuration, Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "message",
+      "type": "Component",
+      "docs": [
+        "Java: `message()`."
+      ],
+      "wire": "reason"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DisconnectPacket(Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DisconnectPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DisconnectSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(COMPONENT, DisconnectPacket::message, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "disconnect_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "disconnect_packet.tests.rs",
+  "bound": true
+}

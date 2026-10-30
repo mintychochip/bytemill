@@ -1,0 +1,75 @@
+{
+  "class": "NbtQueryResponsePacket",
+  "module": "server/play/nbt_query_response_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.NbtQueryResponsePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record NbtQueryResponsePacket(int transactionId, CompoundBinaryTag",
+      "data)`.",
+      "",
+      "The port carries the compound as its serialized tag bytes, which is what",
+      "`NetworkBuffer.NBT_COMPOUND` writes and reads; `None` is Java's `null`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "transaction_id",
+      "type": "i32",
+      "docs": [
+        "Java: `transactionId()` \u2014 echoed back from the query."
+      ]
+    },
+    {
+      "name": "data",
+      "type": "Option<Vec<u8>>",
+      "docs": [
+        "Java: `data()` \u2014 the answer's NBT bytes."
+      ],
+      "wire": "nbt",
+      "put": "match &$ { Some(data) => buffer.write(NBT_COMPOUND, data.clone()), None => buffer.write(BYTE, 0x00) }",
+      "take": "Some(buffer.read(NBT_COMPOUND))"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new NbtQueryResponsePacket(int, CompoundBinaryTag)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `NbtQueryResponsePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "NbtQueryResponseSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the hand-written `SERIALIZER` of `NbtQueryResponsePacket` \u2014 a null",
+      "payload is written as a lone `TAG_End` byte."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "nbt_query_response_packet.tests.rs",
+  "bound": true,
+  "uses": [
+    "use crate::network::types::NBT_COMPOUND;"
+  ]
+}

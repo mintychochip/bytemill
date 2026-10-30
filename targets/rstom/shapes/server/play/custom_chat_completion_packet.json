@@ -1,0 +1,91 @@
+{
+  "class": "CustomChatCompletionPacket",
+  "module": "server/play/custom_chat_completion_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.CustomChatCompletionPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CustomChatCompletionPacket(Action action, List<String>",
+      "entries) implements ServerPacket.Play` \u2014 the compact constructor copies the",
+      "list."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "action",
+      "type": "Action",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "codec": "enum_type::<Action>()"
+    },
+    {
+      "name": "entries",
+      "type": "Vec<String>",
+      "docs": [
+        "Java: `entries()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new CustomChatCompletionPacket(Action, List<String>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CustomChatCompletionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CustomChatCompletionSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(NetworkBuffer.Enum(Action.class),",
+      "STRING.list(MAX_ENTRIES), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "custom_chat_completion_packet.ext.rs",
+  "tests": "custom_chat_completion_packet.tests.rs",
+  "hooks": {
+    "read.after:entries_count": [
+      "check_size(entries_count, MAX_ENTRIES);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "try_from",
+      "reason": "the generated write casts the list length to the wire int; lists are bounded by MAX_ENTRIES on read"
+    },
+    {
+      "construct": ".expect(",
+      "reason": "the generated write casts the list length to the wire int; lists are bounded by MAX_ENTRIES on read"
+    },
+    {
+      "construct": "read_entries",
+      "reason": "the generated read loops over the declared count, which the hook checks against MAX_ENTRIES"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;",
+    "use super::advancements_packet::check_size;"
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "class": "UpdateEnabledFeaturesPacket",
+  "module": "server/configuration/update_enabled_features_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.configuration.UpdateEnabledFeaturesPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UpdateEnabledFeaturesPacket(List<String> features) implements",
+      "ServerPacket.Configuration`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "features",
+      "type": "Vec<String>",
+      "docs": [
+        "Java: `features()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UpdateEnabledFeaturesPacket(List<String>)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics above [`MAX_FEATURES`] with Java's `\"Too many features\"` message."
+    ],
+    "body": [
+      "        assert!(features.len() <= MAX_FEATURES, \"Too many features\");",
+      "        Self { features }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UpdateEnabledFeaturesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UpdateEnabledFeaturesSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `STRING.list(MAX_FEATURES)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "update_enabled_features_packet.ext.rs",
+  "tests": "update_enabled_features_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "Negative declared sizes read as zero entries; the generated read loops `for _ in 0..count`, which also runs zero times, so a negative count yields the same empty list."
+    }
+  ]
+}

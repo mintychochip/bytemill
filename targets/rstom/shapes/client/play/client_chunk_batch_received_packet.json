@@ -1,0 +1,57 @@
+{
+  "class": "ClientChunkBatchReceivedPacket",
+  "module": "client/play/client_chunk_batch_received_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientChunkBatchReceivedPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientChunkBatchReceivedPacket(float targetChunksPerTick)",
+      "implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "target_chunks_per_tick",
+      "type": "f32",
+      "docs": [
+        "Java: `targetChunksPerTick()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientChunkBatchReceivedPacket(float targetChunksPerTick)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientChunkBatchReceivedPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientChunkBatchReceivedSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(FLOAT, ClientChunkBatchReceivedPacket::targetChunksPerTick,",
+      "ClientChunkBatchReceivedPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

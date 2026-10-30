@@ -1,0 +1,89 @@
+{
+  "class": "TeamsPacket",
+  "module": "server/play/teams_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.TeamsPacket` and",
+    "every record nested in it (`Settings`, `CreateTeamAction`,",
+    "`RemoveTeamAction`, `UpdateTeamAction`, `AddEntitiesToTeamAction`,",
+    "`RemoveEntitiesToTeamAction`, `NameTagVisibility`, `CollisionRule`).",
+    "",
+    "[`Component`] is [`crate::text::Component`], adventure's component tree \u2014",
+    "the same type Java's records hold. It travels with [`Component::write`] /",
+    "[`Component::read`] (see [`crate::adventure::component_network`]).",
+    "",
+    "- `TeamColor` comes from the ported `color` module; Java's",
+    "  `TeamColor.NETWORK_TYPE` is `NetworkBuffer.Enum(TeamColor.class)`, i.e.",
+    "  the var-int ordinal.",
+    "- `NameTagVisibility` / `CollisionRule` are declared here rather than reused",
+    "  from `scoreboard::team`: the ported `scoreboard` variants model",
+    "  `net.minestom.server.scoreboard.Team`'s enums, which carry the same four",
+    "  constants in the same order but are a different Java type. Only the",
+    "  ordinals matter on the wire, and both enums declare the same order."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TeamsPacket(String teamName, Action action) implements",
+      "ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "team_name",
+      "type": "String",
+      "docs": [
+        "Java: `teamName()`."
+      ]
+    },
+    {
+      "name": "action",
+      "type": "Action",
+      "docs": [
+        "Java: `action()`."
+      ],
+      "wire": "action..entities",
+      "put": "$.write(buffer);",
+      "take": "Action::read(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TeamsPacket(String teamName, Action action)`."
+    ],
+    "body": [
+      "        Self {",
+      "            team_name: team_name.into(),",
+      "            action,",
+      "        }"
+    ],
+    "params": "team_name: impl Into<String>, action: Action"
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TeamsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TeamsSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(STRING, TeamsPacket::teamName,",
+      "ACTION_NETWORK_TYPE, TeamsPacket::action, TeamsPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "teams_packet.ext.rs",
+  "tests": "teams_packet.tests.rs",
+  "bound": true
+}

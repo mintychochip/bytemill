@@ -1,0 +1,73 @@
+{
+  "class": "WorldBorderLerpSizePacket",
+  "module": "server/play/world_border_lerp_size_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.WorldBorderLerpSizePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WorldBorderLerpSizePacket(double oldDiameter, double",
+      "newDiameter, long speed) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "old_diameter",
+      "type": "f64",
+      "docs": [
+        "Java: `oldDiameter()`."
+      ]
+    },
+    {
+      "name": "new_diameter",
+      "type": "f64",
+      "docs": [
+        "Java: `newDiameter()`."
+      ]
+    },
+    {
+      "name": "speed",
+      "type": "i64",
+      "docs": [
+        "Java: `speed()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WorldBorderLerpSizePacket(double, double, long)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WorldBorderLerpSizePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WorldBorderLerpSizeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(DOUBLE,",
+      "WorldBorderLerpSizePacket::oldDiameter, DOUBLE,",
+      "WorldBorderLerpSizePacket::newDiameter, VAR_LONG,",
+      "WorldBorderLerpSizePacket::speed, WorldBorderLerpSizePacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

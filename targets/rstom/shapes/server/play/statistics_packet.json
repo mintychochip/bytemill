@@ -1,0 +1,75 @@
+{
+  "class": "StatisticsPacket",
+  "module": "server/play/statistics_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.StatisticsPacket`",
+    "and its nested `Statistic` record."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record StatisticsPacket(List<Statistic> statistics) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "statistics",
+      "type": "Vec<Statistic>",
+      "docs": [
+        "Java: `statistics()` \u2014 Java's compact constructor copies the list, so",
+        "the packet owns an immutable `Vec`."
+      ],
+      "wire": "statistics"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new StatisticsPacket(List<Statistic>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `StatisticsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "StatisticsSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(Statistic.SERIALIZER.list(MAX_ENTRIES),",
+      "StatisticsPacket::statistics, StatisticsPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "statistics_packet.ext.rs",
+  "tests": "statistics_packet.tests.rs",
+  "hooks": {
+    "read.after:statistics_count": [
+      "check_size(statistics_count, MAX_ENTRIES);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "the generated read takes the count itself and checks it against the same limit with check_size, which read_size applies"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use super::advancements_packet::check_size;"
+  ]
+}

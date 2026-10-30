@@ -1,0 +1,102 @@
+{
+  "class": "DamageEventPacket",
+  "module": "server/play/damage_event_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.DamageEventPacket`.",
+    "",
+    "Java's `sourcePos` is a `Point`; the port carries the decoded",
+    "[`Vec`](crate::coordinate::Vec), as [`VECTOR3D`] reads it back."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DamageEventPacket(int targetEntityId, int damageTypeId, int",
+      "sourceEntityId, int sourceDirectId, @Nullable Point sourcePos) implements",
+      "ServerPacket.Play`.",
+      "",
+      "`sourceEntityId` is `0` when there is no source entity, otherwise",
+      "`entityId + 1`; `sourceDirectId` is the projectile's `entityId + 1` for an",
+      "indirect attack."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "target_entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `targetEntityId()`."
+      ],
+      "wire": "entity_id"
+    },
+    {
+      "name": "damage_type_id",
+      "type": "i32",
+      "docs": [
+        "Java: `damageTypeId()`."
+      ],
+      "wire": "source_type_id"
+    },
+    {
+      "name": "source_entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `sourceEntityId()`."
+      ],
+      "wire": "source_cause_id"
+    },
+    {
+      "name": "source_direct_id",
+      "type": "i32",
+      "docs": [
+        "Java: `sourceDirectId()`."
+      ]
+    },
+    {
+      "name": "source_pos",
+      "type": "Option<CoordVec>",
+      "docs": [
+        "Java: `sourcePos()` \u2014 absent when the source has no position."
+      ],
+      "wire": [
+        "x",
+        "y",
+        "z"
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DamageEventPacket(int, int, int, int, Point)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DamageEventPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DamageEventSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT \u00d7 4, VECTOR3D.optional(),",
+      "\u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "damage_event_packet.tests.rs",
+  "bound": true
+}

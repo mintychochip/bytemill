@@ -1,0 +1,59 @@
+{
+  "class": "UpdateSimulationDistancePacket",
+  "module": "server/play/update_simulation_distance_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.UpdateSimulationDistancePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UpdateSimulationDistancePacket(int simulationDistance)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "simulation_distance",
+      "type": "i32",
+      "docs": [
+        "Java: `simulationDistance()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UpdateSimulationDistancePacket(int simulationDistance)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UpdateSimulationDistancePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UpdateSimulationDistanceSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "UpdateSimulationDistancePacket::simulationDistance,",
+      "UpdateSimulationDistancePacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

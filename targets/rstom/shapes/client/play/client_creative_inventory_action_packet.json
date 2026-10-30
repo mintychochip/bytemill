@@ -1,0 +1,73 @@
+{
+  "class": "ClientCreativeInventoryActionPacket",
+  "module": "client/play/client_creative_inventory_action_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientCreativeInventoryActionPacket`.",
+    "",
+    "The item is the ported `item::ItemStack`. Java writes it with",
+    "`ItemStack.UNTRUSTED_NETWORK_TYPE`: amount, material id, then the",
+    "untrusted component patch."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientCreativeInventoryActionPacket(short slot, ItemStack item)",
+      "implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "slot",
+      "type": "i16",
+      "docs": [
+        "Java: `slot()`."
+      ]
+    },
+    {
+      "name": "item",
+      "type": "ItemStack",
+      "docs": [
+        "Java: `item()`."
+      ],
+      "wire": "clicked_item",
+      "codec": "ItemStack::untrusted_network_type()"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientCreativeInventoryActionPacket(short slot, ItemStack item)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientCreativeInventoryActionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientCreativeInventoryActionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(SHORT, slot, ItemStack.UNTRUSTED_NETWORK_TYPE, item,",
+      "ClientCreativeInventoryActionPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null,
+  "imports": [
+    "use crate::item::ItemStack;"
+  ],
+  "bound": true
+}

@@ -1,0 +1,63 @@
+{
+  "class": "ClientSteerBoatPacket",
+  "module": "client/play/client_steer_boat_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientSteerBoatPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientSteerBoatPacket(boolean leftPaddleTurning, boolean",
+      "rightPaddleTurning) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "left_paddle_turning",
+      "type": "bool",
+      "docs": [
+        "Java: `leftPaddleTurning()`."
+      ]
+    },
+    {
+      "name": "right_paddle_turning",
+      "type": "bool",
+      "docs": [
+        "Java: `rightPaddleTurning()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientSteerBoatPacket(leftPaddleTurning, rightPaddleTurning)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientSteerBoatPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientSteerBoatSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BOOLEAN, ..., BOOLEAN, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

@@ -20,7 +20,7 @@ current-tree evidence (code, test, workflow, or committed report). Design ration
 | Protocol coverage | 39 version roots / 51 releases (1.13 → 26.3), hand-written 26.3, Hytale connection packets |
 | Frame compression | Minecraft-style zlib envelope via `bml decode/encode --compression zlib[:threshold]`, shared with `game_probe`; schemas stay logical; Hytale zstd is not modeled |
 | Binaries | `.github/workflows/release.yml` publishes `bml` for Linux (x86_64 glibc/musl, aarch64), macOS (arm64/x86_64), Windows x86_64, with `SHA256SUMS` |
-| Generated inputs | `data/minecraft-data/pc/` is fetched (`scripts/fetch_minecraft_data.py`); `targets/rstom/shapes/` is extracted (`scripts/extract_rstom_shapes.sh`); both are git-ignored, as are `build/` and `target/` |
+| Generated inputs | `data/minecraft-data/pc/` is fetched (`scripts/fetch_minecraft_data.py`) and git-ignored, as are `build/` and `target/`; `targets/rstom/shapes/` and `targets/rstom/bindings.json` are authored source and tracked: every rstom packet payload is generated from them |
 | Gates run locally | full `cargo test` suite green, `clippy -D warnings` clean, per-printer compile/roundtrip tests |
 | Diagnostics | `bml check` human + `--format json`; `bytemill::diag` (`diagnose_source`, `diagnose_files`, `render`, `to_json`) |
 | Byte spans / hexdump | `bml decode --spans` and `--hexdump` (frame-aware; compression unwraps first) |
@@ -84,9 +84,9 @@ gate (see A1–A4). CI runs clippy on pushes/PRs and builds release binaries.
 
 | ID | Goal | Evidence (current tree) | Done when |
 |---|---|---|---|
-| D1 | Shape the remaining hand-written packets | `targets/rstom/shapes` holds 64 shapes; specs describe 172 remaining (direct 46, enum/cast 29, byte arrays 4, domain 19, record lists 16, combined/other 9, arity 47, no hand file 1) | Waves 2–5 land with per-wave tests, and `test_emit_tree_real_tree` asserts the new eligible count |
+| D1 | Shape the remaining hand-written packets | Done: `targets/rstom/shapes` holds 236 shapes, one per BML packet unit, 131 of them bound (`docs/superpowers/specs/2026-10-30-bml-bound-shapes-generate-every-packet.md`); `bml shapes report` lists every class as `generated` | `test_ledger_shaped` asserts one shape per unit and `test_emit_tree_real_tree` emits all of them |
 | D2 | Add the `frames` module or a scoped fallback | 48 packets render `crate::frames::<walker>(…)`, but rstom has no `frames` module; `tree_packet::guard_frames_walkers` refuses to emit them | Those 48 packets emit and compile in rstom, or the refusal lists a dated, owned fallback |
-| D3 | Complete the cutover | `targets/rstom` holds only its generated-ledger README (shapes are git-ignored); no `bindings.json`; class table still external (`tools/packets_gen/schema/packets.json`); `bps_rstom`, `rstom-packets`, and `packets_gen` remain load-bearing | `ported.rs`/`mod.rs`/id tables are generated; bindings and class table live in-tree; the three legacy packages are retired with the workspace green |
+| D3 | Complete the cutover | `targets/rstom` holds the tracked shape ledger and `bindings.json`; class table still external (`tools/packets_gen/schema/packets.json`); `bps_rstom`, `rstom-packets`, and `packets_gen` remain load-bearing | `ported.rs`/`mod.rs`/id tables are generated; bindings and class table live in-tree; the three legacy packages are retired with the workspace green |
 | D4 | Make `--check` and the pin gate complete | `--check` covers generated files only, not callers/tests/plugins; pin gate has 260 id-table rows vs 261 routes — `legacy_server_list_ping` (`0xfe`) is omitted (`emit_rstom.rs:1611-1612`) | `--check` reports drift outside generated files too, and every route is either pinned or documented as unroutable |
 | D5 | Document the downstream surface | No workspace registry of targets; `README.md` Downstream cites only the waves-0-1 spec; Code Generation table omits `rstom`/`rstom-tree` | `targets/` has a README/registry; README links the waves 2–5 spec and lists both rstom targets with their gates |
 

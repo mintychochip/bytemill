@@ -1,0 +1,88 @@
+{
+  "class": "BlockActionPacket",
+  "module": "server/play/block_action_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.BlockActionPacket`.",
+    "",
+    "Java's `blockPosition` is a `Point`; the port carries the decoded",
+    "[`Vec`](crate::coordinate::Vec), as [`BLOCK_POSITION`] reads it back. Java's",
+    "convenience constructor taking a `Block` (whose `id()` it forwards) is not",
+    "ported: the `instance` block type is not available here."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record BlockActionPacket(Point blockPosition, byte actionId, byte",
+      "actionParam, int blockId) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "action_id",
+      "type": "i8",
+      "docs": [
+        "Java: `actionId()`."
+      ],
+      "wire": "action_id_byte_1"
+    },
+    {
+      "name": "action_param",
+      "type": "i8",
+      "docs": [
+        "Java: `actionParam()`."
+      ],
+      "wire": "action_parameter_byte_2"
+    },
+    {
+      "name": "block_id",
+      "type": "i32",
+      "docs": [
+        "Java: `blockId()`."
+      ],
+      "wire": "block_type"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new BlockActionPacket(Point, byte, byte, int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `BlockActionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "BlockActionSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BLOCK_POSITION, BYTE, BYTE,",
+      "VAR_INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "block_action_packet.tests.rs",
+  "bound": true
+}

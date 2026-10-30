@@ -1,0 +1,166 @@
+{
+  "class": "DeclareRecipesPacket",
+  "module": "server/play/declare_recipes_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.DeclareRecipesPacket`",
+    "(with its nested `StonecutterRecipe` record).",
+    "",
+    "This file also hosts the **wire helpers shared by the three recipe packets**",
+    "of this slice \u2014 the `Ingredient`, `SlotDisplay` and `RecipeDisplay` network",
+    "types \u2014 because `DeclareRecipesPacket` is the packet that owns the",
+    "ingredient concept. `PlaceGhostRecipePacket` and `RecipeBookAddPacket`",
+    "import them from here.",
+    "",
+    "# Local stubs",
+    "",
+    "- [`IngredientValue`] stands in for `net.minestom.server.recipe.Ingredient`,",
+    "  which *is* ported: `crate::recipe::Ingredient` owns the same three shapes",
+    "  of `RegistryTag<Material>` (`Empty`, `Backed`, `Direct`) instead of",
+    "  borrowing a registry, which is what lets it be stored. So what is left is",
+    "  dropping this duplicate for that one; it carries a tag key, the empty",
+    "  tag, or a direct list of material ids, which is exactly the Java wire.",
+    "- [`SlotDisplay`] / [`RecipeDisplay`] come from `crate::recipe`, whose",
+    "  `SlotDisplay` now has all eleven Java variants, but the codecs below",
+    "  still encode and decode only `SlotDisplay.Empty` and",
+    "  `SlotDisplay.AnyFuel`; any other slot display type id is rejected on read",
+    "  because this file has no arm for it yet."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DeclareRecipesPacket(Map<RecipeProperty, List<Material>>",
+      "itemProperties, List<StonecutterRecipe> stonecutterRecipes) implements",
+      "ServerPacket.Play`.",
+      "",
+      "Java's compact constructor runs `Map.copyOf`, whose iteration order is",
+      "salted per JVM for maps of two or more entries; the port keeps the map as an",
+      "ordered `Vec` of pairs and writes them in that order.",
+      "",
+      "A property set's key is written as the namespaced identifier",
+      "(`minecraft:smithing_base`), as vanilla does; Minestom wrote `asMinimalString()`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "item_properties",
+      "type": "Vec<(RecipeProperty, Vec<Material>)>",
+      "docs": [
+        "Java: `itemProperties()`."
+      ],
+      "wire": "property_sets",
+      "item": {
+        "fields": [
+          {
+            "name": "_0",
+            "type": "RecipeProperty",
+            "docs": [],
+            "wire": "property_set_id",
+            "write": "if $.key().contains(':') { $.key().to_owned() } else { format!(\"minecraft:{}\", $.key()) }",
+            "read": "RecipeProperty::from_key($.strip_prefix(\"minecraft:\").unwrap_or(&$)).unwrap_or_else(|| panic!(\"unknown recipe property {}\", $))"
+          },
+          {
+            "name": "_1",
+            "type": "Vec<Material>",
+            "docs": [],
+            "wire": "items",
+            "item": {
+              "fields": [
+                {
+                  "name": "_",
+                  "type": "Material",
+                  "docs": [],
+                  "write": "$.id() as i32",
+                  "read": "Material::from_id(i64::from($)).unwrap_or_else(|| panic!(\"unknown material id {}\", $))"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "stonecutter_recipes",
+      "type": "Vec<StonecutterRecipe>",
+      "docs": [
+        "Java: `stonecutterRecipes()`."
+      ],
+      "wire": "stonecutter_recipes"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DeclareRecipesPacket(...)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DeclareRecipesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DeclareRecipesSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(...)` of `DeclareRecipesPacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "declare_recipes_packet.ext.rs",
+  "imports": [
+    "use crate::item::material::Material;",
+    "use crate::recipe::recipe_property::RecipeProperty;"
+  ],
+  "tests": "declare_recipes_packet.tests.rs",
+  "hooks": {
+    "read.after:property_sets_count": [
+      "check_size(property_sets_count, i32::MAX);"
+    ],
+    "read.after:items_count": [
+      "check_size(items_count, MAX_ITEMS_PER_PROPERTY);"
+    ],
+    "read.after:stonecutter_recipes_count": [
+      "check_size(stonecutter_recipes_count, MAX_STONECUTTER_RECIPES);"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": "read_size",
+      "reason": "vanilla wins (design doc, known deviations): the wire is the one the BML schema writes; the counts are checked by check_size"
+    },
+    {
+      "construct": ".min(",
+      "reason": "the generated read does not reserve capacity up front"
+    },
+    {
+      "construct": ".unwrap_or_else",
+      "reason": "the reads look the property and the material up and panic naming them, as the hand reads did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the reads look the property and the material up and panic naming them, as the hand reads did"
+    },
+    {
+      "construct": "MAX_",
+      "reason": "the hooks check the same limits"
+    }
+  ],
+  "bound": true,
+  "uses": [
+    "use super::advancements_packet::check_size;"
+  ],
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_truncation)]"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "class": "EnterCombatEventPacket",
+  "module": "server/play/enter_combat_event_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EnterCombatEventPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EnterCombatEventPacket() implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EnterCombatEventPacket()`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EnterCombatEventPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "Self",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

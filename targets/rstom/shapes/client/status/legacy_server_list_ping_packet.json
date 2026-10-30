@@ -1,0 +1,56 @@
+{
+  "class": "LegacyServerListPingPacket",
+  "module": "client/status/legacy_server_list_ping_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.status.LegacyServerListPingPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record LegacyServerListPingPacket(byte payload) implements",
+      "ClientPacket.Status`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "payload",
+      "type": "i8",
+      "docs": [
+        "Java: `payload()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new LegacyServerListPingPacket(byte)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `LegacyServerListPingPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "LegacyServerListPingSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(BYTE, LegacyServerListPingPacket::payload, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

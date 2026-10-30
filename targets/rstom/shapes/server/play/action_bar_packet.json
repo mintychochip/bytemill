@@ -1,0 +1,65 @@
+{
+  "class": "ActionBarPacket",
+  "module": "server/play/action_bar_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ActionBarPacket`.",
+    "",
+    "The `text` field is [`Component`](crate::text::Component), adventure's",
+    "component tree \u2014 the same type Java's record holds. It travels with",
+    "[`Component::write`] / [`Component::read`] (see",
+    "[`crate::adventure::component_network`)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ActionBarPacket(Component text) implements ServerPacket.Play,",
+      "ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "text",
+      "type": "Component",
+      "docs": [
+        "Java: `text()` \u2014 the component shown above the hotbar."
+      ],
+      "wire": "action_bar_text"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ActionBarPacket(Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ActionBarPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ActionBarSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(COMPONENT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "action_bar_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "action_bar_packet.tests.rs",
+  "bound": true
+}

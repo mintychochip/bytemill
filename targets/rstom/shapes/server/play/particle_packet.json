@@ -1,0 +1,184 @@
+{
+  "class": "ParticlePacket",
+  "module": "server/play/particle_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ParticlePacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "**None.** The particle goes out through the ported",
+    "`crate::particle::network_type()` \u2014 `Particle.NETWORK_TYPE`, the var-int id",
+    "*and* the variant's `writeData` \u2014 so a `Particle.Block` carries its block",
+    "state id and a `Particle.Dust` its colour and scale.",
+    "`probes/expected/particlewireprobe.json` pins both a data-free",
+    "`Particle.Simple` and a data-carrying `Particle.Block` through this",
+    "serializer.",
+    "",
+    "Java's four convenience constructors (`maxSpeed` broadcast to three axes,",
+    "`Point` overloads, `Randomization.DEFAULT`) are ported as `new_with_*`",
+    "helpers, since Rust has no constructor overloading."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ParticlePacket(Particle particle, boolean overrideLimiter,",
+      "boolean longDistance, double x, double y, double z, float offsetX, float",
+      "offsetY, float offsetZ, float maxSpeedX, float maxSpeedY, float maxSpeedZ,",
+      "int particleCount, Randomization randomization) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "particle",
+      "type": "Particle",
+      "docs": [
+        "Java: `particle()`."
+      ],
+      "wire": "@particle",
+      "put": "crate::particle::network_type().write(buffer, &$);",
+      "take": "crate::particle::network_type().read(buffer)"
+    },
+    {
+      "name": "override_limiter",
+      "type": "bool",
+      "docs": [
+        "Java: `overrideLimiter()`."
+      ]
+    },
+    {
+      "name": "long_distance",
+      "type": "bool",
+      "docs": [
+        "Java: `longDistance()`."
+      ],
+      "wire": "always_visible"
+    },
+    {
+      "name": "x",
+      "type": "f64",
+      "docs": [
+        "Java: `x()`."
+      ]
+    },
+    {
+      "name": "y",
+      "type": "f64",
+      "docs": [
+        "Java: `y()`."
+      ]
+    },
+    {
+      "name": "z",
+      "type": "f64",
+      "docs": [
+        "Java: `z()`."
+      ]
+    },
+    {
+      "name": "offset_x",
+      "type": "f32",
+      "docs": [
+        "Java: `offsetX()`."
+      ],
+      "wire": "x_distance"
+    },
+    {
+      "name": "offset_y",
+      "type": "f32",
+      "docs": [
+        "Java: `offsetY()`."
+      ],
+      "wire": "y_distance"
+    },
+    {
+      "name": "offset_z",
+      "type": "f32",
+      "docs": [
+        "Java: `offsetZ()`."
+      ],
+      "wire": "z_distance"
+    },
+    {
+      "name": "max_speed_x",
+      "type": "f32",
+      "docs": [
+        "Java: `maxSpeedX()`."
+      ],
+      "wire": "x_max_speed"
+    },
+    {
+      "name": "max_speed_y",
+      "type": "f32",
+      "docs": [
+        "Java: `maxSpeedY()`."
+      ],
+      "wire": "y_max_speed"
+    },
+    {
+      "name": "max_speed_z",
+      "type": "f32",
+      "docs": [
+        "Java: `maxSpeedZ()`."
+      ],
+      "wire": "z_max_speed"
+    },
+    {
+      "name": "particle_count",
+      "type": "i32",
+      "docs": [
+        "Java: `particleCount()`."
+      ]
+    },
+    {
+      "name": "randomization",
+      "type": "Randomization",
+      "docs": [
+        "Java: `randomization()`."
+      ],
+      "wire": "randomization_type",
+      "codec": "enum_type::<Randomization>()"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)]"
+    ],
+    "docs": [
+      "Java: the canonical constructor \u2014 the record's own."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ParticlePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ParticleSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(Particle.NETWORK_TYPE,",
+      "ParticlePacket::particle, BOOLEAN, \u2026, ParticlePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "particle_packet.ext.rs",
+  "imports": [
+    "use crate::particle::Particle;"
+  ],
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;",
+    "use crate::network::types::Type;"
+  ]
+}

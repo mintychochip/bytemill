@@ -1,0 +1,61 @@
+{
+  "class": "HitAnimationPacket",
+  "module": "server/play/hit_animation_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.HitAnimationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record HitAnimationPacket(int entityId, float yaw)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()` \u2014 the entity that swung."
+      ]
+    },
+    {
+      "name": "yaw",
+      "type": "f32",
+      "docs": [
+        "Java: `yaw()` \u2014 the swing direction, in degrees."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new HitAnimationPacket(int, float)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `HitAnimationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "HitAnimationSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, FLOAT)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

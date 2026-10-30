@@ -1,0 +1,89 @@
+{
+  "class": "EntityMetaDataPacket",
+  "module": "server/play/entity_meta_data_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.EntityMetaDataPacket`.",
+    "",
+    "`Metadata.Entry.SERIALIZER` \u2014 a var-int metadata type id followed by that",
+    "type's payload \u2014 is exposed here as [`MetadataEntryNetworkType`], which",
+    "delegates to the canonical entry codec",
+    "[`crate::entity::metadata::codec`]. That codec writes the same pair through",
+    "the payload codecs in [`crate::entity::metadata::payload_codec`], so every",
+    "metadata type \u2014 the item stack, the particles, the villager triple, the",
+    "profile and the thirteen variant types included \u2014 is byte-exact here.",
+    "",
+    "This file used to carry its own copy of the payload table. It had drifted",
+    "from the canonical one: `TYPE_BLOCKSTATE`/`TYPE_OPT_BLOCKSTATE` resolved a",
+    "key to the block's *registry* id where Java writes the block's *state* id",
+    "(`Block.STATE_NETWORK_TYPE`), and the payload families Java resolves",
+    "through another class's network type panicked instead of encoding. The",
+    "canonical codec is the only copy now."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityMetaDataPacket(int entityId, Map<Integer,",
+      "Metadata.Entry<?>> entries)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "entries",
+      "type": "MetadataWireEntries",
+      "docs": [
+        "Java: `entries()` \u2014 index byte, wire type id, and payload, in write order.",
+        "",
+        "The same sequence as",
+        "[`EntityMetadata`](crate::entity::entity_data::EntityMetadata)."
+      ],
+      "wire": "metadata",
+      "put": "write_entries(buffer, &$);",
+      "take": "read_entries(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityMetaDataPacket(int, Map)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityMetaDataPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityMetaDataSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the hand-written `SERIALIZER` of `EntityMetaDataPacket` \u2014 a byte index",
+      "then the entry, terminated by `0xFF`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_meta_data_packet.ext.rs",
+  "imports": [
+    "use crate::entity::metadata::MetadataWireEntries;"
+  ],
+  "tests": "entity_meta_data_packet.tests.rs",
+  "bound": true
+}

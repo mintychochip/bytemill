@@ -1,0 +1,77 @@
+{
+  "class": "PostEffectsPacket",
+  "module": "server/common/post_effects_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.PostEffectsPacket`.",
+    "",
+    "`text::Key` and `NetworkBuffer.KEY`",
+    "(`STRING.transform(Key::key, Key::asString)`) are both ported, but the only",
+    "thing the wire holds is the `namespace:value` spelling, so an effect key is a",
+    "`String`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PostEffectsPacket(List<Key> postEffects) implements",
+      "ServerPacket.Configuration, Play` \u2014 the effects, in application order."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "post_effects",
+      "type": "Vec<String>",
+      "docs": [
+        "Java: `postEffects()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PostEffectsPacket(List<Key>)`.",
+      "",
+      "# Panics",
+      "",
+      "Panics above [`MAX_ENTRIES`] with Java's message."
+    ],
+    "body": [
+      "        assert!(",
+      "            post_effects.len() <= MAX_ENTRIES,",
+      "            \"At most {MAX_ENTRIES} post effects are allowed\"",
+      "        );",
+      "        Self { post_effects }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PostEffectsPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PostEffectsSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `KEY.list(MAX_ENTRIES)` template \u2014 each `KEY` is a string."
+    ],
+    "read_via_new": false
+  },
+  "extras": "post_effects_packet.ext.rs",
+  "tests": "post_effects_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "Negative declared sizes read as zero entries; the generated read loops `for _ in 0..count`, which also runs zero times, so a negative count yields the same empty list."
+    }
+  ]
+}

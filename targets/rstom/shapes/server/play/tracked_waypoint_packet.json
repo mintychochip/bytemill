@@ -1,0 +1,94 @@
+{
+  "class": "TrackedWaypointPacket",
+  "module": "server/play/tracked_waypoint_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.TrackedWaypointPacket` and",
+    "every type nested in it (`Operation`, `Waypoint`, `Icon`, `Target` with its",
+    "`Empty`/`Vec3i`/`Chunk`/`Azimuth` cases and its `Type` enum).",
+    "",
+    "# Local stubs",
+    "",
+    "- `Key` comes from the ported `text::key` module (adventure's `Key`).",
+    "  Java's `NetworkBuffer.KEY` is `STRING.transform(Key::key,",
+    "  Key::asString)`, i.e. the namespace:value string.",
+    "- The waypoint colour is the ported `color::Color`, which implements",
+    "  adventure's `RGBLike`; Java's `Color.RGB_BYTE_NETWORK_TYPE` writes three",
+    "  `BYTE`s and reads them back into a `Color`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TrackedWaypointPacket(Operation operation, Waypoint waypoint)",
+      "implements ServerPacket.Configuration, ServerPacket.Play`.",
+      "",
+      "The port models it as a play packet only; the configuration group shares the",
+      "same payload and this crate's `ServerPacketGroup` has one marker per state",
+      "with no cross-state registration."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "operation",
+      "type": "Operation",
+      "docs": [
+        "Java: `operation()`."
+      ],
+      "write": "$.ordinal()",
+      "read": "Operation::from_ordinal($).unwrap_or_else(|| panic!(\"unknown TrackedWaypointPacket.Operation ordinal {}\", $))"
+    },
+    {
+      "name": "waypoint",
+      "type": "Waypoint",
+      "docs": [
+        "Java: `waypoint()`."
+      ],
+      "wire": "is_uuid..angle"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TrackedWaypointPacket(Operation, Waypoint)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TrackedWaypointPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TrackedWaypointSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(Operation.NETWORK_TYPE,",
+      "TrackedWaypointPacket::operation, Waypoint.NETWORK_TYPE,",
+      "TrackedWaypointPacket::waypoint, TrackedWaypointPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "tracked_waypoint_packet.ext.rs",
+  "tests": "tracked_waypoint_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".unwrap_or",
+      "reason": "the read looks the operation up and panics naming the ordinal, as the hand read did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the read looks the operation up and panics naming the ordinal, as the hand read did"
+    }
+  ],
+  "bound": true
+}

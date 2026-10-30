@@ -1,0 +1,65 @@
+{
+  "class": "UpdateViewPositionPacket",
+  "module": "server/play/update_view_position_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.UpdateViewPositionPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UpdateViewPositionPacket(int chunkX, int chunkZ) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "chunk_x",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkX()`."
+      ]
+    },
+    {
+      "name": "chunk_z",
+      "type": "i32",
+      "docs": [
+        "Java: `chunkZ()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UpdateViewPositionPacket(int chunkX, int chunkZ)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UpdateViewPositionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UpdateViewPositionSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "UpdateViewPositionPacket::chunkX, VAR_INT, UpdateViewPositionPacket::chunkZ,",
+      "UpdateViewPositionPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

@@ -1,0 +1,195 @@
+{
+  "copy": [
+    "PlayerHand",
+    "Pos",
+    "Difficulty",
+    "Uuid",
+    "Reason",
+    "Action",
+    "SampleType",
+    "Animation",
+    "Potion",
+    "FacePosition",
+    "Randomization"
+  ],
+  "types": {
+    "PlayerHand": {
+      "write": "$.ordinal()",
+      "read": "PlayerHand::from_ordinal($)"
+    },
+    "Pos": {
+      "wire": [
+        "f64be",
+        "f64be",
+        "f64be",
+        "f32be",
+        "f32be"
+      ],
+      "write": [
+        "$.x",
+        "$.y",
+        "$.z",
+        "$.yaw",
+        "$.pitch"
+      ],
+      "read": "Pos::new($0, $1, $2, $3, $4)"
+    },
+    "CoordVec": [
+      {
+        "wire": [
+          "f64be",
+          "f64be",
+          "f64be"
+        ],
+        "write": [
+          "$.x",
+          "$.y",
+          "$.z"
+        ],
+        "read": "CoordVec::new($0, $1, $2)"
+      },
+      {
+        "wire": [
+          "u8",
+          "u8",
+          "u32be",
+          "varint"
+        ],
+        "codec": "LP_VECTOR3",
+        "imports": [
+          "use crate::network::types::LP_VECTOR3;"
+        ]
+      }
+    ],
+    "Vec<u8>": [
+      {
+        "wire": [
+          "i8[]"
+        ],
+        "codec": "BYTE_ARRAY",
+        "imports": [
+          "use crate::network::types::BYTE_ARRAY;"
+        ]
+      },
+      {
+        "wire": [
+          "u8[]"
+        ],
+        "codec": "BYTE_ARRAY",
+        "imports": [
+          "use crate::network::types::BYTE_ARRAY;"
+        ]
+      }
+    ],
+    "Component": {
+      "put": "$.write(buffer);",
+      "take": "Component::read(buffer)"
+    },
+    "NumberFormat": {
+      "put": "$.write(buffer);",
+      "take": "NumberFormat::read(buffer)"
+    },
+    "LightData": {
+      "put": "$.write(buffer);",
+      "take": "LightData::read(buffer)"
+    },
+    "ChunkData": {
+      "put": "$.write(buffer);",
+      "take": "ChunkData::read(buffer)"
+    },
+    "GameProfile": {
+      "put": "$.write(buffer);",
+      "take": "GameProfile::read(buffer)"
+    },
+    "PlayerSpawnInfo": {
+      "put": "$.write(buffer);",
+      "take": "PlayerSpawnInfo::read(buffer)"
+    },
+    "WorldPos": {
+      "put": "$.write(buffer);",
+      "take": "WorldPos::read(buffer)"
+    },
+    "DebugUpdate": {
+      "put": "$.write(buffer);",
+      "take": "DebugUpdate::read(buffer)"
+    },
+    "DebugEvent": {
+      "put": "$.write(buffer);",
+      "take": "DebugEvent::read(buffer)"
+    },
+    "Waypoint": {
+      "put": "$.write(buffer);",
+      "take": "Waypoint::read(buffer)"
+    },
+    "ItemStackStub": {
+      "put": "$.write(buffer);",
+      "take": "ItemStackStub::read(buffer)"
+    },
+    "Statistic": {
+      "put": "$.write(buffer);",
+      "take": "Statistic::read(buffer)"
+    },
+    "Match": {
+      "put": "$.write(buffer);",
+      "take": "Match::read(buffer)"
+    },
+    "Trade": {
+      "put": "$.write(buffer);",
+      "take": "Trade::read(buffer)"
+    },
+    "ChunkBiomeData": {
+      "put": "$.write(buffer);",
+      "take": "ChunkBiomeData::read(buffer)"
+    },
+    "Node": {
+      "put": "$.write(buffer);",
+      "take": "Node::read(buffer)"
+    },
+    "AdvancementMapping": {
+      "put": "$.write(buffer);",
+      "take": "AdvancementMapping::read(buffer)"
+    },
+    "ProgressMapping": {
+      "put": "$.write(buffer);",
+      "take": "ProgressMapping::read(buffer)"
+    },
+    "RecipeDisplay": {
+      "put": "$.write(buffer);",
+      "take": "RecipeDisplay::read(buffer)"
+    },
+    "SwingAnimation": {
+      "put": "$.write(buffer);",
+      "take": "SwingAnimation::read(buffer)"
+    },
+    "Entry": {
+      "put": "$.write(buffer);",
+      "take": "Entry::read(buffer)"
+    },
+    "Vec<i64>": {
+      "wire": [
+        "i64be[]"
+      ],
+      "codec": "LONG_ARRAY",
+      "imports": [
+        "use crate::network::types::LONG_ARRAY;"
+      ]
+    },
+    "Vec<i32>": {
+      "wire": [
+        "varint[]"
+      ],
+      "codec": "VAR_INT_ARRAY",
+      "imports": [
+        "use crate::network::types::VAR_INT_ARRAY;"
+      ]
+    },
+    "PositionPath": {
+      "put": "$.write(buffer);",
+      "take": "PositionPath::read(buffer)"
+    },
+    "StonecutterRecipe": {
+      "put": "$.write(buffer);",
+      "take": "StonecutterRecipe::read(buffer)"
+    }
+  }
+}

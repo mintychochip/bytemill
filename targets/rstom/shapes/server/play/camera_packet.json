@@ -1,0 +1,55 @@
+{
+  "class": "CameraPacket",
+  "module": "server/play/camera_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.CameraPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record CameraPacket(int cameraId) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "camera_id",
+      "type": "i32",
+      "docs": [
+        "Java: `cameraId()` \u2014 the entity the client should view through, or `0`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new CameraPacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `CameraPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "CameraSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

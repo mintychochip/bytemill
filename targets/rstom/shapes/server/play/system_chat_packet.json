@@ -1,0 +1,74 @@
+{
+  "class": "SystemChatPacket",
+  "module": "server/play/system_chat_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SystemChatPacket`.",
+    "",
+    "The `message` field is [`Component`](crate::text::Component), adventure's",
+    "component tree \u2014 the same type Java's record holds. It travels with",
+    "[`Component::write`] / [`Component::read`] (see",
+    "[`crate::adventure::component_network`)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SystemChatPacket(Component message, boolean overlay)",
+      "implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "message",
+      "type": "Component",
+      "docs": [
+        "Java: `message()`."
+      ],
+      "wire": "content"
+    },
+    {
+      "name": "overlay",
+      "type": "bool",
+      "docs": [
+        "Java: `overlay()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SystemChatPacket(Component message, boolean overlay)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SystemChatPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SystemChatSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(COMPONENT,",
+      "SystemChatPacket::message, BOOLEAN, SystemChatPacket::overlay,",
+      "SystemChatPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "system_chat_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "system_chat_packet.tests.rs",
+  "bound": true
+}

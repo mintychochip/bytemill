@@ -1,0 +1,72 @@
+{
+  "class": "OpenHorseWindowPacket",
+  "module": "server/play/open_horse_window_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.OpenHorseWindowPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record OpenHorseWindowPacket(int windowId, int slotCount, int",
+      "entityId)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "slot_count",
+      "type": "i32",
+      "docs": [
+        "Java: `slotCount()`."
+      ]
+    },
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()` \u2014 the horse the window belongs to."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new OpenHorseWindowPacket(int, int, int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `OpenHorseWindowPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "OpenHorseWindowSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, VAR_INT, INT)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "open_horse_window_packet.tests.rs"
+}

@@ -1,0 +1,106 @@
+{
+  "class": "SetSlotPacket",
+  "module": "server/play/set_slot_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetSlotPacket`.",
+    "",
+    "# Shared wire helpers",
+    "",
+    "Java declares its wire primitives once on `NetworkBuffer`; the port keeps",
+    "them in `crate::network::types` (`VECTOR3D`, `BLOCK_POSITION`,",
+    "`Type::list`, `Type::map_value`, `enum_type`, \u2026). This file only hosts the",
+    "three helpers that are specific to a packet payload rather than to a",
+    "primitive, and that this partition shares:",
+    "",
+    "- [`write_item_stack`] / [`read_item_stack`] \u2014 `ItemStack.NETWORK_TYPE`,",
+    "  the ported `ItemStack::network_type()`.",
+    "- [`write_component_optional`] / [`read_component_optional`] \u2014",
+    "  `COMPONENT.optional()`, over [`Component`](crate::text::Component).",
+    "",
+    "# Deferrals",
+    "",
+    "**None** for the item stack: [`write_item_stack`] and",
+    "[`read_item_stack`] are the ported `ItemStack::network_type()`, so a",
+    "resolved component patch (`DataComponent.PATCH_NETWORK_TYPE`: an added",
+    "count, a removed count, then each entry) goes out and comes back.",
+    "`probes/expected/itemstackwireprobe.json` pins that order."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetSlotPacket(int windowId, int stateId, short slot,",
+      "ItemStack itemStack) implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "state_id",
+      "type": "i32",
+      "docs": [
+        "Java: `stateId()`."
+      ]
+    },
+    {
+      "name": "slot",
+      "type": "i16",
+      "docs": [
+        "Java: `slot()`."
+      ]
+    },
+    {
+      "name": "item_stack",
+      "type": "ItemStack",
+      "docs": [
+        "Java: `itemStack()`."
+      ],
+      "wire": "slot_data",
+      "put": "write_item_stack(buffer, &$);",
+      "take": "read_item_stack(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetSlotPacket(int, int, short, ItemStack)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetSlotPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetSlotSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, SetSlotPacket::windowId,",
+      "VAR_INT, SetSlotPacket::stateId, SHORT, SetSlotPacket::slot,",
+      "ItemStack.NETWORK_TYPE, SetSlotPacket::itemStack, SetSlotPacket::new)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "set_slot_packet.ext.rs",
+  "imports": [
+    "use crate::item::item_stack::ItemStack;"
+  ],
+  "bound": true
+}

@@ -1,0 +1,65 @@
+{
+  "class": "DebugEventPacket",
+  "module": "server/play/debug_event_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.DebugEventPacket`.",
+    "",
+    "The [`DebugSubscription`](super::debug_block_value_packet) model it shares",
+    "with the other debug packets lives in",
+    "[`debug_block_value_packet`](super::debug_block_value_packet)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DebugEventPacket(DebugSubscription.Event<?> event) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "event",
+      "type": "DebugEvent",
+      "docs": [
+        "Java: `event()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DebugEventPacket(DebugSubscription.Event)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DebugEventPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DebugEventSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(DebugSubscription.Event",
+      ".NETWORK_TYPE, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use super::debug_block_value_packet::DebugEvent;"
+  ],
+  "tests": "debug_event_packet.tests.rs",
+  "bound": true
+}

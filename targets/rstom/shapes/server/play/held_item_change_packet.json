@@ -1,0 +1,58 @@
+{
+  "class": "HeldItemChangePacket",
+  "module": "server/play/held_item_change_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.HeldItemChangePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record HeldItemChangePacket(byte slot)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "slot",
+      "type": "i8",
+      "docs": [
+        "Java: `slot()` \u2014 the selected hotbar index."
+      ],
+      "codec": "BYTE"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new HeldItemChangePacket(byte)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `HeldItemChangePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "HeldItemChangeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BYTE)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "held_item_change_packet.tests.rs",
+  "bound": true
+}

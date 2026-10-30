@@ -16,8 +16,25 @@ use crate::shapes::scan::{
     skip_balanced, skip_item, skip_trivia, sub, sw,
 };
 
-/// `crates/rstom/src/network/packet`
-pub const PACKET_ROOT: &str = "crates/rstom/src/network/packet";
+/// The workspace's library crate directory: `crates/netherstar`, or `crates/rstom` in a checkout
+/// from before the rename. A workspace with neither generates into `crates/netherstar`.
+pub fn crate_root(workspace: &Path) -> PathBuf {
+    for name in ["netherstar", "rstom"] {
+        let candidate = workspace.join("crates").join(name);
+        if candidate.is_dir() {
+            return candidate;
+        }
+    }
+    workspace.join("crates").join("netherstar")
+}
+
+/// `crates/<crate>/src/network/packet`.
+pub fn packet_root(workspace: &Path) -> PathBuf {
+    crate_root(workspace)
+        .join("src")
+        .join("network")
+        .join("packet")
+}
 
 const ALLOWED_TRAITS_FOR_CLS: &[&str] = &[
     "Packet",
@@ -60,7 +77,8 @@ const GENERATOR_NAMES: &[&str] = &[
     "FIXED_BYTES",
 ];
 
-const COORD_VEC_PATHS: &[&str] = &["crate::coordinate::Vec", "crate::coordinate::vec::Vec"];
+pub(crate) const COORD_VEC_PATHS: &[&str] =
+    &["crate::coordinate::Vec", "crate::coordinate::vec::Vec"];
 const GENERATED_TAIL_USE: &str = "pub use ext::*;";
 
 /// Python `\w`.
@@ -159,7 +177,7 @@ fn use_head(text: &str) -> Option<usize> {
 }
 
 /// `_use_statement`.
-fn use_statement(text: &str) -> BmlResult<String> {
+pub(crate) fn use_statement(text: &str) -> BmlResult<String> {
     let start = use_head(text).ok_or_else(|| shape_error("malformed use"))?;
     let joined = sub(text, start, text.len())
         .split_whitespace()
@@ -172,7 +190,7 @@ fn use_statement(text: &str) -> BmlResult<String> {
 }
 
 /// `_split_use`: (head, leaves).
-fn split_use(statement: &str) -> BmlResult<(String, Vec<String>)> {
+pub(crate) fn split_use(statement: &str) -> BmlResult<(String, Vec<String>)> {
     let body = statement.strip_suffix(';').unwrap_or(statement);
     if let Some((head, inner)) = body.split_once('{') {
         let inner = inner.strip_suffix('}').unwrap_or(inner);
@@ -194,7 +212,7 @@ fn split_use(statement: &str) -> BmlResult<(String, Vec<String>)> {
 }
 
 /// `_leaf_binding`: (full path, bound name).
-fn leaf_binding(head: &str, leaf: &str) -> (String, String) {
+pub(crate) fn leaf_binding(head: &str, leaf: &str) -> (String, String) {
     let p = skip_pub(head, 0);
     let raw = if sw(head, p, "use") {
         match ws_end(head, p + 3) {
@@ -225,7 +243,9 @@ fn leaf_binding(head: &str, leaf: &str) -> (String, String) {
 }
 
 /// `_coordinate_names`: names the coordinate `Vec` is bound to in this file.
-fn coordinate_names<'a>(use_texts: impl Iterator<Item = &'a str>) -> BmlResult<BTreeSet<String>> {
+pub(crate) fn coordinate_names<'a>(
+    use_texts: impl Iterator<Item = &'a str>,
+) -> BmlResult<BTreeSet<String>> {
     let mut names = BTreeSet::new();
     for text in use_texts {
         let (head, leaves) = split_use(&use_statement(text)?)?;
@@ -266,7 +286,7 @@ fn coord_match_at(text: &str, i: usize, coord: &BTreeSet<String>) -> Option<usiz
 }
 
 /// `_normalise_types`: coordinate `Vec` aliases become `CoordVec`; `std::vec::Vec` becomes `Vec`.
-fn normalise_types(text: &str, coord: &BTreeSet<String>) -> String {
+pub(crate) fn normalise_types(text: &str, coord: &BTreeSet<String>) -> String {
     let mut out = String::with_capacity(text.len());
     if coord.is_empty() {
         out.push_str(text);
@@ -313,7 +333,7 @@ fn has_word(needed: &str, bound: &str) -> bool {
 }
 
 /// `_rebuild_use`.
-fn rebuild_use(head: &str, leaves: &[String]) -> Option<String> {
+pub(crate) fn rebuild_use(head: &str, leaves: &[String]) -> Option<String> {
     match leaves {
         [] => None,
         [one] if one == "self" => Some(format!("{};", head.strip_suffix("::").unwrap_or(head))),
@@ -331,7 +351,18 @@ fn hand_imports(use_texts: &[&str], needed: &str) -> BmlResult<Vec<String>> {
             continue;
         }
         if statement.starts_with("pub") {
-            kept.push(statement);
+            // A re-export keeps the documentation it had.
+            let docs: Vec<&str> = text
+                .lines()
+                .map(str::trim)
+                .take_while(|l| !l.starts_with("pub") && !l.starts_with("use "))
+                .filter(|l| l.starts_with("///"))
+                .collect();
+            if docs.is_empty() {
+                kept.push(statement);
+            } else {
+                kept.push(format!("{}\n{statement}", docs.join("\n")));
+            }
             continue;
         }
         let (head, leaves) = split_use(&statement)?;
@@ -421,7 +452,7 @@ fn parse_struct_fields(body: &str) -> BmlResult<Vec<FieldShape>> {
             name,
             type_: typ,
             docs,
-            wire: None,
+            bind: Default::default(),
         });
     }
     Ok(fields)

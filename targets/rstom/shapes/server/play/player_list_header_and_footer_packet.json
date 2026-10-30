@@ -1,0 +1,69 @@
+{
+  "class": "PlayerListHeaderAndFooterPacket",
+  "module": "server/play/player_list_header_and_footer_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.PlayerListHeaderAndFooterPacket`.",
+    "",
+    "Java also implements `ServerPacket.ComponentHolding`; that marker has no",
+    "ported trait in this workspace (see `advancements_packet.rs`), so",
+    "`components()` / `copyWithOperator` are inherent methods here, exactly as",
+    "`ActionBarPacket` carries them. The wire form is unaffected."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PlayerListHeaderAndFooterPacket(Component header, Component footer) implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "header",
+      "type": "Component",
+      "docs": [
+        "Java: `header()`."
+      ]
+    },
+    {
+      "name": "footer",
+      "type": "Component",
+      "docs": [
+        "Java: `footer()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PlayerListHeaderAndFooterPacket(header: Component, footer: Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PlayerListHeaderAndFooterPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PlayerListHeaderAndFooterSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(COMPONENT, PlayerListHeaderAndFooterPacket::header, COMPONENT, PlayerListHeaderAndFooterPacket::footer, PlayerListHeaderAndFooterPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "player_list_header_and_footer_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "bound": true
+}

@@ -1,0 +1,74 @@
+{
+  "class": "PlaceGhostRecipePacket",
+  "module": "server/play/place_ghost_recipe_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.PlaceGhostRecipePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PlaceGhostRecipePacket(int windowId, RecipeDisplay recipe)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "recipe",
+      "type": "RecipeDisplay",
+      "docs": [
+        "Java: `recipe()`."
+      ],
+      "wire": "recipe_display",
+      "put": "write_recipe_display(buffer, &$);",
+      "take": "read_recipe_display(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PlaceGhostRecipePacket(int, RecipeDisplay)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PlaceGhostRecipePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PlaceGhostRecipeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(NetworkBuffer.VAR_INT,",
+      "PlaceGhostRecipePacket::windowId, RecipeDisplay.NETWORK_TYPE,",
+      "PlaceGhostRecipePacket::recipe, PlaceGhostRecipePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::recipe::recipe_display::RecipeDisplay;"
+  ],
+  "tests": "place_ghost_recipe_packet.tests.rs",
+  "bound": true,
+  "uses": [
+    "use super::declare_recipes_packet::{read_recipe_display, write_recipe_display};"
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "class": "UpdateHealthPacket",
+  "module": "server/play/update_health_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.UpdateHealthPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record UpdateHealthPacket(float health, int food, float",
+      "foodSaturation) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "health",
+      "type": "f32",
+      "docs": [
+        "Java: `health()`."
+      ]
+    },
+    {
+      "name": "food",
+      "type": "i32",
+      "docs": [
+        "Java: `food()`."
+      ]
+    },
+    {
+      "name": "food_saturation",
+      "type": "f32",
+      "docs": [
+        "Java: `foodSaturation()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new UpdateHealthPacket(float health, int food, float",
+      "foodSaturation)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `UpdateHealthPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "UpdateHealthSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(FLOAT, UpdateHealthPacket::health,",
+      "VAR_INT, UpdateHealthPacket::food, FLOAT,",
+      "UpdateHealthPacket::foodSaturation, UpdateHealthPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

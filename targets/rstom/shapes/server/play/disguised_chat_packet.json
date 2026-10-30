@@ -1,0 +1,91 @@
+{
+  "class": "DisguisedChatPacket",
+  "module": "server/play/disguised_chat_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.DisguisedChatPacket`.",
+    "",
+    "The three components are [`Component`](crate::text::Component), adventure's",
+    "component tree. The target name is optional, written as",
+    "`COMPONENT.optional()`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DisguisedChatPacket(Component message, int type, Component",
+      "senderName, @Nullable Component targetName) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "message",
+      "type": "Component",
+      "docs": [
+        "Java: `message()`."
+      ]
+    },
+    {
+      "name": "message_type",
+      "type": "i32",
+      "docs": [
+        "Java: `type()` \u2014 the chat-message type id."
+      ],
+      "wire": "holder_id..narration_style",
+      "put": "buffer.write(VAR_INT, $);",
+      "take": "buffer.read(VAR_INT)"
+    },
+    {
+      "name": "sender_name",
+      "type": "Component",
+      "docs": [
+        "Java: `senderName()`."
+      ],
+      "wire": "sender_name"
+    },
+    {
+      "name": "target_name",
+      "type": "Option<Component>",
+      "docs": [
+        "Java: `targetName()` \u2014 absent when the message is not a reply."
+      ],
+      "wire": "target_name"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DisguisedChatPacket(Component, int, Component, Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DisguisedChatPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DisguisedChatSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(COMPONENT, VAR_INT, COMPONENT,",
+      "COMPONENT.optional(), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "disguised_chat_packet.tests.rs",
+  "bound": true
+}

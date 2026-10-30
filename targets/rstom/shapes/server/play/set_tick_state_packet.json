@@ -1,0 +1,60 @@
+{
+  "class": "SetTickStatePacket",
+  "module": "server/play/set_tick_state_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetTickStatePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetTickStatePacket(tickRate f32, isFrozen bool) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "tick_rate",
+      "type": "f32",
+      "docs": [
+        "Java: `tickRate()`."
+      ]
+    },
+    {
+      "name": "is_frozen",
+      "type": "bool",
+      "docs": [
+        "Java: `isFrozen()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetTickStatePacket(tick_rate: f32, is_frozen: bool)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetTickStatePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetTickStateSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(FLOAT, SetTickStatePacket::tickRate, BOOLEAN, SetTickStatePacket::isFrozen, SetTickStatePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

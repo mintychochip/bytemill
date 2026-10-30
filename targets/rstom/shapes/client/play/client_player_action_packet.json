@@ -1,0 +1,112 @@
+{
+  "class": "ClientPlayerActionPacket",
+  "module": "client/play/client_player_action_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerActionPacket`.",
+    "",
+    "The `blockFace` is `BYTE.transform(aByte -> BlockFace.values()[aByte], face",
+    "-> (byte) face.ordinal())` in Java \u2014 a raw signed byte, not a `VAR_INT` enum",
+    "\u2014 and the `Status` is a `NetworkBuffer.Enum` (`VAR_INT` of the ordinal).",
+    "[`BlockFace`] is reused from the sibling block-placement packet (a local",
+    "stand-in for the `instance.block` enum)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerActionPacket(Status status, Point blockPosition,",
+      "BlockFace blockFace, int sequence) implements ClientPacket.Play`.",
+      "",
+      "`Eq` is not derived: `block_position` is a float-backed [`Vec`], which is",
+      "only `PartialEq` (Java's record `equals` compares the `double` components",
+      "with `Double.compare`, so `-0.0 != 0.0` and `NaN == NaN` \u2014 semantics a",
+      "derived Rust `Eq` cannot express)."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "status",
+      "type": "Status",
+      "docs": [
+        "Java: `status()`."
+      ],
+      "wire": "status",
+      "write": "$.ordinal()",
+      "read": "Status::from_ordinal($)"
+    },
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()` (a `Point`; read back as a `Vec`)."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "block_face",
+      "type": "BlockFace",
+      "docs": [
+        "Java: `blockFace()`."
+      ],
+      "wire": "face",
+      "write": "$.ordinal() as i8",
+      "read": "BlockFace::from_ordinal($ as i32)"
+    },
+    {
+      "name": "sequence",
+      "type": "i32",
+      "docs": [
+        "Java: `sequence()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: the record constructor."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerActionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlayerActionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(Enum(Status), BLOCK_POSITION, BYTE(face ordinal), VAR_INT, \u2026)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_player_action_packet.ext.rs",
+  "imports": [
+    "pub use crate::network::packet::client::play::client_player_block_placement_packet::BlockFace;"
+  ],
+  "accepted": [
+    {
+      "construct": "pack_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which packs the block position the same way"
+    },
+    {
+      "construct": "unpack_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which unpacks the block position the same way"
+    }
+  ],
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_wrap)]",
+    "#[allow(clippy::cast_sign_loss)]"
+  ]
+}

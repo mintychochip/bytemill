@@ -1,0 +1,44 @@
+{
+  "class": "FinishConfigurationPacket",
+  "module": "server/configuration/finish_configuration_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.configuration.FinishConfigurationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record FinishConfigurationPacket() implements ServerPacket.Configuration`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `FinishConfigurationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "FinishConfigurationPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

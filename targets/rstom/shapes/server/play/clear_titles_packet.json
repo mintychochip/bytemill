@@ -1,0 +1,55 @@
+{
+  "class": "ClearTitlesPacket",
+  "module": "server/play/clear_titles_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.ClearTitlesPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClearTitlesPacket(boolean reset) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "reset",
+      "type": "bool",
+      "docs": [
+        "Java: `reset()` \u2014 whether the client's title reset animation plays."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClearTitlesPacket(boolean)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClearTitlesPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClearTitlesSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BOOLEAN, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

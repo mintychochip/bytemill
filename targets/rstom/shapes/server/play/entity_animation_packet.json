@@ -1,0 +1,69 @@
+{
+  "class": "EntityAnimationPacket",
+  "module": "server/play/entity_animation_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.EntityAnimationPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntityAnimationPacket(int entityId, Animation animation)`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "animation",
+      "type": "Animation",
+      "docs": [
+        "Java: `animation()`."
+      ],
+      "codec": "enum_type::<Animation>()"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntityAnimationPacket(int, Animation)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntityAnimationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntityAnimationSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, Enum(Animation.class))`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_animation_packet.ext.rs",
+  "tests": "entity_animation_packet.tests.rs",
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;"
+  ]
+}

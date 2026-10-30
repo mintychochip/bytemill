@@ -6,15 +6,16 @@ use crate::emit_rstom::{is_generated, packet_body};
 use crate::errors::{BmlResult, emit};
 use crate::minestom::{ClassTable, Unit, build_units};
 use crate::pins::{PINS_TEST_RS, build_pins, pins_json, pins_json_is_owned};
-use crate::shapes::extract::extract_shape;
-use crate::shapes::ledger::{bml_field_pairs, load_ledger, mismatch, module_path};
+use crate::shapes::extract::{crate_root, extract_shape, packet_root};
+use crate::shapes::ledger::{known_deviations, load_ledger, mismatch_fields, module_path};
 use crate::shapes::model::Shape;
-use crate::tree_packet::{tree_packet, validate_shape};
+use crate::tree_bind::Bindings;
+use crate::tree_bound::bound_body;
+use crate::tree_packet::{tree_packet, tree_packet_bound, validate_shape};
+use crate::tree_split::{conservation_gaps, split_hand, uncovered_constructs};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-const PACKET_SCAN_ROOT: &str = "crates/rstom/src/network/packet";
 
 /// `shutil.which("rustfmt")`.
 fn which_rustfmt() -> Option<PathBuf> {
@@ -129,9 +130,7 @@ fn posix_rel(path: &Path, base: &Path) -> String {
 }
 
 fn packet_output_path(workspace: &Path, unit: &Unit) -> PathBuf {
-    workspace
-        .join(PACKET_SCAN_ROOT)
-        .join(format!("{}.rs", module_path(unit)))
+    packet_root(workspace).join(format!("{}.rs", module_path(unit)))
 }
 
 fn require_extras(workspace: &Path, shape: &Shape, packet_dir: &Path) -> BmlResult<()> {
@@ -151,7 +150,10 @@ fn require_tests(workspace: &Path, shape: &Shape, packet_dir: &Path) -> BmlResul
     };
     let path = packet_dir.join(tests);
     if !path.is_file() {
-        return Err(emit(format!("create {} first", posix_rel(&path, workspace))));
+        return Err(emit(format!(
+            "create {} first",
+            posix_rel(&path, workspace)
+        )));
     }
     Ok(())
 }
@@ -246,7 +248,10 @@ fn hand_prefix_markers(hand_text: &str) -> Vec<String> {
                 }
                 continue;
             }
-            markers.push(stripped.to_string());
+            // The same lint allowance on several statements needs to survive once.
+            if !markers.iter().any(|m| m == stripped) {
+                markers.push(stripped.to_string());
+            }
         }
     }
     markers
@@ -264,18 +269,77 @@ pub fn missing_hand_markers(hand_text: &str, generated_text: &str, ext_text: &st
     } else {
         splitlines(ext_text).into_iter().map(|l| l.trim()).collect()
     };
+    let markers = hand_prefix_markers(hand_text);
+    // Each marker is carried by the generated file or by the ext, each in hand order. A line
+    // that both carry (the same `#[derive(...)]` on the packet and on a nested enum) must not
+    // be settled greedily, so choose the assignment that loses the fewest markers.
+    let mut memo: std::collections::HashMap<(usize, usize, usize), usize> =
+        std::collections::HashMap::new();
+    fn best(
+        k: usize,
+        gi: usize,
+        ei: usize,
+        markers: &[String],
+        gen_lines: &[&str],
+        ext_lines: &[&str],
+        memo: &mut std::collections::HashMap<(usize, usize, usize), usize>,
+    ) -> usize {
+        if k == markers.len() {
+            return 0;
+        }
+        if let Some(&m) = memo.get(&(k, gi, ei)) {
+            return m;
+        }
+        let m = &markers[k];
+        let mut out = 1 + best(k + 1, gi, ei, markers, gen_lines, ext_lines, memo);
+        if let Some(g) = (gi..gen_lines.len()).find(|&j| gen_lines[j] == m) {
+            out = out.min(best(k + 1, g + 1, ei, markers, gen_lines, ext_lines, memo));
+        }
+        if let Some(e) = (ei..ext_lines.len()).find(|&j| ext_lines[j] == m) {
+            out = out.min(best(k + 1, gi, e + 1, markers, gen_lines, ext_lines, memo));
+        }
+        memo.insert((k, gi, ei), out);
+        out
+    }
     let mut gi = 0;
     let mut ei = 0;
     let mut missing = Vec::new();
-    for marker in hand_prefix_markers(hand_text) {
-        let gpos = (gi..gen_lines.len()).find(|&j| gen_lines[j] == marker);
-        let epos = (ei..ext_lines.len()).find(|&j| ext_lines[j] == marker);
-        if let Some(g) = gpos {
+    for (k, marker) in markers.iter().enumerate() {
+        let want = best(k, gi, ei, &markers, &gen_lines, &ext_lines, &mut memo);
+        let gpos = (gi..gen_lines.len()).find(|&j| gen_lines[j] == *marker);
+        let epos = (ei..ext_lines.len()).find(|&j| ext_lines[j] == *marker);
+        let via_gen = gpos.map(|g| {
+            best(
+                k + 1,
+                g + 1,
+                ei,
+                &markers,
+                &gen_lines,
+                &ext_lines,
+                &mut memo,
+            )
+        });
+        let via_ext = epos.map(|e| {
+            best(
+                k + 1,
+                gi,
+                e + 1,
+                &markers,
+                &gen_lines,
+                &ext_lines,
+                &mut memo,
+            )
+        });
+        if let (Some(g), Some(v)) = (gpos, via_gen)
+            && v == want
+        {
             gi = g + 1;
-        } else if let Some(e) = epos {
+        } else if let (Some(e), Some(v)) = (epos, via_ext)
+            && v == want
+        {
             ei = e + 1;
         } else {
-            missing.push(marker);
+            missing.push(marker.clone());
         }
     }
     missing
@@ -292,7 +356,17 @@ pub fn assert_hand_content_preserved(
         Some(p) if p.is_file() => read(p)?,
         _ => String::new(),
     };
-    let missing = missing_hand_markers(hand_text, generated_text, &ext_text);
+    assert_markers_preserved(module, hand_text, generated_text, &ext_text)
+}
+
+/// The marker check over an ext text already in hand (planned or read).
+pub fn assert_markers_preserved(
+    module: &str,
+    hand_text: &str,
+    generated_text: &str,
+    ext_text: &str,
+) -> BmlResult<()> {
+    let missing = missing_hand_markers(hand_text, generated_text, ext_text);
     if !missing.is_empty() {
         let preview = missing
             .iter()
@@ -314,14 +388,26 @@ pub fn assert_hand_content_preserved(
 
 fn hand_matches_ledger(path: &Path, shape: &Shape) -> BmlResult<bool> {
     let text = read(path)?;
+    // Hooks, `accepted` and the bindings are ledger-only: nothing in the hand file produces them.
+    let mut expected = shape.clone();
+    expected.hooks = Default::default();
+    expected.accepted = Vec::new();
+    expected.constants = Default::default();
+    expected.bound = false;
+    expected.serializer_attrs = Vec::new();
+    expected.uses = Vec::new();
+    expected.alias = None;
+    for f in &mut expected.fields {
+        f.bind = Default::default();
+    }
     match extract_shape(&text, &shape.cls, &shape.module, Some(path)) {
-        Ok(hand) => Ok(&hand == shape),
+        Ok(hand) => Ok(hand == expected),
         Err(_) => Ok(false),
     }
 }
 
 fn orphan_generated_packets(workspace: &Path, shaped_modules: &[String]) -> BmlResult<Vec<String>> {
-    let root = workspace.join(PACKET_SCAN_ROOT);
+    let root = packet_root(workspace);
     if !root.is_dir() {
         return Ok(Vec::new());
     }
@@ -365,15 +451,45 @@ fn put(planned: &mut Vec<(PathBuf, String)>, path: PathBuf, text: String) {
     }
 }
 
-/// What planning the packet files yields: the files to write (path, text) and the hand files
-/// that are swapped for generated ones.
-type PacketPlan = (Vec<(PathBuf, String)>, Vec<PathBuf>);
+/// What planning the packet files yields.
+struct PacketPlan {
+    /// Generated files to write (path, text).
+    planned: Vec<(PathBuf, String)>,
+    /// Hand files that are swapped for generated ones.
+    hand_swaps: Vec<PathBuf>,
+    /// Sibling files (`<stem>.ext.rs`, `<stem>.tests.rs`) a swap creates when absent. Hand-owned
+    /// once they exist, so never compared or overwritten.
+    siblings: Vec<(PathBuf, String)>,
+}
+
+/// The sibling to create for `name` in `dir`, or the text that is already there.
+fn sibling_text(
+    dir: &Path,
+    name: &Option<String>,
+    fresh: Option<&String>,
+    siblings: &mut Vec<(PathBuf, String)>,
+) -> BmlResult<String> {
+    let Some(name) = name.as_deref().filter(|n| !n.is_empty()) else {
+        return Ok(String::new());
+    };
+    let path = dir.join(name);
+    if path.is_file() {
+        return read(&path);
+    }
+    let Some(text) = fresh else {
+        return Ok(String::new());
+    };
+    let text = rustfmt_text(text)?;
+    siblings.push((path, text.clone()));
+    Ok(text)
+}
 
 fn planned_packets(
     resolved: &ResolvedSchema,
     workspace: &Path,
     classes: &ClassTable,
     shapes: &[(String, Shape)],
+    bindings: &Bindings,
     swap_hand: bool,
 ) -> BmlResult<PacketPlan> {
     let units = build_units(resolved, classes)?;
@@ -383,44 +499,99 @@ fn planned_packets(
             return Err(emit(format!("stale shape: {module}")));
         }
     }
-    let mut planned: Vec<(PathBuf, String)> = Vec::new();
-    let mut hand_swaps: Vec<PathBuf> = Vec::new();
+    let known = known_deviations(workspace)?;
+    let mut plan = PacketPlan {
+        planned: Vec::new(),
+        hand_swaps: Vec::new(),
+        siblings: Vec::new(),
+    };
     for unit in &units {
         let module = module_path(unit);
         let Some((_, shape)) = shapes.iter().find(|(m, _)| *m == module) else {
             continue;
         };
         validate_shape(shape)?;
-        let reasons = mismatch(shape, &bml_field_pairs(&unit.pkt, resolved)?);
-        if !reasons.is_empty() {
-            return Err(emit(format!("{module}: {}", reasons.join("; "))));
+        // A domain limit is the hand type's, kept by the generated packet; the known entry stays
+        // as the record of it. Any other known deviation is the hand port's wire, not Bytemill's.
+        if let Some(d) = known
+            .iter()
+            .find(|d| d.class == shape.cls && d.category != "domain-limit")
+        {
+            return Err(emit(format!(
+                "{module}: {} is a known wire deviation ({}) in wire_pins_known.json; \
+                 a packet swapped to Bytemill must not be listed there",
+                shape.cls, d.category
+            )));
         }
-        let body = packet_body(unit, resolved)?;
+        let mut generated = String::new();
+        let raw = if shape.has_bindings() {
+            let body = bound_body(unit, resolved, shape, bindings)?;
+            generated = format!("{}\n{}\n{}", body.writes, body.reads, body.ctor.join("\n"));
+            tree_packet_bound(unit, shape, &body)?
+        } else {
+            let body = packet_body(unit, resolved)?;
+            let reasons = mismatch_fields(shape, &body.fields);
+            if !reasons.is_empty() {
+                return Err(emit(format!("{module}: {}", reasons.join("; "))));
+            }
+            tree_packet(unit, shape, &body)?
+        };
         let path = packet_output_path(workspace, unit);
         let packet_dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
-        require_extras(workspace, shape, &packet_dir)?;
-        require_tests(workspace, shape, &packet_dir)?;
         refuse_orphan_ext(&module, shape, &path)?;
         refuse_orphan_tests(&module, shape, &path)?;
-        let raw = tree_packet(unit, shape, &body)?;
         let text = rustfmt_text(&raw)?;
-        if swap_hand && path.is_file() && !is_generated(&path) {
+        let hand_present = path.is_file() && !is_generated(&path);
+        if swap_hand && hand_present {
             if !hand_matches_ledger(&path, shape)? {
                 return Err(emit(format!(
                     "hand file changed since its shape was extracted: {module}"
                 )));
             }
-            let ext_path = shape
-                .extras
-                .as_deref()
-                .filter(|e| !e.is_empty())
-                .map(|e| packet_dir.join(e));
-            assert_hand_content_preserved(&module, &read(&path)?, &text, ext_path.as_deref())?;
-            hand_swaps.push(path.clone());
+            let hand = read(&path)?;
+            let uncovered = uncovered_constructs(shape, &hand, &generated)?;
+            if !uncovered.is_empty() {
+                return Err(emit(format!(
+                    "{module}: the hand serializer carries behaviour the generated wire code \
+                     does not: {}; reproduce each with a hook or record it under \"accepted\" \
+                     (construct and reason) in the shape, or keep the packet hand-written",
+                    uncovered.join(", ")
+                )));
+            }
+            let split = split_hand(shape, &hand, &raw)?;
+            let ext = sibling_text(
+                &packet_dir,
+                &shape.extras,
+                split.ext.as_ref(),
+                &mut plan.siblings,
+            )?;
+            sibling_text(
+                &packet_dir,
+                &shape.tests,
+                split.tests.as_ref(),
+                &mut plan.siblings,
+            )?;
+            let gaps = conservation_gaps(shape, &hand, &raw, &ext, &split.dropped)?;
+            if !gaps.is_empty() {
+                return Err(emit(format!(
+                    "{module}: hand items would be lost: {}",
+                    gaps.join("; ")
+                )));
+            }
+            // Dropped helpers take their docs with them; nothing else may go missing.
+            let mut kept_hand = hand.clone();
+            for dropped in &split.dropped_text {
+                kept_hand = kept_hand.replace(dropped.as_str(), "");
+            }
+            assert_markers_preserved(&module, &kept_hand, &text, &ext)?;
+            plan.hand_swaps.push(path.clone());
+        } else {
+            require_extras(workspace, shape, &packet_dir)?;
+            require_tests(workspace, shape, &packet_dir)?;
         }
-        put(&mut planned, path, text);
+        put(&mut plan.planned, path, text);
     }
-    Ok((planned, hand_swaps))
+    Ok(plan)
 }
 
 /// `emit_tree(resolved, workspace, classes, shapes_dir, check)`: write the pin
@@ -439,17 +610,27 @@ pub fn emit_tree(
     };
     let units = build_units(resolved, classes)?;
     let rows = build_pins(resolved, &units)?;
-    let tests = workspace.join("crates").join("rstom").join("tests");
+    let tests = crate_root(workspace).join("tests");
     let rust_path = tests.join("bml_wire_pins.rs");
     let json_path = tests.join("bml").join("wire_pins.json");
     let known_path = tests.join("bml").join("wire_pins_known.json");
 
+    let crate_name = crate_root(workspace).file_name().map_or_else(
+        || "netherstar".to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let pins_test = PINS_TEST_RS.replace("rstom::", &format!("{crate_name}::"));
     let mut planned: Vec<(PathBuf, String)> = vec![
-        (rust_path, rustfmt_text(PINS_TEST_RS)?),
+        (rust_path, rustfmt_text(&pins_test)?),
         (json_path, format!("{}\n", pins_json(&rows))),
     ];
-    let (packet_planned, hand_swaps) =
-        planned_packets(resolved, workspace, classes, &shapes, !check)?;
+    let bindings = Bindings::beside(shapes_dir)?;
+    let packets = planned_packets(resolved, workspace, classes, &shapes, &bindings, !check)?;
+    let PacketPlan {
+        planned: packet_planned,
+        hand_swaps,
+        siblings,
+    } = packets;
     for (path, text) in packet_planned {
         put(&mut planned, path, text);
     }
@@ -482,7 +663,7 @@ pub fn emit_tree(
     refuse_hand_files(&planned, &hand_swaps)?;
 
     let mut written: Vec<PathBuf> = Vec::new();
-    for (path, text) in &planned {
+    for (path, text) in siblings.iter().chain(planned.iter()) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| emit(e.to_string()))?;
         }
@@ -501,4 +682,49 @@ pub fn emit_tree(
 
     rustfmt_paths(&written)?;
     Ok(written.iter().map(|p| posix_rel(p, workspace)).collect())
+}
+
+/// The generated source of one shaped packet, formatted, without the swap checks: what
+/// `emit rstom-tree` would write for `class`, for authoring a shape.
+pub fn render_packet(
+    resolved: &ResolvedSchema,
+    classes: &ClassTable,
+    shapes_dir: &Path,
+    class: &str,
+) -> BmlResult<String> {
+    let shapes = load_ledger(shapes_dir)?;
+    let units = build_units(resolved, classes)?;
+    let unit = units
+        .iter()
+        .find(|u| u.cls.name == class)
+        .ok_or_else(|| emit(format!("no packet class {class}")))?;
+    let module = module_path(unit);
+    let (_, shape) = shapes
+        .iter()
+        .find(|(m, _)| *m == module)
+        .ok_or_else(|| emit(format!("no shape for {class} in {}", shapes_dir.display())))?;
+    let bindings = Bindings::beside(shapes_dir)?;
+    let raw = if shape.has_bindings() {
+        let body = bound_body(unit, resolved, shape, &bindings)?;
+        tree_packet_bound(unit, shape, &body)?
+    } else {
+        let body = packet_body(unit, resolved)?;
+        tree_packet(unit, shape, &body)?
+    };
+    rustfmt_text(&raw)
+}
+
+/// The wire fields `class` flattens to, one per line.
+pub fn describe_packet(
+    resolved: &ResolvedSchema,
+    classes: &ClassTable,
+    class: &str,
+) -> BmlResult<String> {
+    let units = build_units(resolved, classes)?;
+    let unit = units
+        .iter()
+        .find(|u| u.cls.name == class)
+        .ok_or_else(|| emit(format!("no packet class {class}")))?;
+    let (wires, _) = crate::emit_rstom::packet_fields(&unit.pkt, resolved)?;
+    Ok(crate::tree_bound::describe(&wires))
 }

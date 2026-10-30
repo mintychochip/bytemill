@@ -1,0 +1,57 @@
+{
+  "class": "ClientHeldItemChangePacket",
+  "module": "client/play/client_held_item_change_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientHeldItemChangePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientHeldItemChangePacket(short slot) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "slot",
+      "type": "i16",
+      "docs": [
+        "Java: `slot()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientHeldItemChangePacket(short slot)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientHeldItemChangePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientHeldItemChangeSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(SHORT, ClientHeldItemChangePacket::slot,",
+      "ClientHeldItemChangePacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

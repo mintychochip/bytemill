@@ -1,0 +1,73 @@
+{
+  "class": "WindowPropertyPacket",
+  "module": "server/play/window_property_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.WindowPropertyPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WindowPropertyPacket(int windowId, short property, short value)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "property",
+      "type": "i16",
+      "docs": [
+        "Java: `property()`."
+      ]
+    },
+    {
+      "name": "value",
+      "type": "i16",
+      "docs": [
+        "Java: `value()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WindowPropertyPacket(int windowId, short property, short",
+      "value)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WindowPropertyPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WindowPropertySerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "WindowPropertyPacket::windowId, SHORT, WindowPropertyPacket::property,",
+      "SHORT, WindowPropertyPacket::value, WindowPropertyPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

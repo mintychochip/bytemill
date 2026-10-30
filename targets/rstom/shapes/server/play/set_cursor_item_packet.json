@@ -1,0 +1,72 @@
+{
+  "class": "SetCursorItemPacket",
+  "module": "server/play/set_cursor_item_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.SetCursorItemPacket`.",
+    "",
+    "Java also implements `ServerPacket.ComponentHolding`, ported as",
+    "[`ComponentHoldingServerPacket`](super::super::server_packet::ComponentHoldingServerPacket).",
+    "The wire form is unaffected.",
+    "",
+    "# Deferrals",
+    "",
+    "The `ItemStack` component patch has no ported wire codec; see",
+    "`set_slot_packet.rs` for the exact scope."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetCursorItemPacket(itemStack ItemStack) implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "item_stack",
+      "type": "ItemStack",
+      "docs": [
+        "Java: `itemStack()`."
+      ],
+      "wire": "carried_item",
+      "put": "write_item_stack(buffer, &$);",
+      "take": "read_item_stack(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetCursorItemPacket(item_stack: ItemStack)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetCursorItemPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetCursorItemSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(ItemStack.NETWORK_TYPE, SetCursorItemPacket::itemStack, SetCursorItemPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "set_cursor_item_packet.ext.rs",
+  "imports": [
+    "use crate::item::item_stack::ItemStack;"
+  ],
+  "bound": true,
+  "uses": [
+    "use super::set_slot_packet::{read_item_stack, write_item_stack};"
+  ]
+}

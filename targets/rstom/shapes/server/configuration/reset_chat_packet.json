@@ -1,0 +1,44 @@
+{
+  "class": "ResetChatPacket",
+  "module": "server/configuration/reset_chat_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.configuration.ResetChatPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ResetChatPacket() implements ServerPacket.Configuration`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "Default",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "unit"
+  },
+  "fields": [],
+  "new": {
+    "present": false,
+    "must_use": false,
+    "const": false,
+    "attrs": [],
+    "docs": [],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ResetChatPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "constant",
+    "name": "ResetChatPacket",
+    "pub": false,
+    "docs": [],
+    "read_via_new": false
+  },
+  "extras": null
+}

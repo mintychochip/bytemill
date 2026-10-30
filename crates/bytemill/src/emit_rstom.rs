@@ -76,22 +76,22 @@ pub const GENERATED_FRAMES: &[&str] = &[
     "debug_subscription_event",
 ];
 
-fn wire_entry(name: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn wire_entry(name: &str) -> Option<(&'static str, &'static str)> {
     WIRE_TYPES
         .iter()
         .find(|(n, _, _)| *n == name)
         .map(|(_, w, r)| (*w, *r))
 }
 
-fn is_wire(name: &str) -> bool {
+pub(crate) fn is_wire(name: &str) -> bool {
     wire_entry(name).is_some()
 }
 
-fn is_opaque(name: &str) -> bool {
+pub(crate) fn is_opaque(name: &str) -> bool {
     OPAQUE.contains(&name)
 }
 
-fn self_delimiting(name: &str) -> Option<&'static str> {
+pub(crate) fn self_delimiting(name: &str) -> Option<&'static str> {
     SELF_DELIMITING
         .iter()
         .find(|(n, _)| *n == name)
@@ -208,7 +208,7 @@ fn bind_params(
 }
 
 /// Byte length of a payload's frame, when the schema declares one (`_opaque_len`).
-fn opaque_len(
+pub(crate) fn opaque_len(
     r: Option<&TypeRef>,
     resolved: Option<&ResolvedSchema>,
     params: Option<&OrderedMap<i128>>,
@@ -254,7 +254,7 @@ fn opaque_len(
 }
 
 /// (wire constant, Rust type) for a wire field's declared type (`_field_rust`).
-fn field_rust(r: &TypeRef) -> BmlResult<(String, String)> {
+pub(crate) fn field_rust(r: &TypeRef) -> BmlResult<(String, String)> {
     if is_bare_primitive(&r.name)
         && wire_entry(&r.name).is_none()
         && r.name != "bytes"
@@ -407,7 +407,7 @@ fn elem_frame_mode(e: &PacketShape, resolved: &ResolvedSchema) -> BmlResult<Stri
 }
 
 /// The field a `bytes(<ident>)` payload takes its length from (`_len_field`).
-fn len_field(f: &PacketShape) -> Option<String> {
+pub(crate) fn len_field(f: &PacketShape) -> Option<String> {
     let r = f.ref_.as_ref()?;
     if r.name != "bytes" || r.args.is_empty() {
         return None;
@@ -486,7 +486,7 @@ fn scan_read(ident: &str, walker: &str, indent: &str) -> Vec<String> {
 }
 
 /// Every identifier an expression reads, innermost first (`_expr_idents`).
-fn expr_idents(expr: &Expr) -> Vec<String> {
+pub(crate) fn expr_idents(expr: &Expr) -> Vec<String> {
     let mut found = Vec::new();
     collect_idents(expr, &mut found);
     found
@@ -515,7 +515,7 @@ fn collect_idents(expr: &Expr, found: &mut Vec<String>) {
 }
 
 /// Element scope type map extended with the enclosing packet's fields (`_scope_types`).
-fn scope_types(f: &PacketShape, top: Option<&[PacketShape]>) -> OrderedMap<String> {
+pub(crate) fn scope_types(f: &PacketShape, top: Option<&[PacketShape]>) -> OrderedMap<String> {
     let mut types = f.elem_types.clone();
     for outer in top.unwrap_or(&[]) {
         let base = match &outer.repeat_mode {
@@ -905,7 +905,7 @@ fn destructure(f: &PacketShape, var: &str) -> String {
 }
 
 /// The `Type` expression for a payload field, or None for a plain wire type (`_frame_expr`).
-fn frame_expr(f: &PacketShape, resolved: &ResolvedSchema) -> BmlResult<Option<String>> {
+pub(crate) fn frame_expr(f: &PacketShape, resolved: &ResolvedSchema) -> BmlResult<Option<String>> {
     if f.wire == "FIXED_BYTES" || f.opaque {
         let n = opaque_len(f.ref_.as_ref(), Some(resolved), Some(&f.params));
         return Ok(Some(match n {
@@ -940,7 +940,7 @@ const RUST_KEYWORDS: &[&str] = &[
 ];
 
 /// A safe Rust identifier for a schema field name (`_ident`).
-fn ident(name: &str) -> String {
+pub(crate) fn ident(name: &str) -> String {
     if RUST_KEYWORDS.contains(&name) {
         format!("{name}_")
     } else {
@@ -949,7 +949,7 @@ fn ident(name: &str) -> String {
 }
 
 /// A zero value for a Rust type (`_default_value`).
-fn default_value(rtype: &str) -> String {
+pub(crate) fn default_value(rtype: &str) -> String {
     match rtype {
         "bool" => "false".to_string(),
         "f32" | "f64" => "0.0".to_string(),
@@ -1024,7 +1024,7 @@ impl PacketShape {
 }
 
 /// The Rust element type: the one field's type, or a tuple for a record (`_elem_rtype`).
-fn elem_rtype(element: &[PacketShape]) -> String {
+pub(crate) fn elem_rtype(element: &[PacketShape]) -> String {
     if element.len() == 1 && element[0].repeat_mode.is_none() {
         return elem_part(&element[0]);
     }
@@ -1038,7 +1038,7 @@ fn elem_rtype(element: &[PacketShape]) -> String {
 }
 
 /// One tuple slot's type: a guarded subfield is optional, like a packet field (`_elem_part`).
-fn elem_part(e: &PacketShape) -> String {
+pub(crate) fn elem_part(e: &PacketShape) -> String {
     let base = if e.repeat_mode.is_some() {
         format!("Vec<{}>", e.rtype)
     } else {
@@ -1052,7 +1052,7 @@ fn elem_part(e: &PacketShape) -> String {
 }
 
 /// A Rust expression for a `count =` that is not a plain field name (`_count_expr`).
-fn count_expr(expr: Option<&Expr>) -> Option<String> {
+pub(crate) fn count_expr(expr: Option<&Expr>) -> Option<String> {
     match expr? {
         Expr::Ident(n) => Some(ident(n)),
         Expr::Binop(op, l, r) => {
@@ -1066,7 +1066,7 @@ fn count_expr(expr: Option<&Expr>) -> Option<String> {
 }
 
 /// The field a `count = <ident>` reads, when it is a plain identifier (`_count_field`).
-fn count_field(expr: Option<&Expr>) -> Option<String> {
+pub(crate) fn count_field(expr: Option<&Expr>) -> Option<String> {
     match expr {
         Some(Expr::Ident(n)) => Some(n.clone()),
         _ => None,
@@ -1149,7 +1149,11 @@ fn rust_field_access(name: &str, types: &OrderedMap<String>, mode: &str) -> Stri
 }
 
 /// Rust scalar expression for a guard operand (`_rust_operand`).
-fn rust_operand(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BmlResult<String> {
+pub(crate) fn rust_operand(
+    expr: &Expr,
+    types: &OrderedMap<String>,
+    mode: &str,
+) -> BmlResult<String> {
     match expr {
         Expr::Int(i) => Ok(i.to_string()),
         Expr::Bool(b) => Ok(if *b { "true" } else { "false" }.to_string()),
@@ -1171,7 +1175,11 @@ fn is_zero_int(e: &Expr) -> bool {
 }
 
 /// Rust boolean expression for a schema guard; `None` is `true` (`_rust_guard`).
-fn rust_guard(expr: Option<&Expr>, types: &OrderedMap<String>, mode: &str) -> BmlResult<String> {
+pub(crate) fn rust_guard(
+    expr: Option<&Expr>,
+    types: &OrderedMap<String>,
+    mode: &str,
+) -> BmlResult<String> {
     let Some(expr) = expr else {
         return Ok("true".to_string());
     };
@@ -1221,7 +1229,7 @@ fn rust_guard(expr: Option<&Expr>, types: &OrderedMap<String>, mode: &str) -> Bm
 }
 
 /// Drop one wrap-around `(...)` pair when it encloses the whole expression (`_strip_outer_parens`).
-fn strip_outer_parens(text: &str) -> String {
+pub(crate) fn strip_outer_parens(text: &str) -> String {
     if !text.starts_with('(') {
         return text.to_string();
     }
@@ -1243,7 +1251,7 @@ fn strip_outer_parens(text: &str) -> String {
 }
 
 /// `_rust_guard` as a top-level `if` condition, without the wrapper parens (`_rust_cond`).
-fn rust_cond(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BmlResult<String> {
+pub(crate) fn rust_cond(expr: &Expr, types: &OrderedMap<String>, mode: &str) -> BmlResult<String> {
     Ok(strip_outer_parens(&rust_guard(Some(expr), types, mode)?))
 }
 
@@ -1916,7 +1924,7 @@ pub struct PacketBody {
 }
 
 /// Whether `word` occurs in `text` delimited by non-word characters (`\b{word}\b`).
-fn has_word(text: &str, word: &str) -> bool {
+pub(crate) fn has_word(text: &str, word: &str) -> bool {
     let bytes = text.as_bytes();
     let is_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
     text.match_indices(word).any(|(pos, _)| {
@@ -3428,6 +3436,35 @@ fn drop_stale(out_dir: &Path, written: &[PathBuf]) -> BmlResult<()> {
     Ok(())
 }
 
+/// Replace the `rstom` crate path with the renamed dependency, without
+/// touching the generated crate's own `bml_rstom::` path.
+fn replace_dep_crate(text: &str, dep_name: &str) -> String {
+    if dep_name == "rstom" {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let needle: Vec<char> = "rstom".chars().collect();
+    let suffix: Vec<char> = "::".chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let is_ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        if chars[i..].starts_with(&needle) {
+            let end = i + needle.len();
+            let left_ok = i == 0 || !is_ident(chars[i - 1]);
+            let right_ok = chars[end..].starts_with(&suffix);
+            if left_ok && right_ok {
+                out.push_str(dep_name);
+                i = end;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
 /// `emit_rstom`: emit an rstom-compatible packet crate. Returns the emitted files.
 /// `rstom_path` is the default `../rstom` dependency path.
 pub fn emit_rstom(
@@ -3446,8 +3483,13 @@ pub fn emit_rstom(
     let units = build_units(resolved, classes)?;
     let src = out_dir.join("src");
     let mut written: Vec<PathBuf> = Vec::new();
+    // The dependency crate was renamed from `rstom` to `netherstar`; the
+    // generated imports and Cargo key follow the path we were handed.
+    let dep_name = Path::new(rstom_path)
+        .file_name()
+        .map_or_else(|| "rstom".to_string(), |n| n.to_string_lossy().into_owned());
 
-    fn write(written: &mut Vec<PathBuf>, path: PathBuf, text: &str) -> BmlResult<()> {
+    fn write_raw(written: &mut Vec<PathBuf>, path: PathBuf, text: &str) -> BmlResult<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| emit(e.to_string()))?;
         }
@@ -3455,6 +3497,15 @@ pub fn emit_rstom(
         written.push(path);
         Ok(())
     }
+
+    let write = |written: &mut Vec<PathBuf>, path: PathBuf, text: &str| -> BmlResult<()> {
+        let text = if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            replace_dep_crate(text, &dep_name)
+        } else {
+            text.to_string()
+        };
+        write_raw(written, path, &text)
+    };
 
     // (group, package) pairs in first-seen order, with their units.
     let mut packages: Vec<((String, String), Vec<&Unit>)> = Vec::new();
@@ -3529,8 +3580,8 @@ pub fn emit_rstom(
         out_dir.join("Cargo.toml"),
         &format!(
             "[package]\nname = \"bml_rstom\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n\
-             [dependencies]\nrstom = {{ path = \"{rstom_path}\" }}\n\n\
-             [dev-dependencies]\nrstom = {{ path = \"{rstom_path}\" }}\n"
+             [dependencies]\n{dep_name} = {{ path = \"{rstom_path}\" }}\n\n\
+             [dev-dependencies]\n{dep_name} = {{ path = \"{rstom_path}\" }}\n"
         ),
     )?;
     drop_stale(out_dir, &written)?;

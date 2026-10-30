@@ -1,0 +1,69 @@
+{
+  "class": "BlockChangePacket",
+  "module": "server/play/block_change_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.BlockChangePacket`.",
+    "",
+    "Java's `blockPosition` is a `Point`; the port carries the decoded",
+    "[`Vec`](crate::coordinate::Vec) \u2014 which is exactly what",
+    "[`BLOCK_POSITION`](crate::network::types::BLOCK_POSITION) reads back \u2014 since",
+    "`Point` is an open trait here and every decoded value is a point of doubles."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record BlockChangePacket(Point blockPosition, int blockStateId)",
+      "implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ]
+    },
+    {
+      "name": "block_state_id",
+      "type": "i32",
+      "docs": [
+        "Java: `blockStateId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new BlockChangePacket(Point, int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `BlockChangePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "BlockChangeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BLOCK_POSITION, VAR_INT, \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null,
+  "tests": "block_change_packet.tests.rs"
+}

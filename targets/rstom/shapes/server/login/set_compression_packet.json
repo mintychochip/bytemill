@@ -1,0 +1,55 @@
+{
+  "class": "SetCompressionPacket",
+  "module": "server/login/set_compression_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.login.SetCompressionPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetCompressionPacket(int threshold) implements ServerPacket.Login`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "threshold",
+      "type": "i32",
+      "docs": [
+        "Java: `threshold()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetCompressionPacket(int)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetCompressionPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetCompressionSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(VAR_INT, SetCompressionPacket::threshold, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

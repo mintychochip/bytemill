@@ -1,0 +1,97 @@
+{
+  "class": "RegistryDataPacket",
+  "module": "server/configuration/registry_data_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.configuration.RegistryDataPacket`",
+    "and its nested `Entry`.",
+    "",
+    "`NetworkBuffer.NBT` writes adventure's `BinaryTag` as a *nameless* binary",
+    "NBT tag (type id byte plus a self-delimiting body). The ported `nbt` module",
+    "writes exactly that form through `BinaryTagWriter::write_nameless`, so an",
+    "entry's `data` is a real [`BinaryTag`] and is byte-exact."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record RegistryDataPacket(String registryId, List<Entry> entries)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "registry_id",
+      "type": "String",
+      "docs": [
+        "Java: `registryId()`."
+      ]
+    },
+    {
+      "name": "entries",
+      "type": "Vec<Entry>",
+      "docs": [
+        "Java: `entries()`."
+      ],
+      "wire": "entries",
+      "item": {
+        "fields": [
+          {
+            "name": "id",
+            "type": "String",
+            "docs": [],
+            "wire": "entry_id"
+          },
+          {
+            "name": "data",
+            "type": "Option<BinaryTag>",
+            "docs": [],
+            "wire": "data",
+            "put": "write_nbt(buffer, $);",
+            "take": "read_nbt(buffer)"
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new RegistryDataPacket(String, List<Entry>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `RegistryDataPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "RegistryDataSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `Type#list(Integer.MAX_VALUE)` \u2014 a size var int, then each element."
+    ],
+    "read_via_new": false
+  },
+  "extras": "registry_data_packet.ext.rs",
+  "tests": "registry_data_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "the generated read loops 0..count, which is empty for a negative count just as size.max(0) is"
+    },
+    {
+      "construct": ".expect(",
+      "reason": "the generated read builds each entry itself, so there is no downcast of an erased packet value to unwrap"
+    }
+  ],
+  "bound": true
+}

@@ -1,0 +1,140 @@
+{
+  "class": "ClientPlayerBlockPlacementPacket",
+  "module": "client/play/client_player_block_placement_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientPlayerBlockPlacementPacket`.",
+    "",
+    "This module also carries the [`BlockFace`] and [`PlayerHand`] stand-in",
+    "enums: Java sources them from `net.minestom.server.instance.block.BlockFace`",
+    "and `net.minestom.server.entity.PlayerHand`, packages this slice does not",
+    "own. They are reproduced here, keyed on the ordinal wire value the packets",
+    "actually encode, so the packet ports stay self-contained and do not depend",
+    "on modules another agent may still be writing. When the `instance` and",
+    "`entity` packages land, these move there and are re-exported."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPlayerBlockPlacementPacket(PlayerHand hand, Point",
+      "blockPosition, BlockFace blockFace, float cursorPositionX, float",
+      "cursorPositionY, float cursorPositionZ, boolean insideBlock, boolean",
+      "hitWorldBorder, int sequence) implements ClientPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "hand",
+      "type": "PlayerHand",
+      "docs": [
+        "Java: `hand()`."
+      ]
+    },
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()` (a `Point`; read back as a `Vec`)."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "block_face",
+      "type": "BlockFace",
+      "docs": [
+        "Java: `blockFace()`."
+      ],
+      "wire": "face",
+      "write": "$.ordinal()",
+      "read": "BlockFace::from_ordinal($)"
+    },
+    {
+      "name": "cursor_position_x",
+      "type": "f32",
+      "docs": [
+        "Java: `cursorPositionX()`."
+      ]
+    },
+    {
+      "name": "cursor_position_y",
+      "type": "f32",
+      "docs": [
+        "Java: `cursorPositionY()`."
+      ]
+    },
+    {
+      "name": "cursor_position_z",
+      "type": "f32",
+      "docs": [
+        "Java: `cursorPositionZ()`."
+      ]
+    },
+    {
+      "name": "inside_block",
+      "type": "bool",
+      "docs": [
+        "Java: `insideBlock()`."
+      ]
+    },
+    {
+      "name": "hit_world_border",
+      "type": "bool",
+      "docs": [
+        "Java: `hitWorldBorder()`."
+      ],
+      "wire": "world_border_hit"
+    },
+    {
+      "name": "sequence",
+      "type": "i32",
+      "docs": [
+        "Java: `sequence()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [
+      "#[allow(clippy::too_many_arguments)]"
+    ],
+    "docs": [
+      "Java: the record constructor."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPlayerBlockPlacementPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPlayerBlockPlacementSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(Enum(PlayerHand), BLOCK_POSITION, Enum(BlockFace), FLOAT \u00d73,",
+      "BOOLEAN \u00d72, VAR_INT, \u2026)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_player_block_placement_packet.ext.rs",
+  "accepted": [
+    {
+      "construct": "pack_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which packs the block position the same way"
+    },
+    {
+      "construct": "unpack_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which unpacks the block position the same way"
+    }
+  ],
+  "bound": true
+}

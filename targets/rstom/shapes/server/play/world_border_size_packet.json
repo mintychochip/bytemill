@@ -1,0 +1,56 @@
+{
+  "class": "WorldBorderSizePacket",
+  "module": "server/play/world_border_size_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.WorldBorderSizePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WorldBorderSizePacket(double diameter) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "diameter",
+      "type": "f64",
+      "docs": [
+        "Java: `diameter()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WorldBorderSizePacket(double diameter)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WorldBorderSizePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WorldBorderSizeSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(DOUBLE,",
+      "WorldBorderSizePacket::diameter, WorldBorderSizePacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

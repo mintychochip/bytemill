@@ -1,0 +1,88 @@
+{
+  "class": "TestInstanceBlockStatus",
+  "module": "server/play/test_instance_block_status",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.TestInstanceBlockStatus`.",
+    "",
+    "The `status` is [`Component`](crate::text::Component), adventure's",
+    "component tree \u2014 the same type Java's record holds. It travels with",
+    "[`Component::write`] / [`Component::read`] (see",
+    "[`crate::adventure::component_network`).",
+    "- The ported `coordinate::Vec` stands in for Java's `Point` (Java's readers",
+    "  build a `Vec` too)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record TestInstanceBlockStatus(Component status, @Nullable Point",
+      "size) implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "status",
+      "type": "Component",
+      "docs": [
+        "Java: `status()`."
+      ]
+    },
+    {
+      "name": "size",
+      "type": "Option<CoordVec>",
+      "docs": [
+        "Java: `size()` \u2014 `VECTOR3I.optional()`, so a presence boolean precedes",
+        "the three var ints."
+      ],
+      "wire": [
+        "size_x",
+        "size_y",
+        "size_z"
+      ],
+      "put": "write_vector3i(buffer, $);",
+      "take": "read_vector3i(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new TestInstanceBlockStatus(Component status, @Nullable Point",
+      "size)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `TestInstanceBlockStatus.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "TestInstanceBlockStatusSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(COMPONENT,",
+      "TestInstanceBlockStatus::status, VECTOR3I.optional(),",
+      "TestInstanceBlockStatus::size, TestInstanceBlockStatus::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "test_instance_block_status.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "test_instance_block_status.tests.rs",
+  "bound": true,
+  "uses": [
+    "use super::world_event_packet::{read_vector3i, write_vector3i};"
+  ]
+}

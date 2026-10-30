@@ -1,0 +1,78 @@
+{
+  "class": "SetTransientBlockPacket",
+  "module": "server/play/set_transient_block_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.SetTransientBlockPacket`.",
+    "",
+    "# Deferrals",
+    "",
+    "Java's `Block` field is written with `Block.STATE_NETWORK_TYPE`, which is",
+    "`VAR_INT.transform(Block::fromStateId, Block::stateId)` \u2014 the block's",
+    "protocol state id and nothing else. The port therefore carries that id",
+    "directly rather than a `Block`: it is exactly the wire payload, and it keeps",
+    "this packet free of the `instance` module. A caller holding a",
+    "`instance::block::block::Block` passes `block.state_id()`; a caller reading",
+    "the packet resolves it back with `instance::block::block::from_state_id`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SetTransientBlockPacket(Point blockPosition, Block block)",
+      "implements ServerPacket.Play`.",
+      "",
+      "`block` is Java's `Block`; see the module docs for why the port carries its",
+      "protocol state id."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ]
+    },
+    {
+      "name": "block_state_id",
+      "type": "i32",
+      "docs": [
+        "Java: `block().stateId()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SetTransientBlockPacket(Point, Block)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SetTransientBlockPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SetTransientBlockSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(BLOCK_POSITION,",
+      "SetTransientBlockPacket::blockPosition, Block.STATE_NETWORK_TYPE,",
+      "SetTransientBlockPacket::block, SetTransientBlockPacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

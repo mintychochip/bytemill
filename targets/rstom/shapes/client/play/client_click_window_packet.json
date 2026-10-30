@@ -1,0 +1,154 @@
+{
+  "class": "ClientClickWindowPacket",
+  "module": "client/play/client_click_window_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientClickWindowPacket`.",
+    "",
+    "# Local representation",
+    "",
+    "[`ItemStackHash`] stands in for `net.minestom.server.item.ItemStack.Hash`,",
+    "which **is** ported at `crate::item::ItemStackHash` together with its",
+    "`ItemStack.Hash.NETWORK_TYPE`. This file's local copy carries the full",
+    "component maps (its `write_hash`/`read_hash` write the added and removed",
+    "entries, not just their counts), so what is left here is dropping it for the",
+    "ported type. It stays for now because this packet's public API is spelled in",
+    "terms of it."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientClickWindowPacket(int windowId, int stateId, short slot,",
+      "byte button, ClickType clickType, Map<Short, ItemStack.Hash> changedSlots,",
+      "ItemStack.Hash clickedItem) implements ClientPacket.Play`.",
+      "",
+      "Java freezes `changedSlots` with `Map.copyOf`, so the port keeps the entries",
+      "in a `Vec` keyed by slot, in the order they were supplied."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "window_id",
+      "type": "i32",
+      "docs": [
+        "Java: `windowId()`."
+      ]
+    },
+    {
+      "name": "state_id",
+      "type": "i32",
+      "docs": [
+        "Java: `stateId()`."
+      ]
+    },
+    {
+      "name": "slot",
+      "type": "i16",
+      "docs": [
+        "Java: `slot()`."
+      ]
+    },
+    {
+      "name": "button",
+      "type": "i8",
+      "docs": [
+        "Java: `button()`."
+      ]
+    },
+    {
+      "name": "click_type",
+      "type": "ClickType",
+      "docs": [
+        "Java: `clickType()`."
+      ],
+      "wire": "mode",
+      "write": "$.ordinal()",
+      "read": "ClickType::from_ordinal($)"
+    },
+    {
+      "name": "changed_slots",
+      "type": "Vec<(i16, ItemStackHash)>",
+      "docs": [
+        "Java: `changedSlots()`."
+      ],
+      "wire": "changed_slots",
+      "item": {
+        "fields": [
+          {
+            "name": "_0",
+            "type": "i16",
+            "docs": [],
+            "wire": "slot_number"
+          },
+          {
+            "name": "_1",
+            "type": "ItemStackHash",
+            "docs": [],
+            "wire": "slot_data",
+            "put": "write_hash(buffer, &$);",
+            "take": "read_hash(buffer)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "clicked_item",
+      "type": "ItemStackHash",
+      "docs": [
+        "Java: `clickedItem()`."
+      ],
+      "wire": "carried_item",
+      "put": "write_hash(buffer, &$);",
+      "take": "read_hash(buffer)"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientClickWindowPacket(int windowId, int stateId, short slot, byte",
+      "button, ClickType clickType, Map<Short, ItemStack.Hash> changedSlots,",
+      "ItemStack.Hash clickedItem)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientClickWindowPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientClickWindowSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(VAR_INT, windowId, VAR_INT, stateId, SHORT, slot, BYTE,",
+      "button, Enum(ClickType.class), clickType, SHORT.mapValue(ItemStack.Hash.NETWORK_TYPE,",
+      "MAX_CHANGED_SLOTS), changedSlots, ItemStack.Hash.NETWORK_TYPE, clickedItem,",
+      "ClientClickWindowPacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": "client_click_window_packet.ext.rs",
+  "hooks": {
+    "read.after:changed_slots_count": [
+      "if !(0..=MAX_CHANGED_SLOTS).contains(&changed_slots_count) {",
+      "    panic!(\"Map size ({changed_slots_count}) is outside the allowed range (0-{MAX_CHANGED_SLOTS})\");",
+      "}"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": ".max(",
+      "reason": "the generated read loops 0..count, which the hook bounds at MAX_CHANGED_SLOTS"
+    }
+  ],
+  "bound": true
+}

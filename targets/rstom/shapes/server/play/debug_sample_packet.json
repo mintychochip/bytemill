@@ -1,0 +1,73 @@
+{
+  "class": "DebugSamplePacket",
+  "module": "server/play/debug_sample_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.DebugSamplePacket`.",
+    "",
+    "Java's `Type` enum names the subscription each sample type belongs to;",
+    "`DEDICATED_SERVER_TICK_TIME` is the only constant."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DebugSamplePacket(long[] sample, Type type) implements",
+      "ServerPacket.Play` \u2014 the compact constructor clones `sample`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "sample",
+      "type": "Vec<i64>",
+      "docs": [
+        "Java: `sample()`."
+      ],
+      "wire": "sample"
+    },
+    {
+      "name": "sample_type",
+      "type": "SampleType",
+      "docs": [
+        "Java: `type()`."
+      ],
+      "codec": "enum_type::<SampleType>()"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DebugSamplePacket(long[], Type)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DebugSamplePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DebugSampleSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(LONG_ARRAY, Enum(Type.class), \u2026)`",
+      "template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "debug_sample_packet.ext.rs",
+  "tests": "debug_sample_packet.tests.rs",
+  "bound": true,
+  "uses": [
+    "use crate::network::types::enum_type;"
+  ]
+}

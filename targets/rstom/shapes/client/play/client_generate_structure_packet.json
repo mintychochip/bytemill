@@ -1,0 +1,76 @@
+{
+  "class": "ClientGenerateStructurePacket",
+  "module": "client/play/client_generate_structure_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.client.play.ClientGenerateStructurePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientGenerateStructurePacket(Point blockPosition, int level,",
+      "boolean keepJigsaws) implements ClientPacket.Play`.",
+      "",
+      "The position is a Java `Point`; the port carries it as the float-backed",
+      "[`Vec`] the sibling action packet uses, since a decoded block position is",
+      "always whole."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ]
+    },
+    {
+      "name": "level",
+      "type": "i32",
+      "docs": [
+        "Java: `level()`."
+      ]
+    },
+    {
+      "name": "keep_jigsaws",
+      "type": "bool",
+      "docs": [
+        "Java: `keepJigsaws()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `ClientGenerateStructurePacket(Point blockPosition, int level,",
+      "boolean keepJigsaws)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientGenerateStructurePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientGenerateStructureSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BLOCK_POSITION, blockPosition, VAR_INT, level, BOOLEAN,",
+      "keepJigsaws, ClientGenerateStructurePacket::new)`."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

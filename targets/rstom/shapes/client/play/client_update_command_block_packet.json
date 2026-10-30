@@ -1,0 +1,96 @@
+{
+  "class": "ClientUpdateCommandBlockPacket",
+  "module": "client/play/client_update_command_block_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.play.ClientUpdateCommandBlockPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientUpdateCommandBlockPacket(Point blockPosition, String",
+      "command, Mode mode, byte flags) implements ClientPacket.Play`.",
+      "",
+      "The compact constructor's `Check.argCondition(command.length() >",
+      "Short.MAX_VALUE, ...)` is a validation Rust leaves to the caller;",
+      "`probes/expected/client3probe.json` pins the Java outcome at the",
+      "32767/32768 code-unit boundary."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "block_position",
+      "type": "CoordVec",
+      "docs": [
+        "Java: `blockPosition()`."
+      ],
+      "wire": "location"
+    },
+    {
+      "name": "command",
+      "type": "String",
+      "docs": [
+        "Java: `command()`."
+      ]
+    },
+    {
+      "name": "mode",
+      "type": "Mode",
+      "docs": [
+        "Java: `mode()`."
+      ],
+      "wire": "mode",
+      "write": "$.ordinal()",
+      "read": "Mode::from_ordinal($)"
+    },
+    {
+      "name": "flags",
+      "type": "i8",
+      "docs": [
+        "Java: `flags()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientUpdateCommandBlockPacket(blockPosition, command, mode, flags)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientUpdateCommandBlockPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientUpdateCommandBlockSerializer",
+    "pub": false,
+    "docs": [
+      "Java: `template(BLOCK_POSITION, ..., STRING, ..., Enum(Mode.class), ...,",
+      "BYTE, ...)`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "client_update_command_block_packet.ext.rs",
+  "accepted": [
+    {
+      "construct": "write_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which packs the block position the same way"
+    },
+    {
+      "construct": "read_block_position",
+      "reason": "the BML `position` field is carried by BLOCK_POSITION, which unpacks the block position the same way"
+    }
+  ],
+  "bound": true
+}

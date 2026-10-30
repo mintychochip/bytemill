@@ -1,0 +1,118 @@
+{
+  "class": "EntitySoundEffectPacket",
+  "module": "server/play/entity_sound_effect_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.EntitySoundEffectPacket`.",
+    "",
+    "`SoundEvent` is the adventure-backed `net.minestom.server.sound.SoundEvent`",
+    "holder; this packet declares the local [`SoundEventNetworkType`] that stands",
+    "for `SoundEvent.NETWORK_TYPE`. The playback source is the canonical",
+    "[`crate::adventure::adventure_packet_convertor::SoundSource`]",
+    "(`net.kyori.adventure.sound.Sound.Source`, whose ordinals are the wire",
+    "values `AdventurePacketConvertor.getSoundSourceValue` writes)."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record EntitySoundEffectPacket(SoundEvent soundEvent, Sound.Source",
+      "source, int entityId, float volume, float pitch, long seed)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "sound_event",
+      "type": "SoundEvent",
+      "docs": [
+        "Java: `soundEvent()` \u2014 a built-in id, or a custom identifier."
+      ],
+      "wire": "@sound_event",
+      "codec": "SoundEventNetworkType"
+    },
+    {
+      "name": "source",
+      "type": "SoundSource",
+      "docs": [
+        "Java: `source()`."
+      ],
+      "wire": "category",
+      "write": "$.ordinal()",
+      "read": "SoundSource::from_ordinal($).unwrap_or_else(|| panic!(\"Index {} out of bounds for length {}\", $, SoundSource::ALL.len()))"
+    },
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "volume",
+      "type": "f32",
+      "docs": [
+        "Java: `volume()`."
+      ]
+    },
+    {
+      "name": "pitch",
+      "type": "f32",
+      "docs": [
+        "Java: `pitch()`."
+      ]
+    },
+    {
+      "name": "seed",
+      "type": "i64",
+      "docs": [
+        "Java: `seed()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new EntitySoundEffectPacket(SoundEvent, Sound.Source, int, float,",
+      "float, long)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `EntitySoundEffectPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "EntitySoundEffectSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the hand-written `SERIALIZER` of `EntitySoundEffectPacket`."
+    ],
+    "read_via_new": false
+  },
+  "extras": "entity_sound_effect_packet.ext.rs",
+  "imports": [
+    "use crate::adventure::adventure_packet_convertor::SoundSource;"
+  ],
+  "tests": "entity_sound_effect_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".unwrap_or",
+      "reason": "the read looks the source up and panics naming the index, as the hand read did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the read looks the source up and panics naming the index, as the hand read did"
+    }
+  ],
+  "bound": true
+}

@@ -1,0 +1,76 @@
+{
+  "class": "DeleteChatPacket",
+  "module": "server/play/delete_chat_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.DeleteChatPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DeleteChatPacket(MessageSignature signature) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Copy",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "signature",
+      "type": "MessageSignature",
+      "docs": [
+        "Java: `signature()` \u2014 the signature of the message to remove."
+      ],
+      "wire": "signature",
+      "write": "$.signature().to_vec()",
+      "read": "{ MessageSignature::new($).expect(\"Java reads exactly 256 bytes\") }",
+      "absent": "panic!(\"DeleteChatPacket: a cached message signature reference ({message_id}) has no MessageSignature\")"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": true,
+    "attrs": [],
+    "docs": [
+      "Java: `new DeleteChatPacket(MessageSignature)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DeleteChatPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DeleteChatSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(MessageSignature.SERIALIZER, \u2026)`",
+      "template is `FixedRawBytes(256)`; vanilla's `MessageSignature.Packed` writes var int",
+      "`0`, then those 256 bytes, for a full signature, which is what this packet writes."
+    ],
+    "read_via_new": false
+  },
+  "extras": "delete_chat_packet.ext.rs",
+  "imports": [
+    "use crate::crypto::MessageSignature;"
+  ],
+  "tests": "delete_chat_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".expect(",
+      "reason": "the read builds the signature from its 256 bytes, as the hand read did"
+    }
+  ],
+  "constants": {
+    "message_id": "0"
+  },
+  "bound": true
+}

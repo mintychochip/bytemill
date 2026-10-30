@@ -1,5 +1,5 @@
-//! Ports tests/test_emit_tree_real_tree.py: emit all 92 eligible shaped
-//! packets into a copied rstom tree.
+//! Ports tests/test_emit_tree_real_tree.py: emit every shaped packet of the
+//! committed ledger into a copied rstom tree.
 //!
 //! Deviation: scratch dirs use a Drop guard (unique per call: pid + counter +
 //! nanos) instead of `tempfile.TemporaryDirectory`; the recursive copy and the
@@ -10,7 +10,7 @@ mod common;
 
 use bytemill::emit_tree::emit_tree;
 use bytemill::minestom::build_units;
-use bytemill::shapes::{extract_shapes_for_units, hand_packet_path, module_path, shape_to_json};
+use bytemill::shapes::{module_path, shape_to_json};
 use std::path::{Path, PathBuf};
 
 /// Unique scratch dir, removed on drop (even on assertion failure).
@@ -71,10 +71,10 @@ fn has_rustfmt() -> bool {
 }
 
 #[test]
-fn emit_all_ninety_two_eligible_packets() {
+fn emit_every_committed_packet() {
     let t0 = std::time::Instant::now();
     let rstom = common::rstom_tables::rstom_dir();
-    let packet_src = rstom.join("crates/rstom/src/network/packet");
+    let packet_src = bytemill::shapes::packet_root(&rstom);
     if !packet_src.is_dir() {
         eprintln!("skipped: rstom worktree packet sources not present");
         return;
@@ -89,24 +89,24 @@ fn emit_all_ninety_two_eligible_packets() {
     }
     let resolved = common::load_minecraft().unwrap();
     let units = build_units(&resolved, &table).unwrap();
-    let committed: std::collections::BTreeSet<String> =
-        bytemill::shapes::load_ledger(&common::repo_root().join("targets/rstom/shapes"))
-            .unwrap()
-            .into_iter()
-            .map(|(_, s)| s.cls)
-            .collect();
-    let pairs: Vec<_> = extract_shapes_for_units(&resolved, &rstom, &units, true, None)
-        .unwrap()
-        .into_iter()
-        .filter(|(_, shape)| committed.contains(&shape.cls))
+    let ledger =
+        bytemill::shapes::load_ledger(&common::repo_root().join("targets/rstom/shapes")).unwrap();
+    // The hand files are gone: each unit's shape is the committed one, not an extraction.
+    let shaped: Vec<_> = units
+        .iter()
+        .filter(|unit| ledger.iter().any(|(m, _)| *m == module_path(unit)))
         .collect();
-    assert_eq!(pairs.len(), 92, "eligible committed pairs: {}", pairs.len());
+    assert_eq!(
+        shaped.len(),
+        ledger.len(),
+        "every committed shape names a packet of the protocol"
+    );
 
     let scratch = TempRoot::new("realtree");
     let ws = scratch.path().join("rstom");
     copy_dir_recursive(
         &packet_src,
-        &ws.join("crates/rstom/src/network/packet"),
+        &ws.join("crates/netherstar/src/network/packet"),
     );
     // `write` creates parents, but `copy` does not: make them first.
     std::fs::create_dir_all(ws.join("tools/packets_gen/schema")).unwrap();
@@ -116,27 +116,47 @@ fn emit_all_ninety_two_eligible_packets() {
     )
     .unwrap();
 
+    // The pin gate files the check compares come along, like the real workspace has them.
+    let tests_src = bytemill::shapes::crate_root(&rstom).join("tests");
+    let tests_dst = bytemill::shapes::crate_root(&ws).join("tests");
+    std::fs::create_dir_all(&tests_dst).unwrap();
+    std::fs::copy(
+        tests_src.join("bml_wire_pins.rs"),
+        tests_dst.join("bml_wire_pins.rs"),
+    )
+    .unwrap();
+    copy_dir_recursive(&tests_src.join("bml"), &tests_dst.join("bml"));
+
+    // The committed ledger shapes, with their bindings, hooks and accepted constructs.
     let shapes_dir = scratch.path().join("shapes");
     let mut shaped_modules = std::collections::BTreeSet::new();
-    for (unit, shape) in &pairs {
+    for unit in &shaped {
         let module = module_path(unit);
+        let (_, shape) = ledger
+            .iter()
+            .find(|(m, _)| *m == module)
+            .unwrap_or_else(|| panic!("no committed shape for {module}"));
         shaped_modules.insert(module.clone());
         write(
             &shapes_dir.join(format!("{module}.json")),
             &shape_to_json(shape),
         );
-        if let Some(ext) = &shape.extras {
-            let path = hand_packet_path(&ws, unit);
-            write(&path.parent().unwrap().join(ext), "//! scratch\n");
-        }
-        if let Some(tests) = &shape.tests {
-            let path = hand_packet_path(&ws, unit);
-            write(&path.parent().unwrap().join(tests), "//! scratch tests\n");
-        }
     }
+    // The bindings table sits beside the shapes directory, as it does in the ledger.
+    std::fs::copy(
+        common::repo_root().join("targets/rstom/bindings.json"),
+        scratch.path().join("bindings.json"),
+    )
+    .unwrap();
 
+    let drift = emit_tree(&resolved, &ws, &table, &shapes_dir, true).unwrap();
+    assert!(
+        drift.is_empty(),
+        "the committed ledger and the generated packets in the tree have drifted:\n{}",
+        drift.join("\n")
+    );
     emit_tree(&resolved, &ws, &table, &shapes_dir, false).unwrap();
-    let pkt_root = ws.join("crates/rstom/src/network/packet");
+    let pkt_root = ws.join("crates/netherstar/src/network/packet");
     let mut generated = Vec::new();
     for module in &shaped_modules {
         let path = pkt_root.join(format!("{module}.rs"));
@@ -147,22 +167,29 @@ fn emit_all_ninety_two_eligible_packets() {
         );
         generated.push(path);
     }
-    assert_eq!(generated.len(), 92);
+    assert_eq!(generated.len(), ledger.len());
 
     assert!(has_rustfmt(), "rustfmt not installed");
     for path in &generated {
         let text = std::fs::read_to_string(path).unwrap();
         let lines = text.matches('\n').count() + usize::from(!text.ends_with('\n'));
         assert!(lines <= 400, "{} has {lines} lines", path.display());
-        let out = std::process::Command::new("rustfmt")
+        // The generated file only: its hand-owned `mod ext;`/`mod tests;` children are not the
+        // emitter's to format (the emitter itself passes the same flags).
+        let mut cmd = std::process::Command::new("rustfmt");
+        if text.contains("mod ext;") || text.contains("mod tests;") {
+            cmd.args(["--unstable-features", "--skip-children"]);
+        }
+        let out = cmd
             .args(["--edition", "2024", "--check"])
             .arg(path)
             .output()
             .unwrap();
         assert!(
             out.status.success(),
-            "{}: {}",
+            "{}: {}{}",
             path.display(),
+            String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
     }

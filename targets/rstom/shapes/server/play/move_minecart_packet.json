@@ -1,0 +1,114 @@
+{
+  "class": "MoveMinecartPacket",
+  "module": "server/play/move_minecart_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.play.MoveMinecartPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record MoveMinecartPacket(int entityId, List<LerpStep> lerpSteps)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "lerp_steps",
+      "type": "Vec<LerpStep>",
+      "docs": [
+        "Java: `lerpSteps()`."
+      ],
+      "wire": "steps",
+      "item": {
+        "fields": [
+          {
+            "name": "position",
+            "type": "CoordVec",
+            "docs": [],
+            "wire": [
+              "x",
+              "y",
+              "z"
+            ]
+          },
+          {
+            "name": "velocity",
+            "type": "CoordVec",
+            "docs": [],
+            "wire": [
+              "velocity_x",
+              "velocity_y",
+              "velocity_z"
+            ]
+          },
+          {
+            "name": "yaw",
+            "type": "f32",
+            "docs": [],
+            "wire": "yaw",
+            "write": "($ * 256.0 / 360.0).floor() as i32 as i8",
+            "read": "f32::from($) * 360.0 / 256.0"
+          },
+          {
+            "name": "pitch",
+            "type": "f32",
+            "docs": [],
+            "wire": "pitch",
+            "write": "($ * 256.0 / 360.0).floor() as i32 as i8",
+            "read": "f32::from($) * 360.0 / 256.0"
+          },
+          {
+            "name": "weight",
+            "type": "f32",
+            "docs": []
+          }
+        ]
+      }
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new MoveMinecartPacket(int, List<LerpStep>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `MoveMinecartPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "MoveMinecartSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the",
+      "`NetworkBufferTemplate.template(VAR_INT, LerpStep.SERIALIZER.list(Short.MAX_VALUE))`",
+      "template \u2014 the list type writes its var-int element count first; each step's yaw",
+      "and pitch are one byte each, as vanilla's `ROTATION_BYTE` writes them."
+    ],
+    "read_via_new": false
+  },
+  "extras": "move_minecart_packet.ext.rs",
+  "tests": "move_minecart_packet.tests.rs",
+  "bound": true,
+  "serializer_attrs": [
+    "#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]"
+  ]
+}

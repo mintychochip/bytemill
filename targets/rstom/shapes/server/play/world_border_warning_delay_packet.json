@@ -1,0 +1,59 @@
+{
+  "class": "WorldBorderWarningDelayPacket",
+  "module": "server/play/world_border_warning_delay_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.WorldBorderWarningDelayPacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record WorldBorderWarningDelayPacket(int warningTime) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "warning_time",
+      "type": "i32",
+      "docs": [
+        "Java: `warningTime()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new WorldBorderWarningDelayPacket(int warningTime)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `WorldBorderWarningDelayPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "WorldBorderWarningDelaySerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "WorldBorderWarningDelayPacket::warningTime,",
+      "WorldBorderWarningDelayPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": null
+}

@@ -1,0 +1,77 @@
+{
+  "class": "ClientPluginMessagePacket",
+  "module": "client/common/client_plugin_message_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.client.common.ClientPluginMessagePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ClientPluginMessagePacket(String channel, byte[] data)",
+      "implements ClientPacket.Configuration, Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "channel",
+      "type": "String",
+      "docs": [
+        "Java: `channel()`."
+      ]
+    },
+    {
+      "name": "data",
+      "type": "Vec<u8>",
+      "docs": [
+        "Java: `data()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ClientPluginMessagePacket(String, byte[])`.",
+      "",
+      "# Panics",
+      "",
+      "Panics for a channel longer than 256 characters or data longer than",
+      "`Short.MAX_VALUE`, matching Java's checks."
+    ],
+    "body": [
+      "        assert!(",
+      "            channel.chars().count() <= 256,",
+      "            \"Channel cannot be more than 256 characters long\"",
+      "        );",
+      "        assert!(",
+      "            data.len() <= i16::MAX as usize,",
+      "            \"Data cannot be longer than Short.MAX_VALUE bytes\"",
+      "        );",
+      "        Self { channel, data }"
+    ]
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ClientPluginMessagePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ClientPluginMessageSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(STRING, \u2026, RAW_BYTES, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": null
+}

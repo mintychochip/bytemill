@@ -1,0 +1,75 @@
+{
+  "class": "PlayerInfoRemovePacket",
+  "module": "server/play/player_info_remove_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.PlayerInfoRemovePacket`."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record PlayerInfoRemovePacket(List<UUID> uuids) implements",
+      "ServerPacket.Play`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "uuids",
+      "type": "Vec<Uuid>",
+      "docs": [
+        "Java: `uuids()` \u2014 Java copies the list in its compact constructor."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new PlayerInfoRemovePacket(List<UUID>)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `PlayerInfoRemovePacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "PlayerInfoRemoveSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(NetworkBuffer.UUID.list(MAX_ENTRIES),",
+      "PlayerInfoRemovePacket::uuids, PlayerInfoRemovePacket::new)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "player_info_remove_packet.ext.rs",
+  "tests": "player_info_remove_packet.tests.rs",
+  "hooks": {
+    "write.start": [
+      "i32::try_from(value.uuids.len()).expect(\"list length fits an int\");"
+    ],
+    "read.after:uuids_count": [
+      "assert!(",
+      "    (0..=MAX_ENTRIES).contains(&uuids_count),",
+      "    \"Collection size ({uuids_count}) is outside the allowed range (0-{MAX_ENTRIES})\"",
+      ");"
+    ]
+  },
+  "accepted": [
+    {
+      "construct": ".list(",
+      "reason": "Type::list(max): write checks the length fits an int and read checks the declared size against the bound; both are reproduced by the hooks. The hand read also reserved min(size, 65536, readable bytes) up front; the generated loop grows the Vec as it reads, so a forged size reserves nothing."
+    }
+  ]
+}

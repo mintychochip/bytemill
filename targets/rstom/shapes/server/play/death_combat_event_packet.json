@@ -1,0 +1,70 @@
+{
+  "class": "DeathCombatEventPacket",
+  "module": "server/play/death_combat_event_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.DeathCombatEventPacket`.",
+    "",
+    "The `message` is [`Component`](crate::text::Component), adventure's",
+    "component tree \u2014 the same type Java's record holds."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record DeathCombatEventPacket(int playerId, Component message)",
+      "implements ServerPacket.Play, ServerPacket.ComponentHolding`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "player_id",
+      "type": "i32",
+      "docs": [
+        "Java: `playerId()` \u2014 the entity id of the player who died."
+      ]
+    },
+    {
+      "name": "message",
+      "type": "Component",
+      "docs": [
+        "Java: `message()`."
+      ]
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new DeathCombatEventPacket(int, Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `DeathCombatEventPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "DeathCombatEventSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT, COMPONENT, \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "death_combat_event_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "death_combat_event_packet.tests.rs",
+  "bound": true
+}

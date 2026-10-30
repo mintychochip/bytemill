@@ -1,0 +1,102 @@
+{
+  "class": "SwingAnimationPacket",
+  "module": "server/play/swing_animation_packet",
+  "module_docs": [
+    "Port of",
+    "`net.minestom.server.network.packet.server.play.SwingAnimationPacket`.",
+    "",
+    "# Local stubs",
+    "",
+    "- [`SwingAnimation`] stands in for `net.minestom.server.item.component.SwingAnimation`;",
+    "  the `item.component` package is a placeholder in this workspace, so the",
+    "  record and its `Type` enum are ported here together with the packet.",
+    "- `PlayerHand` comes from the ported `entity::main_hand` module; Java's",
+    "  `PlayerHand.NETWORK_TYPE` is `NetworkBuffer.Enum(PlayerHand.class)`, i.e.",
+    "  the var-int ordinal."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record SwingAnimationPacket(int entityId, PlayerHand hand,",
+      "SwingAnimation animation) implements ServerPacket.Play`."
+    ],
+    "derives": [
+      "Copy",
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "entity_id",
+      "type": "i32",
+      "docs": [
+        "Java: `entityId()`."
+      ]
+    },
+    {
+      "name": "hand",
+      "type": "PlayerHand",
+      "docs": [
+        "Java: `hand()`."
+      ],
+      "write": "i32::from($.ordinal())",
+      "read": "PlayerHand::values().iter().copied().find(|h| i32::from(h.ordinal()) == $).unwrap_or_else(|| panic!(\"unknown PlayerHand ordinal {}\", $))"
+    },
+    {
+      "name": "animation",
+      "type": "SwingAnimation",
+      "docs": [
+        "Java: `animation()` \u2014 see the module docs for the local stand-in."
+      ],
+      "wire": "animation_type..duration"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new SwingAnimationPacket(int entityId, PlayerHand hand,",
+      "SwingAnimation animation)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `SwingAnimationPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "SwingAnimationSerializer",
+    "pub": true,
+    "docs": [
+      "Java: the `NetworkBufferTemplate.template(VAR_INT,",
+      "SwingAnimationPacket::entityId, PlayerHand.NETWORK_TYPE,",
+      "SwingAnimationPacket::hand, SwingAnimation.NETWORK_TYPE,",
+      "SwingAnimationPacket::animation, SwingAnimationPacket::new)` template."
+    ],
+    "read_via_new": true
+  },
+  "extras": "swing_animation_packet.ext.rs",
+  "imports": [
+    "use crate::entity::main_hand::PlayerHand;"
+  ],
+  "tests": "swing_animation_packet.tests.rs",
+  "accepted": [
+    {
+      "construct": ".unwrap_or",
+      "reason": "the read looks the hand up and panics naming the ordinal, as the hand read did"
+    },
+    {
+      "construct": "panic!",
+      "reason": "the read looks the hand up and panics naming the ordinal, as the hand read did"
+    }
+  ],
+  "bound": true
+}

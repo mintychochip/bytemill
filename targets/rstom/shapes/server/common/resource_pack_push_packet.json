@@ -1,0 +1,97 @@
+{
+  "class": "ResourcePackPushPacket",
+  "module": "server/common/resource_pack_push_packet",
+  "module_docs": [
+    "Port of `net.minestom.server.network.packet.server.common.ResourcePackPushPacket`.",
+    "",
+    "`new` takes the five record components; [`ResourcePackPushPacket::from_info`]",
+    "is Java's `new ResourcePackPushPacket(ResourcePackInfo, boolean, Component)`",
+    "convenience constructor over [`crate::adventure::ResourcePackInfo`]. The",
+    "prompt is [`Component`](crate::text::Component), adventure's component tree."
+  ],
+  "struct": {
+    "docs": [
+      "Java: `record ResourcePackPushPacket(UUID id, String url, String hash,",
+      "boolean forced, @Nullable Component prompt)`."
+    ],
+    "derives": [
+      "Clone",
+      "Debug",
+      "PartialEq",
+      "Eq"
+    ],
+    "form": "braced"
+  },
+  "fields": [
+    {
+      "name": "id",
+      "type": "Uuid",
+      "docs": [
+        "Java: `id()`."
+      ],
+      "wire": "uuid"
+    },
+    {
+      "name": "url",
+      "type": "String",
+      "docs": [
+        "Java: `url()`."
+      ]
+    },
+    {
+      "name": "hash",
+      "type": "String",
+      "docs": [
+        "Java: `hash()`."
+      ]
+    },
+    {
+      "name": "forced",
+      "type": "bool",
+      "docs": [
+        "Java: `forced()`."
+      ]
+    },
+    {
+      "name": "prompt",
+      "type": "Option<Component>",
+      "docs": [
+        "Java: `prompt()`."
+      ],
+      "wire": "prompt"
+    }
+  ],
+  "new": {
+    "present": true,
+    "must_use": true,
+    "const": false,
+    "attrs": [],
+    "docs": [
+      "Java: `new ResourcePackPushPacket(UUID, String, String, boolean,",
+      "@Nullable Component)`."
+    ],
+    "body": []
+  },
+  "serializer_fn": {
+    "docs": [
+      "Java: `ResourcePackPushPacket.SERIALIZER`."
+    ],
+    "must_use": true
+  },
+  "serializer_struct": {
+    "style": "struct",
+    "name": "ResourcePackPushSerializer",
+    "pub": false,
+    "docs": [
+      "Java: the `template(UUID, \u2026, STRING, \u2026, STRING, \u2026, BOOLEAN, \u2026,",
+      "COMPONENT.optional(), \u2026)` template."
+    ],
+    "read_via_new": false
+  },
+  "extras": "resource_pack_push_packet.ext.rs",
+  "imports": [
+    "use crate::text::Component;"
+  ],
+  "tests": "resource_pack_push_packet.tests.rs",
+  "bound": true
+}
